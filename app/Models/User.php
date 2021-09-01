@@ -39,13 +39,20 @@ class User extends Authenticatable
         'email_verified_at' => 'datetime',
     ];
 
-    CONST USER_TYPE = [
+    const USER_TYPE = [
         1 => "ادمین",
         2 => "آتلیه دار",
         3 => "فیلم بردار"
     ];
 
-    public function atelier(){
+    const USER_TYPE_KEY = [
+        "ادمین" => 1,
+        "آتلیه دار" => 2,
+        "فیلم بردار" => 3
+    ];
+
+    public function atelier()
+    {
         return $this->hasOne(User::class);
     }
 }

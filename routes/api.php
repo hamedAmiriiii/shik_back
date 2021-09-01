@@ -14,6 +14,12 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
+Route::post('/auth/register', [\App\Http\Controllers\AuthController::class, 'register']);
+Route::post('/auth/login', [\App\Http\Controllers\AuthController::class, 'login']);
+
+Route::post('/confirmation-code/create',[\App\Http\Controllers\ConfirmationCodeController::class , 'store']);
+Route::post('/confirmation-code/check',[\App\Http\Controllers\ConfirmationCodeController::class , 'check']);
+
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });

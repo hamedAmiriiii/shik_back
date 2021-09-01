@@ -41,17 +41,17 @@ class AuthController extends Controller
 
     public function login(Request $request) {
         $fields = $request->validate([
-            'phone' => 'required|string|digits:11',
+            'username' => 'required|string|digits:11',
             'password' => 'required|string'
         ]);
 
         // Check email
-        $user = User::where('phone', $fields['phone'])->first();
+        $user = User::where('phone', $fields['username'])->first();
 
         // Check password
         if(!$user || !Hash::check($fields['password'], $user->password)) {
             return response([
-                'message' => 'Bad creds'
+                'message' => 'اطلاعات وارد شده صحیح نیست'
             ], 401);
         }
 
