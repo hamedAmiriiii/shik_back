@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\Controller;
-use App\Models\atelier;
 use App\Models\User;
 use Illuminate\Http\Request;
 
@@ -19,16 +18,6 @@ class AtelierController extends Controller
     {
         $users = User::where("type", User::USER_TYPE_KEY["آتلیه دار"])->with(['atelier'])->paginate();
         return response($users);
-    }
-
-    /**
-     * Show the form for creating a new resource.
-     *
-     * @return \Illuminate\Http\Response
-     */
-    public function create()
-    {
-        //
     }
 
     /**
@@ -51,19 +40,8 @@ class AtelierController extends Controller
      */
     public function show(User $atelier)
     {
-        $atelier["atelier"] = $atelier->atelier()->get();
+        $atelier["atelier"] = $atelier->atelier()->first();
         return response($atelier);
-    }
-
-    /**
-     * Show the form for editing the specified resource.
-     *
-     * @param \App\Models\atelier $atelier
-     * @return \Illuminate\Http\Response
-     */
-    public function edit(atelier $atelier)
-    {
-        //
     }
 
     /**
@@ -109,11 +87,15 @@ class AtelierController extends Controller
     /**
      * Remove the specified resource from storage.
      *
-     * @param \App\Models\atelier $atelier
+     * @param \App\Models\User $atelier
      * @return \Illuminate\Http\Response
      */
-    public function destroy(atelier $atelier)
+    public function destroy(User $atelier)
     {
-        //
+        $atelier->atelier()->delete();
+        $atelier->delete();
+        return response([
+            'message' => "حذف با موفقیت انجام شد"
+        ]);
     }
 }
