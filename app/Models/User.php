@@ -17,7 +17,7 @@ class User extends Authenticatable
      * @var string[]
      */
     protected $fillable = [
-        'name', 'last_name', 'national_code', 'phone', 'type', 'atelier_id', 'password',
+        'name', 'last_name', 'national_code', 'phone', 'type', 'atelier_id', 'password', 'gender'
     ];
 
     /**
@@ -53,6 +53,6 @@ class User extends Authenticatable
 
     public function atelier()
     {
-        return $this->hasOne(User::class);
+        return $this->belongsTo(Atelier::class);
     }
 }

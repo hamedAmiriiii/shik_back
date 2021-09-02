@@ -19,6 +19,7 @@ class CreateUsersTable extends Migration
             $table->string('last_name');
             $table->string('national_code', 10)->unique();
             $table->string('phone', 11)->unique();
+            $table->enum('gender', ["مرد", "زن"])->nullable();
             $table->enum('type', ["ادمین", "آتلیه دار", "فیلم بردار"]);
             $table->string('password');
             $table->integer('atelier_id')->nullable();

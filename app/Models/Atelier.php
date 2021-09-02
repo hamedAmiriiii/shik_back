@@ -11,5 +11,8 @@ class Atelier extends Model
 
     protected $fillable = ["name" , "code" , "address"];
 
+    public function user(){
+        return $this->hasOne(User::class);
+    }
 
 }
