@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Auth;
 
+use App\Http\Controllers\Controller;
 use App\Models\Atelier;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -17,23 +18,33 @@ class AuthController extends Controller
             'atelier_id' => 'nullable|numeric',
             'type' => 'required|numeric|digits:1',
             'gender' => 'required|numeric|digits:1',
-            'phone' => 'required|numeric|unique:users,phone|digits:11',
-            'national_code' => 'required|string|unique:users,national_code|digits:10',
+            'password' => 'required|string|max:255',
+            'phone' => 'required|numeric|digits:11',
+            'national_code' => 'required|string|digits:10',
             'atelier_name' => 'required_if:type,' . User::USER_TYPE_KEY["آتلیه دار"] . '|string|max:255',
             'atelier_code' => 'required_if:type,' . User::USER_TYPE_KEY["آتلیه دار"] . '|string|max:50',
             'atelier_address' => 'required_if:type,' . User::USER_TYPE_KEY["آتلیه دار"] . '|string|max:255',
         ]);
 
-        $user = User::create([
-            'name' => $fields['name'],
-            'last_name' => $fields['last_name'],
-            'atelier_id' => $fields['atelier_id'],
-            'type' => $fields['type'],
-            'gender' => $fields['gender'],
-            'phone' => $fields['phone'],
-            'national_code' => $fields['national_code'],
-            'password' => bcrypt($fields['national_code'])
-        ]);
+        $user = User::where('phone', $fields['phone'])->where('national_code', $fields['national_code'])->first();
+        if (!$user) {
+            $user = User::create([
+                'name' => $fields['name'],
+                'last_name' => $fields['last_name'],
+                'atelier_id' => $fields['atelier_id'],
+                'gender' => $fields['gender'],
+                'phone' => $fields['phone'],
+                'national_code' => $fields['national_code'],
+                'password' => bcrypt($fields['password'])
+            ]);
+        }
+        $roles = $user->roles->filter(function ($value, $key) use ($fields) {
+            return ($value->id == $fields['type']);
+        });
+        if (!sizeof($roles)) {
+            $user->roles()->attach($fields['type']);
+            $user->save();
+        }
 
         if ($request->input("type") == User::USER_TYPE_KEY["آتلیه دار"]) {
             $atelier = Atelier::create([
@@ -46,6 +57,7 @@ class AuthController extends Controller
             ]);
         }
 
+        $user->load("roles");
         $token = $user->createToken('myapptoken')->plainTextToken;
 
         $response = [

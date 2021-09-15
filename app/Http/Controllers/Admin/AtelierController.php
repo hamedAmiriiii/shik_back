@@ -2,7 +2,8 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Http\Controllers\AuthController;
+use App\Http\Controllers\Auth\AuthController;
+use Illuminate\Database\Eloquent\Builder;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -14,9 +15,12 @@ class AtelierController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function index()
+    public function index(Request $request)
     {
-        $users = User::where("type", User::USER_TYPE_KEY["آتلیه دار"])->with(['atelier'])->paginate();
+        $searchDataModel = json_decode($request->input('searchFilterModel'));
+        $users = User::search($searchDataModel)->whereHas("roles", function (Builder $query) {
+            $query->where('id', User::USER_TYPE_KEY["آتلیه دار"]);
+        })->with(['atelier'])->simplePaginate();
         return response($users);
     }
 

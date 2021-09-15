@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Tools\QueryTools;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -9,7 +10,7 @@ use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable , QueryTools;
 
     /**
      * The attributes that are mass assignable.
@@ -17,7 +18,7 @@ class User extends Authenticatable
      * @var string[]
      */
     protected $fillable = [
-        'name', 'last_name', 'national_code', 'phone', 'type', 'atelier_id', 'password', 'gender'
+        'name', 'last_name', 'national_code', 'phone', 'atelier_id', 'password', 'gender'
     ];
 
     /**
@@ -54,5 +55,13 @@ class User extends Authenticatable
     public function atelier()
     {
         return $this->belongsTo(Atelier::class);
+    }
+
+    /**
+     * The roles that belong to the user.
+     */
+    public function roles(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(Role::class);
     }
 }

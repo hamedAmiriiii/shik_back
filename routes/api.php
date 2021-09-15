@@ -15,13 +15,13 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::name('auth.')->prefix('auth')->group(function () {
-    Route::post('register', [\App\Http\Controllers\AuthController::class, 'register']);
-    Route::post('login', [\App\Http\Controllers\AuthController::class, 'login']);
+    Route::post('register', [\App\Http\Controllers\Auth\AuthController::class, 'register']);
+    Route::post('login', [\App\Http\Controllers\Auth\AuthController::class, 'login']);
 });
 
 Route::name('confirmationCode.')->prefix('confirmation-code')->group(function () {
-    Route::post('create', [\App\Http\Controllers\ConfirmationCodeController::class, 'store']);
-    Route::post('check', [\App\Http\Controllers\ConfirmationCodeController::class, 'check']);
+    Route::post('create', [\App\Http\Controllers\ConfirmationCode\ConfirmationCodeController::class, 'store']);
+    Route::post('check', [\App\Http\Controllers\ConfirmationCode\ConfirmationCodeController::class, 'check']);
 });
 
 Route::group(['middleware' => ['auth:sanctum']], function () {

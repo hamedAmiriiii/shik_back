@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\ConfirmationCode;
 
+use App\Http\Controllers\Controller;
 use App\Models\ConfirmationCode;
 use App\Tools\SmsTools;
 use Carbon\Carbon;
@@ -51,14 +52,14 @@ class ConfirmationCodeController extends Controller
         ]);
 
         $countToday = ConfirmationCode::whereDate('created_at', Carbon::today())->where('phone', $request->input('phone'))->count();
-        if ($countToday >= 3) {
+        if ($countToday >= 100) {
             return response([
                 'message' => "تعداد درخواست های مجاز به پایان رسیده لطفا ساعاتی دیگر تلاش کنید"
             ], 400);
         }
 
         $countThreeMinutesAgo = ConfirmationCode::where('phone', $request->input('phone'))->whereBetween('created_at', [now()->subMinutes(3), now()])->count();
-        if ($countThreeMinutesAgo > 0) {
+        if ($countThreeMinutesAgo > 100) {
             return response([
                 'message' => "شما سه دقیقه اخیر درخواستی داشته ایید"
             ], 400);

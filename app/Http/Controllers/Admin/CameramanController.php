@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 
 class CameramanController extends Controller
@@ -14,9 +15,12 @@ class CameramanController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function index()
+    public function index(Request $request)
     {
-        $users = User::where("type", User::USER_TYPE_KEY["فیلم بردار"])->with(['atelier'])->paginate();
+        $searchDataModel = json_decode($request->input('searchFilterModel'));
+        $users = User::search($searchDataModel)->whereHas("roles", function (Builder $query) {
+            $query->where('id', User::USER_TYPE_KEY["فیلم بردار"]);
+        })->with(['atelier'])->paginate();
         return response($users);
     }
 
@@ -40,7 +44,7 @@ class CameramanController extends Controller
      */
     public function show(User $cameraman): \Illuminate\Http\Response
     {
-        $cameraman->atelier = $cameraman->atelier()->first();
+        $cameraman->load('atelier');
         return response($cameraman);
     }
 
