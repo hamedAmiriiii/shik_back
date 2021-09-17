@@ -20,7 +20,7 @@ class CreateUsersTable extends Migration
             $table->string('national_code', 10)->unique();
             $table->string('phone', 11)->unique();
             $table->enum('gender', ["مرد", "زن"])->nullable();
-            $table->enum('status' , \App\Models\StatusEnum::STATUS )->default(\App\Models\StatusEnum::STATUS[0]);//در انتظار سررسی
+            //$table->enum('status' , \App\Models\StatusEnum::STATUS )->default(\App\Models\StatusEnum::STATUS[0]);//در انتظار سررسی
             $table->string('password');
             $table->integer('atelier_id')->nullable();
             $table->rememberToken();

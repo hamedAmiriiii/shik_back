@@ -26,13 +26,15 @@ Route::name('confirmationCode.')->prefix('confirmation-code')->group(function ()
 
 Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::name('admin.')->prefix('admin')->group(function () {
-        Route::resource("atelier",\App\Http\Controllers\Admin\AtelierController::class);
-        Route::resource("cameraman",\App\Http\Controllers\Admin\CameramanController::class);
-        Route::resource("ceremony",\App\Http\Controllers\Admin\AtelierController::class);
+        Route::resource("atelier", \App\Http\Controllers\Admin\AtelierController::class);
+        Route::post("/atelier/confirm/{atelier}", [\App\Http\Controllers\Admin\AtelierController::class, "confirm"]);
+        Route::resource("cameraman", \App\Http\Controllers\Admin\CameramanController::class);
+        Route::post("/cameraman/confirm/{cameraman}", [\App\Http\Controllers\Admin\CameramanController::class, "confirm"]);
+        Route::resource("ceremony", \App\Http\Controllers\Admin\AtelierController::class);
     });
 
     Route::name('cameraman.')->prefix('cameraman')->group(function () {
-        Route::resource("leave",\App\Http\Controllers\Cameraman\LeaveController::class);
+        Route::resource("leave", \App\Http\Controllers\Cameraman\LeaveController::class);
     });
 });
 

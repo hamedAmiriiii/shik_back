@@ -80,6 +80,25 @@ class CameramanController extends Controller
     }
 
     /**
+     * @param Request $request
+     * @param User $cameraman
+     * @return \Illuminate\Http\Response
+     */
+    public function confirm(Request $request , User $cameraman): \Illuminate\Http\Response
+    {
+        $request->validate([
+            "status" => "required|numeric|max:3|digits:1"
+        ]);
+        foreach ($cameraman->roles as $role){
+            if ($role->id == User::USER_TYPE_KEY["فیلم بردار"]){
+                $cameraman->roles()->syncWithoutDetaching([$role->id => ["status" =>  $request->input("status")]]);
+            }
+        }
+        $cameraman->load("roles");
+        return response($cameraman);
+    }
+
+    /**
      * Remove the specified resource from storage.
      *
      * @param  \App\Models\User  $user

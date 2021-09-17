@@ -89,6 +89,24 @@ class AtelierController extends Controller
     }
 
     /**
+     * @param Request $request
+     * @param User $atelier
+     * @return \Illuminate\Http\Response
+     */
+    public function confirm(Request $request , User $atelier){
+        $request->validate([
+            "status" => "required|numeric|max:3|digits:1"
+        ]);
+        foreach ($atelier->roles as $role){
+            if ($role->id == User::USER_TYPE_KEY["آتلیه دار"]){
+                $atelier->roles()->syncWithoutDetaching([$role->id => ["status" =>  $request->input("status")]]);
+            }
+        }
+        $atelier->load("roles");
+        return response($atelier);
+    }
+
+    /**
      * Remove the specified resource from storage.
      *
      * @param \App\Models\User $atelier
