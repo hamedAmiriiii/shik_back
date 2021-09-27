@@ -20,7 +20,7 @@ class CameramanController extends Controller
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         $users = User::search($searchDataModel)->whereHas("roles", function (Builder $query) {
             $query->where('id', User::USER_TYPE_KEY["فیلم بردار"]);
-        })->with(['atelier'])->paginate();
+        })->with(['atelier' , 'roles'])->simplePaginate();
         return response($users);
     }
 

@@ -22,8 +22,11 @@ class CreateUsersTable extends Migration
             $table->enum('gender', ["مرد", "زن"])->nullable();
             //$table->enum('status' , \App\Models\StatusEnum::STATUS )->default(\App\Models\StatusEnum::STATUS[0]);//در انتظار سررسی
             $table->string('password');
-            $table->integer('atelier_id')->nullable();
             $table->rememberToken();
+            $table->integer('atelier_id')->nullable();
+            $table->string('national_cart');
+            $table->string('birth_certificate');
+            $table->string('personality_image');
             $table->timestamps();
         });
     }

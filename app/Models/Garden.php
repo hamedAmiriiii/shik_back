@@ -6,14 +6,9 @@ use App\Tools\QueryTools;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-class Leave extends Model
+class Garden extends Model
 {
     use HasFactory,QueryTools;
 
-    protected $fillable = ['date_from',  'date_to' , 'status' , 'user_id'];
-
-
-    public function user(){
-        return $this->belongsTo(User::class);
-    }
+    protected $fillable = ["name" , "phone"];
 }

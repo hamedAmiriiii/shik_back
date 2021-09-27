@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Route;
 Route::name('auth.')->prefix('auth')->group(function () {
     Route::post('register', [\App\Http\Controllers\Auth\AuthController::class, 'register']);
     Route::post('login', [\App\Http\Controllers\Auth\AuthController::class, 'login']);
+    Route::get('atelier', [\App\Http\Controllers\Auth\AtelierController::class, 'index']);
 });
 
 Route::name('confirmationCode.')->prefix('confirmation-code')->group(function () {
@@ -28,9 +29,15 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::name('admin.')->prefix('admin')->group(function () {
         Route::resource("atelier", \App\Http\Controllers\Admin\AtelierController::class);
         Route::post("/atelier/confirm/{atelier}", [\App\Http\Controllers\Admin\AtelierController::class, "confirm"]);
+
         Route::resource("cameraman", \App\Http\Controllers\Admin\CameramanController::class);
         Route::post("/cameraman/confirm/{cameraman}", [\App\Http\Controllers\Admin\CameramanController::class, "confirm"]);
+
         Route::resource("ceremony", \App\Http\Controllers\Admin\AtelierController::class);
+
+        Route::resource("talar",\App\Http\Controllers\Admin\TalarController::class);
+
+        Route::resource("garden",\App\Http\Controllers\Admin\GardenController::class);
     });
 
     Route::name('cameraman.')->prefix('cameraman')->group(function () {

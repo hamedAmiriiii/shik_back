@@ -4,6 +4,8 @@
 namespace App\Tools;
 
 
+use Morilog\Jalali\Jalalian;
+
 trait QueryTools
 {
     public function scopeSearch($query, $searchTerms)
@@ -28,5 +30,15 @@ trait QueryTools
                 }
             }
         }
+    }
+
+    public function getCreatedAtAttribute($value): string
+    {
+        return Jalalian::fromDateTime($value);
+    }
+
+    public function getUpdatedAtAttribute($value): string
+    {
+        return Jalalian::fromDateTime($value);
     }
 }

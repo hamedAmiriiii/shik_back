@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\Atelier;
 use App\Models\User;
+use App\Tools\ImageTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 
@@ -16,7 +17,8 @@ class AuthController extends Controller
             'name' => 'required|string',
             'last_name' => 'required|string',
             'atelier_id' => 'nullable|numeric',
-            'type' => 'required|numeric|digits:1',
+            'type' => 'required|array|min:1',
+            'type.*' => 'required|numeric|digits:1',
             'gender' => 'required|numeric|digits:1',
             'password' => 'required|string|max:255',
             'phone' => 'required|numeric|digits:11',
@@ -24,9 +26,14 @@ class AuthController extends Controller
             'atelier_name' => 'required_if:type,' . User::USER_TYPE_KEY["آتلیه دار"] . '|string|max:255',
             'atelier_code' => 'required_if:type,' . User::USER_TYPE_KEY["آتلیه دار"] . '|string|max:50',
             'atelier_address' => 'required_if:type,' . User::USER_TYPE_KEY["آتلیه دار"] . '|string|max:255',
+            'business_license' => 'required_if:type,' . User::USER_TYPE_KEY["آتلیه دار"] . '|string',
+            'personality_image' => 'required|string',
+            'birth_certificate' => 'required|string',
+            'national_cart' => 'required|string',
         ]);
 
-        $user = User::where('phone', $fields['phone'])->where('national_code', $fields['national_code'])->first();
+        $user = User::where('phone', $fields
+        ['phone'])->where('national_code', $fields['national_code'])->first();
         if (!$user) {
             $user = User::create([
                 'name' => $fields['name'],
@@ -35,8 +42,15 @@ class AuthController extends Controller
                 'gender' => $fields['gender'],
                 'phone' => $fields['phone'],
                 'national_code' => $fields['national_code'],
-                'password' => bcrypt($fields['password'])
+                'password' => bcrypt($fields['password']),
+                'personality_image' =>
+                    ImageTools::saveFile($fields['national_code'] . "/personality_image.jpeg", base64_decode(explode(",", $request->input("personality_image"))[1])),
+                'birth_certificate' =>
+                    ImageTools::saveFile($fields['national_code'] . "/birth_certificate.jpeg", base64_decode(explode(",", $request->input("birth_certificate"))[1])),
+                'national_cart' =>
+                    ImageTools::saveFile($fields['national_code'] . "/national_code.jpeg", base64_decode(explode(",", $request->input("national_cart"))[1]))
             ]);
+
         }
         $roles = $user->roles->filter(function ($value, $key) use ($fields) {
             return ($value->id == $fields['type']);
@@ -51,6 +65,8 @@ class AuthController extends Controller
                 "name" => $request->input('atelier_name'),
                 "code" => $request->input('atelier_code'),
                 "address" => $request->input('atelier_address'),
+                "business_license" =>
+                    ImageTools::saveFile($fields['national_code'] . "/business_license.jpeg", base64_decode(explode(",", $request->input("business_license"))[1]))
             ]);
             $user->update([
                 'atelier_id' => $atelier->id

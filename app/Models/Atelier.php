@@ -11,7 +11,7 @@ class Atelier extends Model
     use HasFactory, QueryTools;
 
 
-    protected $fillable = ["name", "code", "address"];
+    protected $fillable = ["name", "code", "address", "business_license"];
 
     public function user()
     {

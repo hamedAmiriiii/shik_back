@@ -3,11 +3,11 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Garden;
 use App\Models\Talar;
-use http\Env\Response;
 use Illuminate\Http\Request;
 
-class TalarController extends Controller
+class GardenController extends Controller
 {
     /**
      * Display a listing of the resource.
@@ -17,14 +17,14 @@ class TalarController extends Controller
     public function index(Request $request)
     {
         $searchDataModel = json_decode($request->input('searchFilterModel'));
-        $talars = Talar::search($searchDataModel)->simplePaginate();
-        return response($talars);
+        $gardens = Garden::search($searchDataModel)->simplePaginate();
+        return response($gardens);
     }
 
     /**
      * Store a newly created resource in storage.
      *
-     * @param \Illuminate\Http\Request $request
+     * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\Response
      */
     public function store(Request $request)
@@ -33,48 +33,47 @@ class TalarController extends Controller
             "name" => "required|string|max:255",
             "phone" => "required|numeric|digits:11"
         ]);
-        $talar = Talar::create($fields);
-        return response($talar, 201);
+        $garden = Garden::create($fields);
+        return response($garden, 201);
     }
 
     /**
      * Display the specified resource.
      *
-     * @param \App\Models\Talar $talar
+     * @param  \App\Models\Garden  $garden
      * @return \Illuminate\Http\Response
      */
-    public function show(Talar $talar)
+    public function show(Garden $garden)
     {
-        return response($talar);
+        return response($garden);
     }
-
 
     /**
      * Update the specified resource in storage.
      *
-     * @param \Illuminate\Http\Request $request
-     * @param \App\Models\Talar $talar
+     * @param  \Illuminate\Http\Request  $request
+     * @param  \App\Models\Garden  $garden
      * @return \Illuminate\Http\Response
      */
-    public function update(Request $request, Talar $talar)
+    public function update(Request $request, Garden $garden)
     {
         $fields = $request->validate([
             "name" => "required|string|max:255",
             "phone" => "required|numeric|digits:11"
         ]);
-        $talar->update($fields);
-        return response($talar);
+        $garden->update($fields);
+        return response($garden);
     }
 
     /**
      * Remove the specified resource from storage.
      *
-     * @param \App\Models\Talar $talar
+     * @param  \App\Models\Garden  $garden
      * @return \Illuminate\Http\Response
      */
-    public function destroy(Talar $talar)
+    public function destroy(Garden $garden)
     {
-        $talar->delete();
+        $garden->delete();
         return response(true);
     }
 }
