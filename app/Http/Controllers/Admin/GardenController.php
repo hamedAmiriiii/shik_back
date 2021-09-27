@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Garden;
-use App\Models\Talar;
 use Illuminate\Http\Request;
 
 class GardenController extends Controller
@@ -74,6 +73,8 @@ class GardenController extends Controller
     public function destroy(Garden $garden)
     {
         $garden->delete();
-        return response(true);
+        return response([
+            'message' => 'حذف با موفقیت انجام شد'
+        ]);
     }
 }

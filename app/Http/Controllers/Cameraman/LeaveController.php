@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Cameraman;
 
 use App\Http\Controllers\Controller;
 use App\Models\Leave;
+use App\Models\StatusEnum;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Morilog\Jalali\Jalalian;
 
 class LeaveController extends Controller
 {
@@ -14,7 +16,7 @@ class LeaveController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function index(): \Illuminate\Http\Response
+    public function index(Request $request): \Illuminate\Http\Response
     {
         $leaves = Leave::where('user_id', Auth::user()->id)->simplePaginate();
         return response($leaves);
@@ -29,13 +31,23 @@ class LeaveController extends Controller
     public function store(Request $request): \Illuminate\Http\Response
     {
         $request->validate([
-            'date_form' => 'required|date|after:tomorrow',
-            'date_to' => 'required|date|after:date_from',
+            'date_from.year' => 'required',
+            'date_from.month' => 'required',
+            'date_from.day' => 'required',
+            'date_to.year' => 'required',
+            'date_to.month' => 'required',
+            'date_to.day' => 'required',
         ]);
 
+        $dayFrom = $request->input('date_from');
+        $dayTo = $request->input('date_to');
+
+        $dayFrom = new Jalalian($dayFrom["year"], $dayFrom["month"], $dayFrom["day"]);
+        $dayTo = new Jalalian($dayTo["year"], $dayTo["month"], $dayTo["day"]);
+
         $leave = Leave::create([
-            'date_form' => $request->input('date_from'),
-            'date_to' => $request->input('date_to'),
+            'date_from' => $dayFrom->toCarbon(),
+            'date_to' => $dayTo->toCarbon(),
             'user_id' => Auth::user()->id,
         ]);
 
@@ -64,13 +76,24 @@ class LeaveController extends Controller
     public function update(Request $request, Leave $leave): \Illuminate\Http\Response
     {
         $request->validate([
-            'date_form' => 'required|date|after:tomorrow',
-            'date_to' => 'required|date|after:date_from',
+            'date_from.year' => 'required',
+            'date_from.month' => 'required',
+            'date_from.day' => 'required',
+            'date_to.year' => 'required',
+            'date_to.month' => 'required',
+            'date_to.day' => 'required',
         ]);
 
+        $dayFrom = $request->input('date_from');
+        $dayTo = $request->input('date_to');
+
+        $dayFrom = new Jalalian($dayFrom["year"], $dayFrom["month"], $dayFrom["day"]);
+        $dayTo = new Jalalian($dayTo["year"], $dayTo["month"], $dayTo["day"]);
+
         $leave->update([
-            'date_form' => $request->input('date_from'),
-            'date_to' => $request->input('date_to')
+            'date_from' => $dayFrom->toCarbon(),
+            'date_to' => $dayTo->toCarbon(),
+            'status' => StatusEnum::STATUS_KEYS['در انتظار بررسی']
         ]);
 
         return response($leave);

@@ -75,6 +75,8 @@ class TalarController extends Controller
     public function destroy(Talar $talar)
     {
         $talar->delete();
-        return response(true);
+        return response([
+            'message' => 'حذف با موفقیت انجام شد'
+        ]);
     }
 }
