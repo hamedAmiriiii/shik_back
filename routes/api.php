@@ -27,6 +27,7 @@ Route::name('confirmationCode.')->prefix('confirmation-code')->group(function ()
 
 Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::name('admin.')->prefix('admin')->group(function () {
+
         Route::resource("atelier", \App\Http\Controllers\Admin\AtelierController::class);
         Route::post("/atelier/confirm/{atelier}", [\App\Http\Controllers\Admin\AtelierController::class, "confirm"]);
 
@@ -38,6 +39,9 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::resource("talar",\App\Http\Controllers\Admin\TalarController::class);
 
         Route::resource("garden",\App\Http\Controllers\Admin\GardenController::class);
+
+        Route::resource("leave",\App\Http\Controllers\Admin\LeaveController::class);
+        Route::post("/leave/confirm/{leave}", [\App\Http\Controllers\Admin\LeaveController::class, "confirm"]);
     });
 
     Route::name('cameraman.')->prefix('cameraman')->group(function () {

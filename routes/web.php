@@ -16,3 +16,10 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', function () {
     return view('welcome');
 });
+
+/*Route::get('/test', function () {
+    $target = '/home2/kermanph/atelier/storage/app/public';
+    $shortcut = '/home2/kermanph/public_html/api/storage';
+    symlink($target, $shortcut);
+    //\Illuminate\Support\Facades\Artisan::call('storage:link');
+});*/
