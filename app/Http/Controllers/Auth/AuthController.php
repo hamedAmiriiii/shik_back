@@ -52,15 +52,14 @@ class AuthController extends Controller
             ]);
 
         }
-        $roles = $user->roles->filter(function ($value, $key) use ($fields) {
-            return ($value->id == $fields['type']);
-        });
-        if (!sizeof($roles)) {
-            $user->roles()->attach($fields['type']);
+        $roles = $user->roles()->select("id")->pluck("id")->toArray();
+        $diffs = array_diff( $fields['type'],$roles);
+        if (sizeof($diffs)) {
+            $user->roles()->attach($diffs);
             $user->save();
         }
-
-        if ($request->input("type") == User::USER_TYPE_KEY["آتلیه دار"]) {
+        if (in_array(User::USER_TYPE_KEY["آتلیه دار"], $request->input("type"))){
+        //if ($request->input("type") == User::USER_TYPE_KEY["آتلیه دار"]) {
             $atelier = Atelier::create([
                 "name" => $request->input('atelier_name'),
                 "code" => $request->input('atelier_code'),

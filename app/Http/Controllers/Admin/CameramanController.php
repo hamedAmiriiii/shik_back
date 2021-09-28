@@ -87,10 +87,11 @@ class CameramanController extends Controller
     public function confirm(Request $request , User $cameraman): \Illuminate\Http\Response
     {
         $request->validate([
-            "status" => "required|numeric|max:3|digits:1"
+            "status" => "required|numeric|max:3|digits:1",
+            "role" => "required|numeric|max:5|digits:1"
         ]);
         foreach ($cameraman->roles as $role){
-            if ($role->id == User::USER_TYPE_KEY["فیلم بردار"]){
+            if ($role->id == User::USER_TYPE[$request->input("role")]){
                 $cameraman->roles()->syncWithoutDetaching([$role->id => ["status" =>  $request->input("status")]]);
             }
         }

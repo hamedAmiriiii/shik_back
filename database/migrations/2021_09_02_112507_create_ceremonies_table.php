@@ -15,6 +15,9 @@ class CreateCeremoniesTable extends Migration
     {
         Schema::create('ceremonies', function (Blueprint $table) {
             $table->id();
+            $table->unsignedInteger("talar_id");
+            $table->unsignedInteger("garden_id");
+            $table->unsignedInteger("atelier_id");
             $table->timestamps();
         });
     }
