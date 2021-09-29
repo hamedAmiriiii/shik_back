@@ -20,7 +20,7 @@ class CameramanController extends Controller
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         $users = User::search($searchDataModel)->whereHas("roles", function (Builder $query) {
             $query->where('id', User::USER_TYPE_KEY["فیلم بردار"]);
-        })->with(['atelier' , 'roles'])->simplePaginate();
+        })->with(['atelier' , 'roles'])->paginate();
         return response($users);
     }
 
@@ -91,7 +91,7 @@ class CameramanController extends Controller
             "role" => "required|numeric|max:5|digits:1"
         ]);
         foreach ($cameraman->roles as $role){
-            if ($role->id == User::USER_TYPE[$request->input("role")]){
+            if ($role->id == $request->input("role")){
                 $cameraman->roles()->syncWithoutDetaching([$role->id => ["status" =>  $request->input("status")]]);
             }
         }
