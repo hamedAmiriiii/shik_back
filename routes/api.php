@@ -34,7 +34,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::resource("cameraman", \App\Http\Controllers\Admin\CameramanController::class);
         Route::post("/cameraman/confirm/{cameraman}", [\App\Http\Controllers\Admin\CameramanController::class, "confirm"]);
 
-        Route::resource("ceremony", \App\Http\Controllers\Admin\AtelierController::class);
+        Route::resource("ceremony", \App\Http\Controllers\Admin\CeremonyController::class);
+        Route::post("/ceremony/confirm/{ceremony}", [\App\Http\Controllers\Admin\CeremonyController::class, "confirm"]);
 
         Route::resource("talar",\App\Http\Controllers\Admin\TalarController::class);
 
@@ -46,6 +47,13 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
     Route::name('cameraman.')->prefix('cameraman')->group(function () {
         Route::resource("leave", \App\Http\Controllers\Cameraman\LeaveController::class);
+    });
+
+    Route::name('atelier.')->prefix('atelier')->group(function () {
+        Route::resource("talar", \App\Http\Controllers\Atelier\TalarController::class)->only("index");
+        Route::resource("garden", \App\Http\Controllers\Atelier\GardenController::class)->only("index");
+        Route::resource("cameraman", \App\Http\Controllers\Atelier\CameramanController::class)->only("index");
+        Route::resource("ceremony", \App\Http\Controllers\Atelier\CeremonyController::class);
     });
 });
 

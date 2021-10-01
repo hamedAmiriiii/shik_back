@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\Admin;
+namespace App\Http\Controllers\Atelier;
 
 use App\Http\Controllers\Controller;
 use App\Models\Ceremony;
@@ -20,6 +20,8 @@ class CeremonyController extends Controller
     {
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         $ceremonies = Ceremony::search($searchDataModel)
+            ->where("atelier_id", Auth::user()->atelier->id)
+            //->with(['womanCameraman', 'manCameraman', 'womanPhotographer', 'manPhotographer'])
             ->paginate();
         return response($ceremonies);
     }
@@ -27,7 +29,7 @@ class CeremonyController extends Controller
     /**
      * Store a newly created resource in storage.
      *
-     * @param  \Illuminate\Http\Request  $request
+     * @param \Illuminate\Http\Request $request
      * @return \Illuminate\Http\Response
      */
     public function store(Request $request)
@@ -80,7 +82,7 @@ class CeremonyController extends Controller
     /**
      * Display the specified resource.
      *
-     * @param  \App\Models\Ceremony  $ceremony
+     * @param \App\Models\Ceremony $ceremony
      * @return \Illuminate\Http\Response
      */
     public function show(Ceremony $ceremony)
@@ -92,8 +94,8 @@ class CeremonyController extends Controller
     /**
      * Update the specified resource in storage.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  \App\Models\Ceremony  $ceremony
+     * @param \Illuminate\Http\Request $request
+     * @param \App\Models\Ceremony $ceremony
      * @return \Illuminate\Http\Response
      */
     public function update(Request $request, Ceremony $ceremony)
@@ -144,25 +146,9 @@ class CeremonyController extends Controller
     }
 
     /**
-     * @param Request $request
-     * @param Ceremony $ceremony
-     * @return \Illuminate\Http\Response
-     */
-    public function confirm(Request $request,Ceremony $ceremony): \Illuminate\Http\Response
-    {
-        $request->validate([
-            "status" => "required|numeric|max:3|digits:1"
-        ]);
-        $ceremony->update([
-            "status" => $request->input("status")
-        ]);
-        return response($ceremony);
-    }
-
-    /**
      * Remove the specified resource from storage.
      *
-     * @param  \App\Models\Ceremony  $ceremony
+     * @param \App\Models\Ceremony $ceremony
      * @return \Illuminate\Http\Response
      */
     public function destroy(Ceremony $ceremony)

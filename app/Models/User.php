@@ -42,6 +42,16 @@ class User extends Authenticatable
         'email_verified_at' => 'datetime',
     ];
 
+    const USER_GENDER = [
+        1 => "مرد",
+        2 => "زن",
+    ];
+
+    const USER_GENDER_KEY = [
+        "مرد" => 1,
+        "زن" => 2,
+    ];
+
     const USER_TYPE = [
         1 => "ادمین",
         2 => "آتلیه دار",
