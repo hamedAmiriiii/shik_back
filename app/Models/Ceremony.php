@@ -59,4 +59,13 @@ class Ceremony extends Model
     {
         return $this->belongsToMany(User::class, "ceremony_air_cameraman")->where("gender", User::USER_GENDER_KEY["مرد"]);
     }
+
+    public function talar(){
+        return $this->belongsTo(Talar::class);
+    }
+
+    public function garden(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Garden::class);
+    }
 }

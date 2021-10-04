@@ -21,7 +21,7 @@ class CeremonyController extends Controller
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         $ceremonies = Ceremony::search($searchDataModel)
             ->where("atelier_id", Auth::user()->atelier->id)
-            //->with(['womanCameraman', 'manCameraman', 'womanPhotographer', 'manPhotographer'])
+            ->with(['talar', 'garden'])
             ->paginate();
         return response($ceremonies);
     }
