@@ -68,4 +68,9 @@ class Ceremony extends Model
     {
         return $this->belongsTo(Garden::class);
     }
+
+    public function atelier(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Atelier::class);
+    }
 }
