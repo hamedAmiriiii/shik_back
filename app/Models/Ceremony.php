@@ -6,6 +6,7 @@ use App\Tools\QueryTools;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Morilog\Jalali\Jalalian;
 
 class Ceremony extends Model
 {
@@ -14,6 +15,10 @@ class Ceremony extends Model
     protected $fillable = ['talar_id', 'garden_id', 'atelier_id', 'groom_full_name', 'groom_phone', 'groom_national_code',
         'date', 'status'];
 
+    public function getDateAttribute($value): string
+    {
+        return Jalalian::fromDateTime($value)->format('date');
+    }
 
     public function cameraman(): BelongsToMany
     {

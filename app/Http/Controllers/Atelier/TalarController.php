@@ -16,7 +16,7 @@ class TalarController extends Controller
     public function index(Request $request)
     {
         $searchDataModel = json_decode($request->input('searchFilterModel'));
-        $talars = Talar::search($searchDataModel)->get();
+        $talars = Talar::search($searchDataModel)->orderBy('id', 'desc')->get();
         return response($talars);
     }
 }

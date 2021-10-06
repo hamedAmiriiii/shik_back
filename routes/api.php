@@ -43,6 +43,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
         Route::resource("leave",\App\Http\Controllers\Admin\LeaveController::class);
         Route::post("/leave/confirm/{leave}", [\App\Http\Controllers\Admin\LeaveController::class, "confirm"]);
+
+        Route::resource("/log-sms",\App\Http\Controllers\Admin\LogSmsController::class)->only("index");
     });
 
     Route::name('cameraman.')->prefix('cameraman')->group(function () {

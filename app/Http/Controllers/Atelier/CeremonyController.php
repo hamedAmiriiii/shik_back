@@ -22,6 +22,7 @@ class CeremonyController extends Controller
         $ceremonies = Ceremony::search($searchDataModel)
             ->where("atelier_id", Auth::user()->atelier->id)
             ->with(['talar', 'garden'])
+            ->orderBy('id', 'desc')
             ->paginate();
         return response($ceremonies);
     }
@@ -40,7 +41,7 @@ class CeremonyController extends Controller
             "groom_full_name" => "required|string",
             "groom_phone" => "required|digits:11|numeric",
             "groom_national_code" => "required|digits:10|numeric",
-            "manCameraman" => "required|array|min:1",
+            /*"manCameraman" => "required|array|min:1",
             "manCameraman.*" => "required|numeric|exists:users,id",
             "womanCameraman" => "required|array|min:1",
             "womanCameraman.*" => "required|numeric|exists:users,id",
@@ -51,7 +52,7 @@ class CeremonyController extends Controller
             "manAirCameraman" => "required|array|min:1",
             "manAirCameraman.*" => "required|numeric|exists:users,id",
             "womanAirCameraman" => "required|array|min:1",
-            "womanAirCameraman.*" => "required|numeric|exists:users,id",
+            "womanAirCameraman.*" => "required|numeric|exists:users,id",*/
             'date.year' => 'required',
             'date.month' => 'required',
             'date.day' => 'required',

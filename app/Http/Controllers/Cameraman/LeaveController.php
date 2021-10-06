@@ -18,7 +18,7 @@ class LeaveController extends Controller
      */
     public function index(Request $request): \Illuminate\Http\Response
     {
-        $leaves = Leave::where('user_id', Auth::user()->id)->paginate();
+        $leaves = Leave::where('user_id', Auth::user()->id)->orderBy('id', 'desc')->paginate();
         return response($leaves);
     }
 

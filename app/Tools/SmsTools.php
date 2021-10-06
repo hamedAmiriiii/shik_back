@@ -3,6 +3,8 @@
 
 namespace App\Tools;
 
+use App\Models\LogSms;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 
 class SmsTools
@@ -22,6 +24,13 @@ class SmsTools
             'gateway' => '1000081290',
             'to' => $receivers,
             'text' => $text
+        ]);
+
+        LogSms::create([
+            "text" => $text,
+            "number" => '1000081290',
+            "receivers" => $receivers,
+            "creator_id" => Auth::id()
         ]);
 
         return $response->json();

@@ -15,8 +15,8 @@ class GardenController extends Controller
      */
     public function index(Request $request)
     {
-        $searchDataModel = json_decode($request->input('searchFilterModel'));
-        $gardens = Garden::search($searchDataModel)->paginate();
+        //$searchDataModel = json_decode($request->input('searchFilterModel'));
+        $gardens = Garden::relatedSearch($request)->orderBy('id', 'desc')->paginate();
         return response($gardens);
     }
 

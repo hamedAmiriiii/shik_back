@@ -19,7 +19,7 @@ class LeaveController extends Controller
     public function index(Request $request): \Illuminate\Http\Response
     {
         $searchDataModel = json_decode($request->input('searchFilterModel'));
-        $leaves = Leave::search($searchDataModel)->with("user")->paginate();
+        $leaves = Leave::search($searchDataModel)->with("user")->orderBy('id', 'desc')->paginate();
         return response($leaves);
     }
 
