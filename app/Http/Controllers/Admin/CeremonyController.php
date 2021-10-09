@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Ceremony;
 use App\Models\StatusEnum;
+use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Morilog\Jalali\Jalalian;
@@ -20,7 +21,7 @@ class CeremonyController extends Controller
     {
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         $ceremonies = Ceremony::search($searchDataModel)
-            ->with(['talar', 'garden' , 'atelier'])
+            ->with(['talar', 'garden', 'atelier'])
             ->orderBy('id', 'desc')
             ->paginate();
         return response($ceremonies);
@@ -29,7 +30,7 @@ class CeremonyController extends Controller
     /**
      * Store a newly created resource in storage.
      *
-     * @param  \Illuminate\Http\Request  $request
+     * @param \Illuminate\Http\Request $request
      * @return \Illuminate\Http\Response
      */
     public function store(Request $request)
@@ -82,20 +83,20 @@ class CeremonyController extends Controller
     /**
      * Display the specified resource.
      *
-     * @param  \App\Models\Ceremony  $ceremony
+     * @param \App\Models\Ceremony $ceremony
      * @return \Illuminate\Http\Response
      */
     public function show(Ceremony $ceremony)
     {
-        $ceremony->load(['womanCameraman', 'manCameraman', 'womanPhotographer', 'manPhotographer' , 'womanAirCameraman' , 'manAirCameraman']);
+        $ceremony->load(['womanCameraman', 'manCameraman', 'womanPhotographer', 'manPhotographer', 'womanAirCameraman', 'manAirCameraman']);
         return response($ceremony);
     }
 
     /**
      * Update the specified resource in storage.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  \App\Models\Ceremony  $ceremony
+     * @param \Illuminate\Http\Request $request
+     * @param \App\Models\Ceremony $ceremony
      * @return \Illuminate\Http\Response
      */
     public function update(Request $request, Ceremony $ceremony)
@@ -150,7 +151,7 @@ class CeremonyController extends Controller
      * @param Ceremony $ceremony
      * @return \Illuminate\Http\Response
      */
-    public function confirm(Request $request,Ceremony $ceremony): \Illuminate\Http\Response
+    public function confirm(Request $request, Ceremony $ceremony): \Illuminate\Http\Response
     {
         $request->validate([
             "status" => "required|numeric|max:3|digits:1"
@@ -158,13 +159,25 @@ class CeremonyController extends Controller
         $ceremony->update([
             "status" => $request->input("status")
         ]);
+        if ($request->input("status") == 2) {
+            $text = "ثبت مراسم\n" .
+                "تاریخ : $ceremony->date \n" .
+                "اتلیه : " . $ceremony->atelier->name . "\n".
+                "داماد: $ceremony->groom_full_name \n" .
+                "تالار : " . $ceremony->talar->name;
+
+            SmsTools::sendSms($ceremony->groom_phone,$text);
+            SmsTools::sendSms($ceremony->atelier->user->phone,$text);
+            SmsTools::sendSms($ceremony->talar->phone,$text);
+            dd($text);
+        }
         return response($ceremony);
     }
 
     /**
      * Remove the specified resource from storage.
      *
-     * @param  \App\Models\Ceremony  $ceremony
+     * @param \App\Models\Ceremony $ceremony
      * @return \Illuminate\Http\Response
      */
     public function destroy(Ceremony $ceremony)

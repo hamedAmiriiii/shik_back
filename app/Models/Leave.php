@@ -15,12 +15,12 @@ class Leave extends Model
 
     public function getDateFromAttribute($value): string
     {
-        return Jalalian::fromDateTime($value)->format('date');
+        return Jalalian::fromDateTime($value)->format('Y-m-d');
     }
 
     public function getDateToAttribute($value): string
     {
-        return Jalalian::fromDateTime($value)->format('date');
+        return Jalalian::fromDateTime($value)->format('Y-m-d');
     }
 
     public function user(){

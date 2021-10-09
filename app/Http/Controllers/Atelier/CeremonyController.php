@@ -36,8 +36,8 @@ class CeremonyController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            "talar_id" => "required|numeric|exists:talars,id",
-            "garden_id" => "required|numeric|exists:gardens,id",
+            "talar_id" => "nullable|numeric|exists:talars,id",
+            "garden_id" => "nullable|numeric|exists:gardens,id",
             "groom_full_name" => "required|string",
             "groom_phone" => "required|digits:11|numeric",
             "groom_national_code" => "required|digits:10|numeric",
