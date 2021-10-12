@@ -166,10 +166,23 @@ class CeremonyController extends Controller
                 "داماد: $ceremony->groom_full_name \n" .
                 "تالار : " . $ceremony->talar->name;
 
-            SmsTools::sendSms($ceremony->groom_phone,$text);
-            SmsTools::sendSms($ceremony->atelier->user->phone,$text);
-            SmsTools::sendSms($ceremony->talar->phone,$text);
-            dd($text);
+            SmsTools::sendSms($ceremony->groom_phone,$text );
+            SmsTools::sendSms($ceremony->atelier->user->phone,$text. "\n آتلیه");
+            if ($ceremony->talar){
+                SmsTools::sendSms($ceremony->talar->phone,$text. "\n تالار");
+            }
+            if ($ceremony->garden){
+                SmsTools::sendSms($ceremony->garden->phone,$text. "\n باغ");
+            }
+            foreach ($ceremony->cameraman as $cameraman){
+                SmsTools::sendSms($cameraman->phone,$text. "\n فیلم بردار");
+            }
+            foreach ($ceremony->photographer as $cameraman){
+                SmsTools::sendSms($cameraman->phone,$text. "\n عکاس");
+            }
+            foreach ($ceremony->airCameraman as $cameraman){
+                SmsTools::sendSms($cameraman->phone,$text. "\n فیلم بردار هوایی");
+            }
         }
         return response($ceremony);
     }

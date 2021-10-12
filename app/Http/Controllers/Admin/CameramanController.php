@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Controller;
+use App\Models\StatusEnum;
 use App\Models\User;
+use App\Tools\SmsTools;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 
@@ -20,14 +22,14 @@ class CameramanController extends Controller
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         $users = User::search($searchDataModel)->whereHas("roles", function (Builder $query) {
             $query->where('id', User::USER_TYPE_KEY["فیلم بردار"]);
-        })->with(['atelier' , 'roles'])->orderBy('id', 'desc')->paginate();
+        })->with(['atelier', 'roles'])->orderBy('id', 'desc')->paginate();
         return response($users);
     }
 
     /**
      * Store a newly created resource in storage.
      *
-     * @param  \Illuminate\Http\Request  $request
+     * @param \Illuminate\Http\Request $request
      * @return \Illuminate\Http\Response
      */
     public function store(Request $request): \Illuminate\Http\Response
@@ -39,7 +41,7 @@ class CameramanController extends Controller
     /**
      * Display the specified resource.
      *
-     * @param  \App\Models\User  $user
+     * @param \App\Models\User $user
      * @return \Illuminate\Http\Response
      */
     public function show(User $cameraman): \Illuminate\Http\Response
@@ -51,8 +53,8 @@ class CameramanController extends Controller
     /**
      * Update the specified resource in storage.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  \App\Models\User  $user
+     * @param \Illuminate\Http\Request $request
+     * @param \App\Models\User $user
      * @return \Illuminate\Http\Response
      */
     public function update(Request $request, User $user)
@@ -84,15 +86,17 @@ class CameramanController extends Controller
      * @param User $cameraman
      * @return \Illuminate\Http\Response
      */
-    public function confirm(Request $request , User $cameraman): \Illuminate\Http\Response
+    public function confirm(Request $request, User $cameraman): \Illuminate\Http\Response
     {
         $request->validate([
             "status" => "required|numeric|max:3|digits:1",
             "role" => "required|numeric|max:5|digits:1"
         ]);
-        foreach ($cameraman->roles as $role){
-            if ($role->id == $request->input("role")){
-                $cameraman->roles()->syncWithoutDetaching([$role->id => ["status" =>  $request->input("status")]]);
+        foreach ($cameraman->roles as $role) {
+            if ($role->id == $request->input("role")) {
+                $cameraman->roles()->syncWithoutDetaching([$role->id => ["status" => $request->input("status")]]);
+                $text = "درخواست شما با عنوان " . $role->name . " " . StatusEnum::STATUS[$request->input("status")] . " است.";
+                SmsTools::sendSms($cameraman->phone, $text);
             }
         }
         $cameraman->load("roles");
@@ -102,7 +106,7 @@ class CameramanController extends Controller
     /**
      * Remove the specified resource from storage.
      *
-     * @param  \App\Models\User  $user
+     * @param \App\Models\User $user
      * @return \Illuminate\Http\Response
      */
     public function destroy(User $user)

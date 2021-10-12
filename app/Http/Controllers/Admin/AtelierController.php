@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Auth\AuthController;
+use App\Models\StatusEnum;
+use App\Tools\SmsTools;
 use Illuminate\Database\Eloquent\Builder;
 use App\Http\Controllers\Controller;
 use App\Models\User;
@@ -100,6 +102,8 @@ class AtelierController extends Controller
         foreach ($atelier->roles as $role){
             if ($role->id == User::USER_TYPE_KEY["آتلیه دار"]){
                 $atelier->roles()->syncWithoutDetaching([$role->id => ["status" =>  $request->input("status")]]);
+                $text = "درخواست شما برای ثبت واحد صنفی " . StatusEnum::STATUS[$request->input("status")] . " است.";
+                SmsTools::sendSms($atelier->phone, $text);
             }
         }
         $atelier->load("roles");

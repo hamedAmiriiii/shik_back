@@ -5,35 +5,36 @@ namespace App\Models;
 use App\Tools\QueryTools;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Query\Builder;
 use Morilog\Jalali\Jalalian;
 
 class Talar extends Model
 {
-    use HasFactory,QueryTools;
+    use HasFactory, QueryTools;
 
-    protected $fillable = ["name" , "phone"];
+    protected $fillable = ["name", "phone"];
 
     public function scopeRelatedSearch($query, $searchTerms)
     {
-        if ($searchTerms->input("active")) {
+        if ($searchTerms->input("type") != null) {
             $date = json_decode($searchTerms->input('date'));
             $date = new Jalalian($date->year, $date->month, $date->day);
-            switch ($searchTerms->input("active")){
-                case 0:
-                        return $query->whereDoesntHave('ceremonies',function (Builder $query) use ($date) {
-                            $query->whereDate('date', $date);
-                        });
-                case 1:
-                    return $query->whereHas('ceremonies',function (Builder $query) use ($date){
-                        $query->whereDate('date', $date);
+            switch ($searchTerms->input("type")) {
+                case "0":
+                    $query->whereDoesntHave('ceremonies', function ($q) use ($date) {
+                        $q->whereDate('date', $date->toCarbon());
                     });
+                    break;
+                case 1:
+                    $query->whereHas('ceremonies', function ( $q) use ($date) {
+                        $q->whereDate('date', $date->toCarbon());
+                    });
+                    break;
             }
         }
-        return $query;
     }
 
-    public function ceremonies(){
+    public function ceremonies()
+    {
         return $this->hasMany(Ceremony::class);
     }
 }

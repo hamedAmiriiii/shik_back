@@ -21,7 +21,7 @@ class SmsTools
     public static function sendSms(string $receivers, string $text)
     {
         $response = Http::get('http://api.shinapayamak.ir/v1/' . self::API_TOKEN . '/sms/send.json', [
-            'gateway' => '1000081290',
+            'gateway' => '200020003000',
             'to' => $receivers,
             'text' => $text
         ]);

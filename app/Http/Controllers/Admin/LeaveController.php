@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Leave;
 use App\Models\StatusEnum;
+use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Morilog\Jalali\Jalalian;
@@ -113,6 +114,10 @@ class LeaveController extends Controller
         $leave->update([
             "status" => $request->input("status")
         ]);
+        $text = "درخواست شما برای مرخصی از تاریخ :  ". $leave->date_from
+            . " تا تاریخ : " . $leave->date_to
+            . StatusEnum::STATUS[$request->input("status")] . " است.";
+        SmsTools::sendSms($leave->user->phone, $text);
         return response($leave);
     }
 

@@ -37,16 +37,19 @@ class CameramanController extends Controller
             ->whereNotIn('users.id', function ($query) use ($date) {
                 $query->select("user_id")->from("ceremony_cameraman")
                     ->join("ceremonies", "ceremony_id", "=", "ceremonies.id")
+                    ->where("ceremonies.status", "!=", StatusEnum::STATUS_KEYS['رد شده'])
                     ->whereDate("ceremonies.date", $date->toCarbon());
             })
             ->whereNotIn('users.id', function ($query) use ($date) {
                 $query->select("user_id")->from("ceremony_photographer")
                     ->join("ceremonies", "ceremony_id", "=", "ceremonies.id")
+                    ->where("ceremonies.status", "!=", StatusEnum::STATUS_KEYS['رد شده'])
                     ->whereDate("ceremonies.date", $date->toCarbon());
             })
             ->whereNotIn('users.id', function ($query) use ($date) {
                 $query->select("user_id")->from("ceremony_air_cameraman")
                     ->join("ceremonies", "ceremony_id", "=", "ceremonies.id")
+                    ->where("ceremonies.status", "!=", StatusEnum::STATUS_KEYS['رد شده'])
                     ->whereDate("ceremonies.date", $date->toCarbon());
             })
             //->whereNotIn("id", $userIds)
