@@ -5,14 +5,13 @@ namespace App\Models;
 use App\Tools\QueryTools;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Query\Builder;
 use Morilog\Jalali\Jalalian;
 
 class Garden extends Model
 {
-    use HasFactory,QueryTools;
+    use HasFactory, QueryTools;
 
-    protected $fillable = ["name" , "phone"];
+    protected $fillable = ["name", "phone"];
 
     public function scopeRelatedSearch($query, $searchTerms)
     {
@@ -26,7 +25,7 @@ class Garden extends Model
                     });
                     break;
                 case 1:
-                    $query->whereHas('ceremonies', function ( $q) use ($date) {
+                    $query->whereHas('ceremonies', function ($q) use ($date) {
                         $q->whereDate('date', $date->toCarbon());
                     });
                     break;
@@ -34,7 +33,8 @@ class Garden extends Model
         }
     }
 
-    public function ceremonies(){
+    public function ceremonies()
+    {
         return $this->hasMany(Ceremony::class);
     }
 }

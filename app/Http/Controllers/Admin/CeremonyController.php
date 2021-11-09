@@ -162,27 +162,43 @@ class CeremonyController extends Controller
         if ($request->input("status") == 2) {
             $text = "ثبت مراسم\n" .
                 "تاریخ : $ceremony->date \n" .
-                "اتلیه : " . $ceremony->atelier->name . "\n".
+                "اتلیه : " . $ceremony->atelier->name . "\n" .
                 "داماد: $ceremony->groom_full_name \n" .
                 "تالار : " . $ceremony->talar->name;
 
-            SmsTools::sendSms($ceremony->groom_phone,$text );
-            SmsTools::sendSms($ceremony->atelier->user->phone,$text. "\n آتلیه");
-            if ($ceremony->talar){
-                SmsTools::sendSms($ceremony->talar->phone,$text. "\n تالار");
+            SmsTools::sendSms($ceremony->groom_phone, $text);
+            SmsTools::sendSms($ceremony->atelier->user->phone, $text . "\n آتلیه");
+            foreach ($ceremony->cameraman as $cameraman) {
+                SmsTools::sendSms($cameraman->phone, $text . "\n فیلم بردار");
             }
-            if ($ceremony->garden){
-                SmsTools::sendSms($ceremony->garden->phone,$text. "\n باغ");
+            foreach ($ceremony->photographer as $cameraman) {
+                SmsTools::sendSms($cameraman->phone, $text . "\n عکاس");
             }
-            foreach ($ceremony->cameraman as $cameraman){
-                SmsTools::sendSms($cameraman->phone,$text. "\n فیلم بردار");
+            foreach ($ceremony->airCameraman as $cameraman) {
+                SmsTools::sendSms($cameraman->phone, $text . "\n فیلم بردار هوایی");
             }
-            foreach ($ceremony->photographer as $cameraman){
-                SmsTools::sendSms($cameraman->phone,$text. "\n عکاس");
+            if ($ceremony->talar) {
+                $text .= "\n" . "فیلم برداران" . "\n";
+                foreach ($ceremony->cameraman as $cameraman) {
+                    $text .= $cameraman->name . $cameraman->last_name . "\n";
+                }
+                foreach ($ceremony->photographer as $cameraman) {
+                    $text .= $cameraman->name . $cameraman->last_name . "\n";
+                }
+                foreach ($ceremony->airCameraman as $cameraman) {
+                    $text .= $cameraman->name . $cameraman->last_name . "\n";
+                }
+                SmsTools::sendSms($ceremony->talar->phone, $text);
             }
-            foreach ($ceremony->airCameraman as $cameraman){
-                SmsTools::sendSms($cameraman->phone,$text. "\n فیلم بردار هوایی");
+            if ($ceremony->garden) {
+                SmsTools::sendSms($ceremony->garden->phone, $text);
             }
+        } else {
+            $text = "عدم تایید مراسم\n" .
+                "تاریخ : $ceremony->date \n" .
+                "داماد: $ceremony->groom_full_name \n" .
+                "تالار : " . $ceremony->talar->name;
+            SmsTools::sendSms($ceremony->atelier->user->phone, $text);
         }
         return response($ceremony);
     }

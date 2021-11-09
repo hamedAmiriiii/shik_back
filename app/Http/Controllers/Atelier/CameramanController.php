@@ -53,6 +53,11 @@ class CameramanController extends Controller
                     ->whereDate("ceremonies.date", $date->toCarbon());
             })
             //->whereNotIn("id", $userIds)
+            ->whereNotIn('users.id', function ($query) use ($date) {
+                $query->select("user_id")->from("leaves")
+                    ->where("leaves.status", StatusEnum::STATUS_KEYS['تایید شده'])
+                    ->whereDate("leaves.date_from", '<=', $date->toCarbon())->whereDate("leaves.date_to", '>=', $date->toCarbon());
+            })
             ->get();
 
         return response($users);

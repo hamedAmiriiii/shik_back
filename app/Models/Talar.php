@@ -25,7 +25,7 @@ class Talar extends Model
                     });
                     break;
                 case 1:
-                    $query->whereHas('ceremonies', function ( $q) use ($date) {
+                    $query->whereHas('ceremonies', function ($q) use ($date) {
                         $q->whereDate('date', $date->toCarbon());
                     });
                     break;
