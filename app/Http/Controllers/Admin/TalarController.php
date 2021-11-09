@@ -79,4 +79,20 @@ class TalarController extends Controller
             'message' => 'حذف با موفقیت انجام شد'
         ]);
     }
+
+    /**
+     * @param Request $request
+     * @param Talar $talar
+     * @return \Illuminate\Http\Response
+     */
+    public function confirm(Request $request,Talar $talar): \Illuminate\Http\Response
+    {
+        $request->validate([
+            "status" => "required|numeric|max:3|digits:1"
+        ]);
+        $talar->update([
+            "status" => $request->input("status")
+        ]);
+        return response($talar);
+    }
 }

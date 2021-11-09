@@ -65,6 +65,22 @@ class GardenController extends Controller
     }
 
     /**
+     * @param Request $request
+     * @param Garden $garden
+     * @return \Illuminate\Http\Response
+     */
+    public function confirm(Request $request,Garden $garden): \Illuminate\Http\Response
+    {
+        $request->validate([
+            "status" => "required|numeric|max:3|digits:1"
+        ]);
+        $garden->update([
+            "status" => $request->input("status")
+        ]);
+        return response($garden);
+    }
+
+    /**
      * Remove the specified resource from storage.
      *
      * @param  \App\Models\Garden  $garden

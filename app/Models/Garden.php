@@ -11,7 +11,7 @@ class Garden extends Model
 {
     use HasFactory, QueryTools;
 
-    protected $fillable = ["name", "phone"];
+    protected $fillable = ["name", "phone", "status"];
 
     public function scopeRelatedSearch($query, $searchTerms)
     {

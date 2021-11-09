@@ -17,6 +17,7 @@ class CreateTalarsTable extends Migration
             $table->id();
             $table->string("name");
             $table->string("phone" , 11);
+            $table->enum('status' , \App\Models\StatusEnum::STATUS )->default(\App\Models\StatusEnum::STATUS[2]);//در انتظار سررسی
             $table->timestamps();
         });
     }

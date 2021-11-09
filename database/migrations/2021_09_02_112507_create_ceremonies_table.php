@@ -22,7 +22,7 @@ class CreateCeremoniesTable extends Migration
             $table->string("groom_phone");
             $table->string("groom_national_code");
             $table->timestamp("date");
-            $table->enum("status" , \App\Models\StatusEnum::STATUS)->default(\App\Models\StatusEnum::STATUS[0]);
+            $table->enum("status" , \App\Models\StatusEnum::STATUS)->default(\App\Models\StatusEnum::STATUS[1]);
             $table->timestamps();
         });
     }

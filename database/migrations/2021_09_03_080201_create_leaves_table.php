@@ -17,7 +17,7 @@ class CreateLeavesTable extends Migration
             $table->id();
             $table->timestamp('date_from');
             $table->timestamp('date_to')->nullable();
-            $table->enum('status' , \App\Models\StatusEnum::STATUS )->default(\App\Models\StatusEnum::STATUS[0]);//در انتظار سررسی
+            $table->enum('status' , \App\Models\StatusEnum::STATUS )->default(\App\Models\StatusEnum::STATUS[1]);//در انتظار سررسی
             $table->integer('user_id');
             $table->timestamps();
         });
