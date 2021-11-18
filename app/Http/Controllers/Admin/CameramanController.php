@@ -57,28 +57,28 @@ class CameramanController extends Controller
      * @param \App\Models\User $user
      * @return \Illuminate\Http\Response
      */
-    public function update(Request $request, User $user)
+    public function update(Request $request, User $cameraman)
     {
-        $request["type"] = User::USER_TYPE_KEY["فیلم بردار"];
         $fields = $request->validate([
             'name' => 'required|string',
             'last_name' => 'required|string',
             'atelier_id' => 'nullable|numeric',
-            'type' => 'required|numeric|digits:1',
             'gender' => 'required|numeric|digits:1',
-            'phone' => 'required|numeric|unique:users,phone,' . $user->id . '|digits:11',
-            'national_code' => 'required|string|unique:users,national_code,' . $user->id . '|digits:10',
+            'phone' => 'required|numeric|unique:users,phone,' . $cameraman->id . '|digits:11',
+            'national_code' => 'required|string|unique:users,national_code,' . $cameraman->id . '|digits:10',
         ]);
 
 
-        $user->update([
+        $cameraman->update([
             'name' => $fields['name'],
             'last_name' => $fields['last_name'],
             'gender' => $fields['gender'],
             'phone' => $fields['phone'],
             'national_code' => $fields['national_code'],
         ]);
-        return response($user);
+        $cameraman->roles()->sync($request->input('type'));
+        $cameraman->load('roles');
+        return response($cameraman);
     }
 
     /**

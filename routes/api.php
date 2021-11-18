@@ -38,8 +38,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::post("/ceremony/confirm/{ceremony}", [\App\Http\Controllers\Admin\CeremonyController::class, "confirm"]);
 
         Route::resource("talar",\App\Http\Controllers\Admin\TalarController::class);
+        Route::post("/talar/confirm/{talar}", [\App\Http\Controllers\Admin\TalarController::class, "confirm"]);
 
         Route::resource("garden",\App\Http\Controllers\Admin\GardenController::class);
+        Route::post("/garden/confirm/{garden}", [\App\Http\Controllers\Admin\GardenController::class, "confirm"]);
 
         Route::resource("leave",\App\Http\Controllers\Admin\LeaveController::class);
         Route::post("/leave/confirm/{leave}", [\App\Http\Controllers\Admin\LeaveController::class, "confirm"]);
