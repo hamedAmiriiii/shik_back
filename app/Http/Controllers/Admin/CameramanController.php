@@ -106,12 +106,14 @@ class CameramanController extends Controller
     /**
      * Remove the specified resource from storage.
      *
-     * @param \App\Models\User $user
+     * @param \App\Models\User $cameraman
      * @return \Illuminate\Http\Response
      */
-    public function destroy(User $user)
+    public function destroy(User $cameraman)
     {
-        $user->delete();
+        $cameraman->atelier()->delete();
+        $cameraman->roles()->detach();
+        $cameraman->delete();
         return response([
             'message' => "حذف با موفقیت انجام شد"
         ]);

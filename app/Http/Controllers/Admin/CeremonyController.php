@@ -68,7 +68,8 @@ class CeremonyController extends Controller
             "groom_full_name" => $request->input('groom_full_name'),
             "groom_phone" => $request->input('groom_phone'),
             "groom_national_code" => $request->input('groom_national_code'),
-            "date" => $date->toCarbon()
+            "date" => $date->toCarbon(),
+            "status" => 2
         ]);
 
         $ceremony->cameraman()->attach(array_merge($request->input('manCameraman'), $request->input('womanCameraman')));
@@ -76,6 +77,40 @@ class CeremonyController extends Controller
         $ceremony->photographer()->attach(array_merge($request->input('manPhotographer'), $request->input('womanPhotographer')));
 
         $ceremony->airCameraman()->attach(array_merge($request->input('manAirCameraman'), $request->input('womanAirCameraman')));
+
+        $text = "ثبت مراسم\n" .
+            "تاریخ : $ceremony->date \n" .
+            "اتلیه : " . $ceremony->atelier->name . "\n" .
+            "داماد: $ceremony->groom_full_name \n" .
+            "تالار : " . $ceremony->talar->name;
+
+        SmsTools::sendSms($ceremony->groom_phone, $text);
+        SmsTools::sendSms($ceremony->atelier->user->phone, $text . "\n آتلیه");
+        foreach ($ceremony->cameraman as $cameraman) {
+            SmsTools::sendSms($cameraman->phone, $text . "\n فیلم بردار");
+        }
+        foreach ($ceremony->photographer as $cameraman) {
+            SmsTools::sendSms($cameraman->phone, $text . "\n عکاس");
+        }
+        foreach ($ceremony->airCameraman as $cameraman) {
+            SmsTools::sendSms($cameraman->phone, $text . "\n فیلم بردار هوایی");
+        }
+        if ($ceremony->talar) {
+            $text .= "\n" . "فیلم برداران" . "\n";
+            foreach ($ceremony->cameraman as $cameraman) {
+                $text .= $cameraman->name . $cameraman->last_name . "\n";
+            }
+            foreach ($ceremony->photographer as $cameraman) {
+                $text .= $cameraman->name . $cameraman->last_name . "\n";
+            }
+            foreach ($ceremony->airCameraman as $cameraman) {
+                $text .= $cameraman->name . $cameraman->last_name . "\n";
+            }
+            SmsTools::sendSms($ceremony->talar->phone, $text);
+        }
+        if ($ceremony->garden) {
+            SmsTools::sendSms($ceremony->garden->phone, $text);
+        }
 
         return response($ceremony, 201);
     }

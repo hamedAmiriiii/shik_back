@@ -33,6 +33,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
         Route::resource("cameraman", \App\Http\Controllers\Admin\CameramanController::class);
         Route::post("/cameraman/confirm/{cameraman}", [\App\Http\Controllers\Admin\CameramanController::class, "confirm"]);
+        Route::post("/cameraman/reset-password/{cameraman}", [\App\Http\Controllers\Admin\CameramanController::class, "resetPassword"]);
 
         Route::resource("ceremony", \App\Http\Controllers\Admin\CeremonyController::class);
         Route::post("/ceremony/confirm/{ceremony}", [\App\Http\Controllers\Admin\CeremonyController::class, "confirm"]);
@@ -51,6 +52,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
     Route::name('cameraman.')->prefix('cameraman')->group(function () {
         Route::resource("leave", \App\Http\Controllers\Cameraman\LeaveController::class);
+        Route::post("/profile/reset-password", [\App\Http\Controllers\Cameraman\ProfileController::class,"resetPassword"]);
     });
 
     Route::name('atelier.')->prefix('atelier')->group(function () {
@@ -58,6 +60,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::resource("garden", \App\Http\Controllers\Atelier\GardenController::class)->only("index");
         Route::resource("cameraman", \App\Http\Controllers\Atelier\CameramanController::class)->only("index");
         Route::resource("ceremony", \App\Http\Controllers\Atelier\CeremonyController::class);
+        Route::post("/profile/reset-password", [\App\Http\Controllers\Atelier\ProfileController::class, "resetPassword"]);
+
     });
 });
 

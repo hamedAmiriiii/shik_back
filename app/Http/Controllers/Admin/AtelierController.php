@@ -119,6 +119,7 @@ class AtelierController extends Controller
     public function destroy(User $atelier)
     {
         $atelier->atelier()->delete();
+        $atelier->roles()->detach();
         $atelier->delete();
         return response([
             'message' => "حذف با موفقیت انجام شد"
