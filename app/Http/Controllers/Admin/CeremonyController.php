@@ -195,7 +195,7 @@ class CeremonyController extends Controller
             "status" => $request->input("status")
         ]);
         if ($request->input("status") == 2) {
-            $text = "ثبت مراسم\n" .
+            /*$text = "ثبت مراسم\n" .
                 "تاریخ : $ceremony->date \n" .
                 "اتلیه : " . $ceremony->atelier->name . "\n" .
                 "داماد: $ceremony->groom_full_name \n" .
@@ -227,7 +227,7 @@ class CeremonyController extends Controller
             }
             if ($ceremony->garden) {
                 SmsTools::sendSms($ceremony->garden->phone, $text);
-            }
+            }*/
         } else {
             $text = "عدم تایید مراسم\n" .
                 "تاریخ : $ceremony->date \n" .

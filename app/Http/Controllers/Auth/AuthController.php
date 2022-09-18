@@ -35,6 +35,16 @@ class AuthController extends Controller
         $user = User::where('phone', $fields
         ['phone'])->where('national_code', $fields['national_code'])->first();
         if (!$user) {
+            $user = User::where('phone', $fields
+            ['phone'])->first();
+            if ($user){
+                return response("error" , 422);
+            }
+            $user = User::where('national_code', $fields['national_code'])->first();
+            if ($user){
+                return response("error" , 422);
+            }
+
             $user = User::create([
                 'name' => $fields['name'],
                 'last_name' => $fields['last_name'],

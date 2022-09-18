@@ -6,6 +6,7 @@ namespace App\Tools;
 use App\Models\LogSms;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
+use Kavenegar;
 
 class SmsTools
 {
@@ -21,14 +22,14 @@ class SmsTools
     public static function sendSms(string $receivers, string $text)
     {
         $response = Http::get('http://api.shinapayamak.ir/v1/' . self::API_TOKEN . '/sms/send.json', [
-            'gateway' => '200020003000',
+            'gateway' => '300071432',
             'to' => $receivers,
             'text' => $text
         ]);
 
         LogSms::create([
             "text" => $text,
-            "number" => '1000081290',
+            "number" => '1000528554',
             "receivers" => $receivers,
             "creator_id" => Auth::id()
         ]);
@@ -36,4 +37,31 @@ class SmsTools
         return $response->json();
     }
 
+    public static function sendSmsK(string $receivers, string $text)
+    {
+        try {
+            $result = Kavenegar::Send("10006007005000", $receivers, $text);
+            if ($result) {
+                foreach ($result as $r) {
+                    echo "messageid = $r->messageid";
+                    echo "message = $r->message";
+                    echo "status = $r->status";
+                    echo "statustext = $r->statustext";
+                    echo "sender = $r->sender";
+                    echo "receptor = $r->receptor";
+                    echo "date = $r->date";
+                    echo "cost = $r->cost";
+                }
+            }
+            return $result;
+        } catch (\Kavenegar\Exceptions\ApiException $e) {
+            // در صورتی که خروجی وب سرویس 200 نباشد این خطا رخ می دهد
+            echo $e->errorMessage();
+        } catch
+        (\Kavenegar\Exceptions\HttpException $e) {
+            // در زمانی که مشکلی در برقرای ارتباط با وب سرویس وجود داشته باشد این خطا رخ می دهد
+            echo $e->errorMessage();
+        }
+
+    }
 }
