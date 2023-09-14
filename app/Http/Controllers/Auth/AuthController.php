@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Atelier;
 use App\Models\User;
 use App\Tools\ImageTools;
+use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 
@@ -29,6 +30,7 @@ class AuthController extends Controller
             'business_license' => 'required_if:type,' . User::USER_TYPE_KEY["آتلیه دار"] . '|string',
             'personality_image' => 'required|string',
             'birth_certificate' => 'required|string',
+            'tech_certificate' => 'required_if:type,' . User::USER_TYPE_KEY["فیلم بردار"] . '|string',
             'national_cart' => 'required|string',
         ]);
 
@@ -128,5 +130,30 @@ class AuthController extends Controller
         return [
             'message' => 'Logged out'
         ];
+    }
+
+    public function resetPassword(Request $request){
+        $fields = $request->validate([
+            'username' => 'required|string|digits:11',
+            'nationalCode' => 'required|string|digits:10'
+        ]);
+        $user = User::where('phone', $fields['username'])->where('national_code',$fields['nationalCode'])->first();
+
+        if (!$user){
+            return response([
+                'message' => "کاربر یافت نشد"
+            ], 400);
+        }
+        $password = mt_rand(100000, 999999);
+
+        $text = "رمز عبور شما : $password";
+        $user->update([
+            "password" => Hash::make($password)
+        ]);
+        $balance = SmsTools::sendSms($user->phone, $text);
+        return response([
+            'message' => 'پسوورد ارسال شد',
+            'smsResult' => $balance
+        ], 201);
     }
 }

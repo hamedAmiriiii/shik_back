@@ -20,6 +20,13 @@ Route::name('auth.')->prefix('auth')->group(function () {
     Route::get('atelier', [\App\Http\Controllers\Auth\AtelierController::class, 'index']);
 });
 
+Route::name('resetPassword.')->prefix('reset-password')->group(function () {
+    Route::get("/test" , function () {
+       return "tesgt";
+    });
+    Route::post('', [\App\Http\Controllers\Auth\AuthController::class,'resetPassword']);
+});
+
 Route::name('confirmationCode.')->prefix('confirmation-code')->group(function () {
     Route::post('create', [\App\Http\Controllers\ConfirmationCode\ConfirmationCodeController::class, 'store']);
     Route::post('check', [\App\Http\Controllers\ConfirmationCode\ConfirmationCodeController::class, 'check']);
@@ -38,21 +45,21 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::resource("ceremony", \App\Http\Controllers\Admin\CeremonyController::class);
         Route::post("/ceremony/confirm/{ceremony}", [\App\Http\Controllers\Admin\CeremonyController::class, "confirm"]);
 
-        Route::resource("talar",\App\Http\Controllers\Admin\TalarController::class);
+        Route::resource("talar", \App\Http\Controllers\Admin\TalarController::class);
         Route::post("/talar/confirm/{talar}", [\App\Http\Controllers\Admin\TalarController::class, "confirm"]);
 
-        Route::resource("garden",\App\Http\Controllers\Admin\GardenController::class);
+        Route::resource("garden", \App\Http\Controllers\Admin\GardenController::class);
         Route::post("/garden/confirm/{garden}", [\App\Http\Controllers\Admin\GardenController::class, "confirm"]);
 
-        Route::resource("leave",\App\Http\Controllers\Admin\LeaveController::class);
+        Route::resource("leave", \App\Http\Controllers\Admin\LeaveController::class);
         Route::post("/leave/confirm/{leave}", [\App\Http\Controllers\Admin\LeaveController::class, "confirm"]);
 
-        Route::resource("/log-sms",\App\Http\Controllers\Admin\LogSmsController::class)->only("index");
+        Route::resource("/log-sms", \App\Http\Controllers\Admin\LogSmsController::class)->only("index");
     });
 
     Route::name('cameraman.')->prefix('cameraman')->group(function () {
         Route::resource("leave", \App\Http\Controllers\Cameraman\LeaveController::class);
-        Route::post("/profile/reset-password", [\App\Http\Controllers\Cameraman\ProfileController::class,"resetPassword"]);
+        Route::post("/profile/reset-password", [\App\Http\Controllers\Cameraman\ProfileController::class, "resetPassword"]);
     });
 
     Route::name('atelier.')->prefix('atelier')->group(function () {
