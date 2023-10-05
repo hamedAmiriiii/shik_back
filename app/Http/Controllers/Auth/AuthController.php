@@ -59,6 +59,8 @@ class AuthController extends Controller
                     ImageTools::saveFile($fields['national_code'] . "/personality_image.jpeg", base64_decode(explode(",", $request->input("personality_image"))[1])),
                 'birth_certificate' =>
                     ImageTools::saveFile($fields['national_code'] . "/birth_certificate.jpeg", base64_decode(explode(",", $request->input("birth_certificate"))[1])),
+                'tech_certificate' =>
+                    ImageTools::saveFile($fields['tech_certificate'] . "/tech_certificate.jpeg", base64_decode(explode(",", $request->input("tech_certificate"))[1])),
                 'national_cart' =>
                     ImageTools::saveFile($fields['national_code'] . "/national_code.jpeg", base64_decode(explode(",", $request->input("national_cart"))[1]))
             ]);
