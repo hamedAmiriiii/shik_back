@@ -78,6 +78,11 @@ class User extends Authenticatable
         return Storage::url($value);
     }
 
+    public function getTechCertificateAttribute($value): string
+    {
+        return Storage::url($value);
+    }
+
     public function getNationalCartAttribute($value): string
     {
         return Storage::url($value);
