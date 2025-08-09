@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\ProductController;
 
 /*
 |--------------------------------------------------------------------------
@@ -21,10 +22,7 @@ Route::name('auth.')->prefix('auth')->group(function () {
 });
 
 Route::name('resetPassword.')->prefix('reset-password')->group(function () {
-    Route::get("/test" , function () {
-       return "tesgt";
-    });
-    Route::post('', [\App\Http\Controllers\Auth\AuthController::class,'resetPassword']);
+    Route::post('', [\App\Http\Controllers\Auth\AuthController::class, 'resetPassword']);
 });
 
 Route::name('confirmationCode.')->prefix('confirmation-code')->group(function () {
@@ -32,8 +30,22 @@ Route::name('confirmationCode.')->prefix('confirmation-code')->group(function ()
     Route::post('check', [\App\Http\Controllers\ConfirmationCode\ConfirmationCodeController::class, 'check']);
 });
 
+
+Route::prefix('purchased-products')->name('purchased-products.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\PurchasedProductController::class, 'index']);
+    Route::post('/', [\App\Http\Controllers\PurchasedProductController::class, 'store']);
+    Route::get('/{purchasedProduct}', [\App\Http\Controllers\PurchasedProductController::class, 'show']);
+    Route::put('/{purchasedProduct}', [\App\Http\Controllers\PurchasedProductController::class, 'update']);
+    Route::delete('/{purchasedProduct}', [\App\Http\Controllers\PurchasedProductController::class, 'destroy']);
+});
+
+
+Route::resource("product", ProductController::class);
 Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::name('admin.')->prefix('admin')->group(function () {
+        
+        // اضافه کردن روت‌های مدیریت محصولات
+        
 
         Route::resource("atelier", \App\Http\Controllers\Admin\AtelierController::class);
         Route::post("/atelier/confirm/{atelier}", [\App\Http\Controllers\Admin\AtelierController::class, "confirm"]);
@@ -68,7 +80,6 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::resource("cameraman", \App\Http\Controllers\Atelier\CameramanController::class)->only("index");
         Route::resource("ceremony", \App\Http\Controllers\Atelier\CeremonyController::class);
         Route::post("/profile/reset-password", [\App\Http\Controllers\Atelier\ProfileController::class, "resetPassword"]);
-
     });
 });
 
