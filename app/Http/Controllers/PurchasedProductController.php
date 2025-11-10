@@ -4,40 +4,65 @@ namespace App\Http\Controllers;
 
 use App\Models\PurchasedProduct;
 use App\Models\Product;
-use App\Models\CustomerPhone;
 use Illuminate\Http\Request;
-use App\Tools\SmsTools;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
+// use App\Tools\SmsTools;
 
 
 class PurchasedProductController extends Controller
 {
-    public function index()
-    {
-        return response(PurchasedProduct::with('product')->orderBy('id', 'desc')->paginate(), 200);
+    public function index(Request $request)
+{
+    $query = PurchasedProduct::with('product')->orderBy('id', 'desc');
+
+    // فیلتر تاریخ
+    if ($request->has('filter')) {
+        if ($request->filter === 'today') {
+            $query->whereDate('created_at', Carbon::today());
+        } elseif ($request->filter === 'month') {
+            $query->whereMonth('created_at', Carbon::now()->month)
+                  ->whereYear('created_at', Carbon::now()->year);
+        }
     }
+
+    $items = $query->paginate();
+
+    // محاسبه مجموع قیمت خرید برای آیتم‌های این صفحه
+    $total = PurchasedProduct::whereIn('id', $items->pluck('id'))
+        ->select(DB::raw('SUM(quantity * purchase_price) as total'))
+        ->value('total');
+
+    // اضافه کردن به meta به شکل درست
+    $items->withPath(url()->current()); // حفظ مسیر URL
+
+    // اضافه کردن custom meta
+    $itemsArray = $items->toArray();
+    $itemsArray['total_purchase_price'] = $total;
+
+    return response($itemsArray, 200);
+}
+
 
     public function store(Request $request)
     {
         $request->validate([
-            'phone'=>'required',
+                        // 'phone'=>'required',
             'products' => 'required|array|min:1',
             'products.*.product_id' => 'required|exists:products,id',
             'products.*.quantity' => 'required|integer|min:1',
             'products.*.purchase_price' => 'required|numeric|min:0',
         ]);
 
+
         $purchasedProducts = [];
 
         foreach ($request->input('products') as $productData) {
             $purchasedProducts[] = PurchasedProduct::create($productData);
         }
+//  $text = "با تشکر از خرید شما";
 
-        CustomerPhone::createNewPhone($request->get("phone"));
-
-        $text = "با تشکر از خرید شما";
-
-    SmsTools::sendSms($phone, $text);
-
+//     SmsTools::sendSms($phone, $text);
         return response($purchasedProducts, 201);
     }
 
