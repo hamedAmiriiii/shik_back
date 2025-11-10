@@ -4,7 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\PurchasedProduct;
 use App\Models\Product;
+use App\Models\CustomerPhone;
 use Illuminate\Http\Request;
+use App\Tools\SmsTools;
+
 
 class PurchasedProductController extends Controller
 {
@@ -16,6 +19,7 @@ class PurchasedProductController extends Controller
     public function store(Request $request)
     {
         $request->validate([
+            'phone'=>'required',
             'products' => 'required|array|min:1',
             'products.*.product_id' => 'required|exists:products,id',
             'products.*.quantity' => 'required|integer|min:1',
@@ -27,6 +31,12 @@ class PurchasedProductController extends Controller
         foreach ($request->input('products') as $productData) {
             $purchasedProducts[] = PurchasedProduct::create($productData);
         }
+
+        CustomerPhone::createNewPhone($request->get("phone"));
+
+        $text = "با تشکر از خرید شما";
+
+    SmsTools::sendSms($phone, $text);
 
         return response($purchasedProducts, 201);
     }
