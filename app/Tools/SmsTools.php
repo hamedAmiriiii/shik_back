@@ -22,9 +22,9 @@ class SmsTools
     public static function sendSms(string $receivers, string $text)
     {
         $response = Http::get('http://api.shinapayamak.ir/v1/' . self::API_TOKEN . '/sms/send.json', [
-            'gateway' => '300071432',
+            'gateway' => '90003002',
             'to' => $receivers,
-            'text' => $text
+            'text' => $text . " \n لغو11"
         ]);
 
         LogSms::create([
@@ -40,7 +40,7 @@ class SmsTools
     public static function sendSmsK(string $receivers, string $text)
     {
         try {
-            $result = Kavenegar::Send("10006007005000", $receivers, $text);
+            $result = Kavenegar::Send("500031430320", $receivers, $text);
             if ($result) {
                 foreach ($result as $r) {
                     echo "messageid = $r->messageid";
