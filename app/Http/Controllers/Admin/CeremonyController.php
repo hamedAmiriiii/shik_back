@@ -19,11 +19,34 @@ class CeremonyController extends Controller
      */
     public function index(Request $request)
     {
+        $user = auth()->user();
         $searchDataModel = json_decode($request->input('searchFilterModel'));
-        $ceremonies = Ceremony::search($searchDataModel)
-            ->with(['talar', 'garden', 'atelier'])
-            ->orderBy('id', 'desc')
-            ->paginate();
+        
+        $query = Ceremony::query()
+            ->with(['talar', 'garden', 'atelier']);
+
+        // فیلتر شهر برای همه کاربران (حتی ادمین‌ها) اعمال می‌شود
+        if ($user->city_id) {
+            $query->whereHas('talar', function($q) use ($user) {
+                $q->where('city_id', $user->city_id);
+            })->orWhereHas('garden', function($q) use ($user) {
+                $q->where('city_id', $user->city_id);
+            });
+        }
+
+        // اگر جستجو وجود داشت، اعمال می‌شود
+        if ($searchDataModel) {
+            if (is_object($searchDataModel)) {
+                if (isset($searchDataModel->groom_full_name)) {
+                    $query->where('groom_full_name', 'like', '%' . $searchDataModel->groom_full_name . '%');
+                }
+                if (isset($searchDataModel->groom_phone)) {
+                    $query->orWhere('groom_phone', 'like', '%' . $searchDataModel->groom_phone . '%');
+                }
+            }
+        }
+
+        $ceremonies = $query->orderBy('id', 'desc')->paginate();
         return response($ceremonies);
     }
 
