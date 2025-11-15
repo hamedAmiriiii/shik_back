@@ -16,8 +16,14 @@ class TalarController extends Controller
      */
     public function index(Request $request)
     {
-        //$searchDataModel = json_decode($request->input('searchFilterModel'));
-        $talars = Talar::relatedSearch($request)->orderBy('id', 'desc')->paginate();
+        $query = Talar::query();
+        
+        // If user is not a super admin, filter by city
+        if (!auth()->user()->hasRole('super-admin') && auth()->user()->city_id) {
+            $query->where('city_id', auth()->user()->city_id);
+        }
+        
+        $talars = $query->relatedSearch($request)->orderBy('id', 'desc')->paginate();
         return response($talars);
     }
 
@@ -33,6 +39,12 @@ class TalarController extends Controller
             "name" => "required|string|max:255",
             "phone" => "required|numeric|digits:11"
         ]);
+        
+        // Add city_id from authenticated user
+        if (auth()->check() && auth()->user()->city_id) {
+            $fields['city_id'] = auth()->user()->city_id;
+        }
+        
         $talar = Talar::create($fields);
         return response($talar, 201);
     }
@@ -62,6 +74,15 @@ class TalarController extends Controller
             "name" => "required|string|max:255",
             "phone" => "required|numeric|digits:11"
         ]);
+        
+        // Only allow updating city_id if user is admin
+        if (auth()->user()->hasRole('ادمین') && $request->has('city_id')) {
+            $fields['city_id'] = $request->input('city_id');
+        } elseif (auth()->user()->city_id) {
+            // Non-admin users can't change the city_id
+            $fields['city_id'] = $talar->city_id;
+        }
+        
         $talar->update($fields);
         return response($talar);
     }

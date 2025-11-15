@@ -59,17 +59,16 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::post("/cameraman/confirm/{cameraman}", [\App\Http\Controllers\Admin\CameramanController::class, "confirm"]);
         Route::post("/cameraman/reset-password/{cameraman}", [\App\Http\Controllers\Admin\CameramanController::class, "resetPassword"]);
 
-        Route::resource("ceremony", \App\Http\Controllers\Admin\CeremonyController::class);
-        Route::post("/ceremony/confirm/{ceremony}", [\App\Http\Controllers\Admin\CeremonyController::class, "confirm"]);
+        Route::middleware(['city.access'])->group(function () {
+            Route::resource("ceremony", \App\Http\Controllers\Admin\CeremonyController::class);
+            Route::post("/ceremony/confirm/{ceremony}", [\App\Http\Controllers\Admin\CeremonyController::class, "confirm"]);
 
-        Route::resource("talar", \App\Http\Controllers\Admin\TalarController::class);
-        Route::post("/talar/confirm/{talar}", [\App\Http\Controllers\Admin\TalarController::class, "confirm"]);
+            Route::resource("talar", \App\Http\Controllers\Admin\TalarController::class);
+            Route::post("/talar/confirm/{talar}", [\App\Http\Controllers\Admin\TalarController::class, "confirm"]);
 
-        Route::resource("garden", \App\Http\Controllers\Admin\GardenController::class);
-        Route::post("/garden/confirm/{garden}", [\App\Http\Controllers\Admin\GardenController::class, "confirm"]);
-
-        Route::resource("leave", \App\Http\Controllers\Admin\LeaveController::class);
-        Route::post("/leave/confirm/{leave}", [\App\Http\Controllers\Admin\LeaveController::class, "confirm"]);
+            Route::resource("garden", \App\Http\Controllers\Admin\GardenController::class);
+            Route::post("/garden/confirm/{garden}", [\App\Http\Controllers\Admin\GardenController::class, "confirm"]);
+        });
 
         Route::resource("/log-sms", \App\Http\Controllers\Admin\LogSmsController::class)->only("index");
     });
