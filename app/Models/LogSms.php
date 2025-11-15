@@ -11,6 +11,12 @@ class LogSms extends Model
     use HasFactory,QueryTools;
 
     protected $fillable = [
-        "text" , "number" , "receivers" , "creator_id"
+        "text", "number", "receivers", "creator_id"
     ];
+
+  
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'creator_id');
+    }
 }

@@ -15,7 +15,21 @@ class LogSmsController extends Controller
      */
     public function index()
     {
-        $logSms = LogSms::orderBy('id', 'desc')->paginate();
+        $user = auth()->user();
+        
+        $query = LogSms::query();
+
+        // فیلتر شهر برای همه کاربران (حتی ادمین‌ها) اعمال می‌شود
+        if ($user->city_id) {
+            $query->whereHas('creator', function($q) use ($user) {
+                $q->where('city_id', $user->city_id);
+            });
+        }
+
+        $logSms = $query->with('creator')
+                       ->orderBy('id', 'desc')
+                       ->paginate();
+                       
         return response($logSms);
     }
 
