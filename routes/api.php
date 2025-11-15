@@ -68,6 +68,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
             Route::resource("garden", \App\Http\Controllers\Admin\GardenController::class);
             Route::post("/garden/confirm/{garden}", [\App\Http\Controllers\Admin\GardenController::class, "confirm"]);
+
+            // مدیریت مرخصی‌ها
+            Route::resource("leave", \App\Http\Controllers\Admin\LeaveController::class)->only(["index", "update", "show"]);
+            Route::post("/leave/confirm/{leave}", [\App\Http\Controllers\Admin\LeaveController::class, "confirm"]);
         });
 
         Route::resource("/log-sms", \App\Http\Controllers\Admin\LogSmsController::class)->only("index");
