@@ -19,10 +19,38 @@ class AtelierController extends Controller
      */
     public function index(Request $request)
     {
-        $searchDataModel = json_decode($request->input('searchFilterModel'));
-        $users = User::search($searchDataModel)->whereHas("roles", function (Builder $query) {
-            $query->where('id', User::USER_TYPE_KEY["آتلیه دار"]);
-        })->with(['atelier' , 'roles'])->orderBy('id', 'desc')->paginate();
+        $user = auth()->user();
+        
+        $query = User::whereHas("roles", function($q) {
+            $q->where('id', User::USER_TYPE_KEY["آتلیه دار"]);
+        })->with(['atelier', 'roles']);
+
+        // فیلتر شهر برای همه کاربران (حتی ادمین‌ها) اعمال می‌شود
+        if ($user->city_id) {
+            $query->whereHas('atelier', function($q) use ($user) {
+                $q->where('city_id', $user->city_id);
+            });
+        }
+
+        // جستجو
+        if ($search = $request->input('searchFilterModel')) {
+            $searchData = json_decode($search, true);
+            $query->where(function($q) use ($searchData) {
+                if (is_array($searchData)) {
+                    if (isset($searchData['name'])) {
+                        $q->where('name', 'like', '%' . $searchData['name'] . '%');
+                    }
+                    if (isset($searchData['phone'])) {
+                        $q->orWhere('phone', 'like', '%' . $searchData['phone'] . '%');
+                    }
+                } else {
+                    $q->where('name', 'like', '%' . $searchData . '%')
+                      ->orWhere('phone', 'like', '%' . $searchData . '%');
+                }
+            });
+        }
+
+        $users = $query->orderBy('id', 'desc')->paginate();
         return response($users);
     }
 
@@ -35,7 +63,25 @@ class AtelierController extends Controller
     public function store(Request $request)
     {
         $request['type'] = 2;
-        return (new AuthController)->register($request);
+        $response = (new AuthController)->register($request);
+        
+        // If the user was created successfully, update their city_id
+        if ($response->getStatusCode() === 201) {
+            $userData = json_decode($response->content(), true);
+            $user = User::find($userData['user']['id']);
+            
+            if ($user && auth()->user()->city_id) {
+                $user->update(['city_id' => auth()->user()->city_id]);
+                
+                // Reload the user with updated data
+                $user->load('atelier', 'roles');
+                
+                // Return the updated user data
+                return response($user, 201);
+            }
+        }
+        
+        return $response;
     }
 
     /**
