@@ -21,7 +21,7 @@ Route::name('auth.')->prefix('auth')->group(function () {
     Route::get('atelier', [\App\Http\Controllers\Auth\AtelierController::class, 'index']);
 });
 
-Route::name('geo.').prefix('geo')->group(function (){
+Route::name('geo.')->prefix('geo')->group(function (){
     Route::get('cities' , [\App\Http\Controllers\CityController::class,'index']);
     Route::get('states' , [\App\Http\Controllers\StateController::class,'index']);
 });
