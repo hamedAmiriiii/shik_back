@@ -11,7 +11,7 @@ class Talar extends Model
 {
     use HasFactory, QueryTools;
 
-    protected $fillable = ["name", "phone" , "status"];
+    protected $fillable = ["name", "phone" , "status","city_id"];
 
     public function scopeRelatedSearch($query, $searchTerms)
     {
