@@ -17,7 +17,18 @@ class TalarController extends Controller
     public function index(Request $request)
     {
         $searchDataModel = json_decode($request->input('searchFilterModel'));
-        $talars = Talar::search($searchDataModel)->where("status" , StatusEnum::STATUS_KEYS["تایید شده"])->orderBy('id', 'desc')->get();
+        $user = auth()->user();
+        
+        $query = Talar::where("status", StatusEnum::STATUS_KEYS["تایید شده"]);
+        
+        if ($user->city_id) {
+            $query->where('city_id', $user->city_id);
+        }
+        
+        $talars = $query->search($searchDataModel)
+            ->orderBy('id', 'desc')
+            ->get();
+            
         return response($talars);
     }
 }

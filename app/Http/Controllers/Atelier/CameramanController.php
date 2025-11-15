@@ -34,6 +34,9 @@ class CameramanController extends Controller
                     ->orWhere('atelier_id', Auth::user()->atelier_id);
             })
             ->where("role_user.status", 2)
+            ->when(Auth::user()->city_id, function($query) {
+                $query->where('users.city_id', Auth::user()->city_id);
+            })
             ->whereNotIn('users.id', function ($query) use ($date) {
                 $query->select("user_id")->from("ceremony_cameraman")
                     ->join("ceremonies", "ceremony_id", "=", "ceremonies.id")
