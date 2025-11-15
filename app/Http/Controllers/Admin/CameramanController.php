@@ -19,10 +19,37 @@ class CameramanController extends Controller
      */
     public function index(Request $request)
     {
+        $user = auth()->user();
         $searchDataModel = json_decode($request->input('searchFilterModel'));
-        $users = User::search($searchDataModel)->whereHas("roles", function (Builder $query) {
-            $query->whereIn('id', [User::USER_TYPE_KEY["فیلم بردار"] , User::USER_TYPE_KEY["فیلم بردار هوایی"] , User::USER_TYPE_KEY["عکاس"]]);
-        })->with(['atelier', 'roles'])->orderBy('id', 'desc')->paginate();
+        
+        $query = User::whereHas("roles", function (Builder $query) {
+            $query->whereIn('id', [
+                User::USER_TYPE_KEY["فیلم بردار"],
+                User::USER_TYPE_KEY["فیلم بردار هوایی"],
+                User::USER_TYPE_KEY["عکاس"]
+            ]);
+        })->with(['atelier', 'roles']);
+
+        // فیلتر شهر برای همه کاربران (حتی ادمین‌ها) اعمال می‌شود
+        if ($user->city_id) {
+            $query->where('city_id', $user->city_id);
+        }
+
+        // اگر جستجو وجود داشت، اعمال می‌شود
+        if ($searchDataModel) {
+            $query->where(function($q) use ($searchDataModel) {
+                if (is_object($searchDataModel)) {
+                    if (isset($searchDataModel->name)) {
+                        $q->where('name', 'like', '%' . $searchDataModel->name . '%');
+                    }
+                    if (isset($searchDataModel->phone)) {
+                        $q->orWhere('phone', 'like', '%' . $searchDataModel->phone . '%');
+                    }
+                }
+            });
+        }
+
+        $users = $query->orderBy('id', 'desc')->paginate();
         return response($users);
     }
 
