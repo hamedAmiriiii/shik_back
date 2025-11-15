@@ -12,9 +12,16 @@ class CityController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function index()
+    public function index(Request $request)
     {
-        $cities = City::all();
+        $stateId = $request->query('state_id');
+        
+        if ($stateId) {
+            $cities = City::where('state_id', $stateId)->get();
+        } else {
+            $cities = City::all();
+        }
+        
         return Response($cities);
     }
 

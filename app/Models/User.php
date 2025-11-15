@@ -20,7 +20,7 @@ class User extends Authenticatable
      */
     protected $fillable = [
         'name', 'last_name', 'national_code', 'phone', 'atelier_id', 'password', 'gender',
-        'personality_image', 'birth_certificate', 'national_cart' , 'tech_certificate'
+        'personality_image', 'birth_certificate', 'national_cart' , 'tech_certificate', 'city_id'
     ];
 
     /**
@@ -91,6 +91,11 @@ class User extends Authenticatable
     public function atelier()
     {
         return $this->belongsTo(Atelier::class);
+    }
+
+    public function city()
+    {
+        return $this->belongsTo(City::class);
     }
 
     /**
