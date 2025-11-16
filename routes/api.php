@@ -79,6 +79,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
     Route::name('cameraman.')->prefix('cameraman')->group(function () {
         Route::resource("leave", \App\Http\Controllers\Cameraman\LeaveController::class);
+        Route::resource("ceremony", \App\Http\Controllers\Cameraman\CeremonyController::class)->only(['index']);
         Route::post("/profile/reset-password", [\App\Http\Controllers\Cameraman\ProfileController::class, "resetPassword"]);
     });
 
