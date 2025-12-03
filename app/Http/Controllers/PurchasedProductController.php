@@ -7,6 +7,7 @@ use App\Models\Product;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Morilog\Jalali\Jalalian;
 // use App\Tools\SmsTools;
 
 
@@ -20,9 +21,28 @@ class PurchasedProductController extends Controller
     if ($request->has('filter')) {
         if ($request->filter === 'today') {
             $query->whereDate('created_at', Carbon::today());
+        } elseif ($request->filter === 'week') {
+            // فیلتر هفته شمسی (شنبه تا جمعه)
+            $now = Jalalian::now();
+            $dayOfWeek = $now->getDayOfWeek(); // 0 = شنبه, 6 = جمعه
+            $startOfWeek = Jalalian::now()->subDays($dayOfWeek)->toCarbon()->startOfDay();
+            $endOfWeek = Jalalian::now()->addDays(6 - $dayOfWeek)->toCarbon()->endOfDay();
+            $query->whereBetween('created_at', [$startOfWeek, $endOfWeek]);
         } elseif ($request->filter === 'month') {
             $query->whereMonth('created_at', Carbon::now()->month)
                   ->whereYear('created_at', Carbon::now()->year);
+        } elseif ($request->filter === 'range') {
+            // فیلتر بازه تاریخ شمسی
+            if ($request->has('from_date')) {
+                $fromDate = json_decode($request->input('from_date'));
+                $fromCarbon = (new Jalalian($fromDate->year, $fromDate->month, $fromDate->day))->toCarbon()->startOfDay();
+                $query->where('created_at', '>=', $fromCarbon);
+            }
+            if ($request->has('to_date')) {
+                $toDate = json_decode($request->input('to_date'));
+                $toCarbon = (new Jalalian($toDate->year, $toDate->month, $toDate->day))->toCarbon()->endOfDay();
+                $query->where('created_at', '<=', $toCarbon);
+            }
         }
     }
 

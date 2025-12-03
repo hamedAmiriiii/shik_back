@@ -51,7 +51,7 @@ class ProductController extends Controller
             "purchase_price" => "required|numeric|min:0",
             "sale_price" => "required|numeric|min:0",
             "quantity" => "required|integer|min:0",
-            'barcode' => 'required|string|unique:products|max:255',
+            'barcode' => 'required|string|unique:products,barcode,' . $product->id . '|max:255',
         ]);
 
         $product->update($fields);

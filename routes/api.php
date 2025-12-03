@@ -36,6 +36,12 @@ Route::name('confirmationCode.')->prefix('confirmation-code')->group(function ()
 });
 
 
+Route::prefix('reports')->name('reports.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\ReportController::class, 'index']);
+});
+
+Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);
+
 Route::prefix('purchased-products')->name('purchased-products.')->group(function () {
     Route::get('/', [\App\Http\Controllers\PurchasedProductController::class, 'index']);
     Route::post('/', [\App\Http\Controllers\PurchasedProductController::class, 'store']);
