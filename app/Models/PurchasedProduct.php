@@ -10,7 +10,13 @@ class PurchasedProduct extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['product_id', 'quantity', 'purchase_price'];
+    protected $fillable = ['product_id', 'quantity', 'purchase_price', 'phone', 'total_amount', 'credit_used', 'credit_earned'];
+
+    protected $casts = [
+        'total_amount' => 'decimal:2',
+        'credit_used' => 'decimal:2',
+        'credit_earned' => 'decimal:2',
+    ];
 
     public function getCreatedAtAttribute($value): string
     {

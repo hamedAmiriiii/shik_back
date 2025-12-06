@@ -45,6 +45,7 @@ Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);
 Route::prefix('purchased-products')->name('purchased-products.')->group(function () {
     Route::get('/', [\App\Http\Controllers\PurchasedProductController::class, 'index']);
     Route::post('/', [\App\Http\Controllers\PurchasedProductController::class, 'store']);
+    Route::get('/credit', [\App\Http\Controllers\PurchasedProductController::class, 'getCreditByPhone']);
     Route::get('/{purchasedProduct}', [\App\Http\Controllers\PurchasedProductController::class, 'show']);
     Route::put('/{purchasedProduct}', [\App\Http\Controllers\PurchasedProductController::class, 'update']);
     Route::delete('/{purchasedProduct}', [\App\Http\Controllers\PurchasedProductController::class, 'destroy']);
