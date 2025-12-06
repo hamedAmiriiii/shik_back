@@ -74,17 +74,36 @@ class PurchasedProductController extends Controller
             'products' => 'required|array|min:1',
             'products.*.product_id' => 'required|exists:products,id',
             'products.*.quantity' => 'required|integer|min:1',
-            'products.*.purchase_price' => 'required|numeric|min:0',
             'use_credit' => 'nullable|boolean', // آیا کاربر می‌خواهد از اعتبارش استفاده کند؟
         ]);
 
         $phone = $request->input('phone');
         $useCredit = $request->input('use_credit', false);
         
-        // محاسبه مجموع مبلغ خرید (قبل از تخفیف)
+        // خواندن همه محصولات در یک query
+        $productIds = array_column($request->input('products'), 'product_id');
+        $products = Product::whereIn('id', $productIds)->get()->keyBy('id');
+        
+        // محاسبه مجموع مبلغ خرید بر اساس sale_price (قبل از تخفیف)
         $originalTotalAmount = 0;
+        $productsData = [];
         foreach ($request->input('products') as $productData) {
-            $originalTotalAmount += $productData['quantity'] * $productData['purchase_price'];
+            $product = $products->get($productData['product_id']);
+            if (!$product) {
+                return response(['error' => 'محصول یافت نشد'], 404);
+            }
+            
+            $salePrice = $product->sale_price;
+            $quantity = $productData['quantity'];
+            $originalTotalAmount += $quantity * $salePrice;
+            
+            // ذخیره اطلاعات محصول برای استفاده بعدی
+            $productsData[] = [
+                'product_id' => $productData['product_id'],
+                'quantity' => $quantity,
+                'sale_price' => $salePrice,
+                'purchase_price' => $product->purchase_price, // برای ذخیره در purchased_products
+            ];
         }
 
         $totalAmount = $originalTotalAmount;
@@ -121,12 +140,12 @@ class PurchasedProductController extends Controller
 
         // ذخیره محصولات خریداری شده و لینک کردن به سبد خرید
         $purchasedProducts = [];
-        foreach ($request->input('products') as $productData) {
+        foreach ($productsData as $productData) {
             $purchasedProducts[] = PurchasedProduct::create([
                 'purchase_id' => $purchase->id,
                 'product_id' => $productData['product_id'],
                 'quantity' => $productData['quantity'],
-                'purchase_price' => $productData['purchase_price'],
+                'purchase_price' => $productData['purchase_price'], // قیمت خرید محصول برای ثبت
             ]);
         }
 

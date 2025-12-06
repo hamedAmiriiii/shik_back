@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Purchase;
 use App\Models\PurchasedProduct;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -75,21 +76,31 @@ class ReportController extends Controller
 
     private function getSalesAndProfit($startDate, $endDate)
     {
-        $purchasedProducts = PurchasedProduct::with('product')
+        // دریافت تمام سبدهای خرید در بازه زمانی مشخص
+        $purchases = Purchase::with('purchasedProducts.product')
             ->whereBetween('created_at', [$startDate, $endDate])
             ->get();
 
         $totalSales = 0;
         $totalPurchase = 0;
+        $totalCreditEarned = 0;
 
-        foreach ($purchasedProducts as $purchasedProduct) {
-            if ($purchasedProduct->product) {
-                $totalSales += $purchasedProduct->quantity * $purchasedProduct->product->sale_price;
+        foreach ($purchases as $purchase) {
+            // total_amount قبلاً credit_used را کسر کرده است
+            // پس این مبلغ واقعی است که مشتری پرداخت کرده
+            $totalSales += $purchase->total_amount;
+
+            // محاسبه هزینه خرید محصولات
+            foreach ($purchase->purchasedProducts as $purchasedProduct) {
+                $totalPurchase += $purchasedProduct->quantity * $purchasedProduct->purchase_price;
             }
-            $totalPurchase += $purchasedProduct->quantity * $purchasedProduct->purchase_price;
+
+            // جمع کردن اعتبار هدیه داده شده (که باید از سود کسر شود)
+            $totalCreditEarned += $purchase->credit_earned;
         }
 
-        $totalProfit = $totalSales - $totalPurchase;
+        // سود = فروش - هزینه خرید - اعتبار هدیه داده شده
+        $totalProfit = $totalSales - $totalPurchase - $totalCreditEarned;
 
         return [
             'sales' => (float) $totalSales,
