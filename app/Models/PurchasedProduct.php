@@ -10,13 +10,7 @@ class PurchasedProduct extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['product_id', 'quantity', 'purchase_price', 'phone', 'total_amount', 'credit_used', 'credit_earned'];
-
-    protected $casts = [
-        'total_amount' => 'decimal:2',
-        'credit_used' => 'decimal:2',
-        'credit_earned' => 'decimal:2',
-    ];
+    protected $fillable = ['purchase_id', 'product_id', 'quantity', 'purchase_price'];
 
     public function getCreatedAtAttribute($value): string
     {
@@ -26,5 +20,13 @@ class PurchasedProduct extends Model
     public function product()
     {
         return $this->belongsTo(Product::class);
+    }
+
+    /**
+     * سبد خرید این محصول
+     */
+    public function purchase()
+    {
+        return $this->belongsTo(Purchase::class);
     }
 }

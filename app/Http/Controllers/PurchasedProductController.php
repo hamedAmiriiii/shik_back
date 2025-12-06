@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\PurchasedProduct;
+use App\Models\Purchase;
 use App\Models\Product;
 use App\Models\UserShiksho;
 use App\Models\CustomerPhone;
@@ -17,7 +18,7 @@ class PurchasedProductController extends Controller
 {
     public function index(Request $request)
 {
-    $query = PurchasedProduct::with('product')->orderBy('id', 'desc');
+    $query = Purchase::with('purchasedProducts.product')->orderBy('id', 'desc');
 
     // فیلتر تاریخ
     if ($request->has('filter')) {
@@ -51,8 +52,8 @@ class PurchasedProductController extends Controller
     $items = $query->paginate();
 
     // محاسبه مجموع قیمت خرید برای آیتم‌های این صفحه
-    $total = PurchasedProduct::whereIn('id', $items->pluck('id'))
-        ->select(DB::raw('SUM(quantity * purchase_price) as total'))
+    $total = Purchase::whereIn('id', $items->pluck('id'))
+        ->select(DB::raw('SUM(total_amount) as total'))
         ->value('total');
 
     // اضافه کردن به meta به شکل درست
@@ -102,30 +103,35 @@ class PurchasedProductController extends Controller
             }
         }
 
-        // ذخیره محصولات خریداری شده
-        $purchasedProducts = [];
-        foreach ($request->input('products') as $productData) {
-            $purchasedProducts[] = PurchasedProduct::create([
-                'product_id' => $productData['product_id'],
-                'quantity' => $productData['quantity'],
-                'purchase_price' => $productData['purchase_price'],
-                'phone' => $phone,
-                'total_amount' => $totalAmount,
-                'credit_used' => $creditUsed,
-                'credit_earned' => 0, // موقتاً 0، بعد از محاسبه به‌روزرسانی می‌شود
-            ]);
-        }
-
-        // اگر شماره تلفن وجود دارد، اعتبار جدید را محاسبه و ذخیره کن
+        $creditEarned = 0;
+        
+        // اگر شماره تلفن وجود دارد، اعتبار جدید را محاسبه کن
         if ($phone) {
             // محاسبه اعتبار کسب شده (بر اساس مبلغ اصلی خرید، قبل از کسر اعتبار استفاده شده)
             $creditEarned = UserShiksho::calculateCredit($originalTotalAmount);
+        }
 
-            // به‌روزرسانی اعتبار کسب شده در محصولات خریداری شده
-            foreach ($purchasedProducts as $purchasedProduct) {
-                $purchasedProduct->update(['credit_earned' => $creditEarned]);
-            }
+        // ایجاد سبد خرید (Purchase)
+        $purchase = Purchase::create([
+            'phone' => $phone,
+            'total_amount' => $totalAmount,
+            'credit_used' => $creditUsed,
+            'credit_earned' => $creditEarned,
+        ]);
 
+        // ذخیره محصولات خریداری شده و لینک کردن به سبد خرید
+        $purchasedProducts = [];
+        foreach ($request->input('products') as $productData) {
+            $purchasedProducts[] = PurchasedProduct::create([
+                'purchase_id' => $purchase->id,
+                'product_id' => $productData['product_id'],
+                'quantity' => $productData['quantity'],
+                'purchase_price' => $productData['purchase_price'],
+            ]);
+        }
+
+        // اگر شماره تلفن وجود دارد، اعتبار را به‌روزرسانی کن و پیامک بفرست
+        if ($phone) {
             // به‌روزرسانی اعتبار (اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود)
             UserShiksho::updateCredit($phone, $creditEarned);
 
@@ -138,30 +144,35 @@ class PurchasedProductController extends Controller
             SmsTools::sendSms($phone, $text);
         }
 
-        return response($purchasedProducts, 201);
+        // برگرداندن سبد خرید با محصولاتش
+        $purchase->load('purchasedProducts.product');
+        
+        return response($purchase, 201);
     }
 
-    public function show(PurchasedProduct $purchasedProduct)
+    public function show(Purchase $purchase)
     {
-        return response($purchasedProduct->load('product'), 200);
+        return response($purchase->load('purchasedProducts.product'), 200);
     }
 
-    public function update(Request $request, PurchasedProduct $purchasedProduct)
+    public function update(Request $request, Purchase $purchase)
     {
         $request->validate([
-            'quantity' => 'sometimes|required|integer|min:1',
-            'purchase_price' => 'sometimes|required|numeric|min:0',
+            'phone' => 'sometimes|nullable|string|digits:11',
+            'total_amount' => 'sometimes|required|numeric|min:0',
+            'credit_used' => 'sometimes|required|numeric|min:0',
+            'credit_earned' => 'sometimes|required|numeric|min:0',
         ]);
 
-        $purchasedProduct->update($request->only(['quantity', 'purchase_price']));
+        $purchase->update($request->only(['phone', 'total_amount', 'credit_used', 'credit_earned']));
 
-        return response($purchasedProduct, 200);
+        return response($purchase->load('purchasedProducts.product'), 200);
     }
 
-    public function destroy(PurchasedProduct $purchasedProduct)
+    public function destroy(Purchase $purchase)
     {
-        $purchasedProduct->delete();
-        return response(['message' => 'محصول خریداری‌شده حذف شد'], 200);
+        $purchase->delete();
+        return response(['message' => 'سبد خرید حذف شد'], 200);
     }
 
     /**
