@@ -102,12 +102,6 @@ class PurchasedProductController extends Controller
             }
         }
 
-        // محاسبه اعتبار کسب شده (بر اساس مبلغ اصلی خرید، قبل از کسر اعتبار استفاده شده)
-        $creditEarned = 0;
-        if ($phone) {
-            $creditEarned = UserShiksho::calculateCredit($originalTotalAmount);
-        }
-
         // ذخیره محصولات خریداری شده
         $purchasedProducts = [];
         foreach ($request->input('products') as $productData) {
@@ -118,19 +112,27 @@ class PurchasedProductController extends Controller
                 'phone' => $phone,
                 'total_amount' => $totalAmount,
                 'credit_used' => $creditUsed,
-                'credit_earned' => $creditEarned,
+                'credit_earned' => 0, // موقتاً 0، بعد از محاسبه به‌روزرسانی می‌شود
             ]);
         }
 
         // اگر شماره تلفن وجود دارد، اعتبار جدید را محاسبه و ذخیره کن
         if ($phone) {
+            // محاسبه اعتبار کسب شده (بر اساس مبلغ اصلی خرید، قبل از کسر اعتبار استفاده شده)
+            $creditEarned = UserShiksho::calculateCredit($originalTotalAmount);
+
+            // به‌روزرسانی اعتبار کسب شده در محصولات خریداری شده
+            foreach ($purchasedProducts as $purchasedProduct) {
+                $purchasedProduct->update(['credit_earned' => $creditEarned]);
+            }
+
             // به‌روزرسانی اعتبار (اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود)
             UserShiksho::updateCredit($phone, $creditEarned);
 
             // ثبت شماره تلفن در جدول customer_phones
             CustomerPhone::createNewPhone($phone);
 
-            // ارسال پیامک
+            // ارسال پیامک بعد از ذخیره خرید
             $creditFormatted = number_format($creditEarned, 0);
             $text = "مشتری گرامی مبلغ {$creditFormatted} تومان اعتبار شما برای خرید بعدی شارژ شد -- شیک شو";
             SmsTools::sendSms($phone, $text);
