@@ -13,7 +13,7 @@ class LogSmsController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function index()
+    public function index(Request $request)
     {
         $user = auth()->user();
         
@@ -23,6 +23,41 @@ class LogSmsController extends Controller
         if ($user->city_id) {
             $query->whereHas('creator', function($q) use ($user) {
                 $q->where('city_id', $user->city_id);
+            });
+        }
+
+        // جستجو بر اساس searchFilterModel
+        $searchDataModel = json_decode($request->input('searchFilterModel'));
+        if ($searchDataModel) {
+            $query->where(function($q) use ($searchDataModel) {
+                if (is_object($searchDataModel)) {
+                    // جستجو بر اساس شماره تلفن
+                    if (isset($searchDataModel->number)) {
+                        $q->where('number', 'like', '%' . $searchDataModel->number . '%');
+                    }
+                    // جستجو بر اساس متن پیام
+                    if (isset($searchDataModel->text)) {
+                        $q->orWhere('text', 'like', '%' . $searchDataModel->text . '%');
+                    }
+                    // جستجو بر اساس گیرندگان
+                    if (isset($searchDataModel->receivers)) {
+                        $q->orWhere('receivers', 'like', '%' . $searchDataModel->receivers . '%');
+                    }
+                    // جستجو بر اساس نام کاربر
+                    if (isset($searchDataModel->creator_name)) {
+                        $q->orWhereHas('creator', function($userQuery) use ($searchDataModel) {
+                            $userQuery->where('name', 'like', '%' . $searchDataModel->creator_name . '%');
+                        });
+                    }
+                } else if (is_string($searchDataModel)) {
+                    // اگر یک رشته ساده بود، در شماره تلفن، متن پیام، گیرندگان و نام کاربر جستجو می‌کند
+                    $q->where('number', 'like', '%' . $searchDataModel . '%')
+                      ->orWhere('text', 'like', '%' . $searchDataModel . '%')
+                      ->orWhere('receivers', 'like', '%' . $searchDataModel . '%')
+                      ->orWhereHas('creator', function($userQuery) use ($searchDataModel) {
+                          $userQuery->where('name', 'like', '%' . $searchDataModel . '%');
+                      });
+                }
             });
         }
 

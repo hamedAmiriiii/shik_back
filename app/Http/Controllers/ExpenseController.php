@@ -16,6 +16,31 @@ class ExpenseController extends Controller
     {
         $query = Expense::with('user')->orderBy('id', 'desc');
 
+        // جستجو بر اساس searchFilterModel
+        $searchDataModel = json_decode($request->input('searchFilterModel'));
+        if ($searchDataModel) {
+            $query->where(function($q) use ($searchDataModel) {
+                if (is_object($searchDataModel)) {
+                    // جستجو بر اساس عنوان هزینه
+                    if (isset($searchDataModel->title)) {
+                        $q->where('title', 'like', '%' . $searchDataModel->title . '%');
+                    }
+                    // جستجو بر اساس نام کاربر
+                    if (isset($searchDataModel->user_name)) {
+                        $q->orWhereHas('user', function($userQuery) use ($searchDataModel) {
+                            $userQuery->where('name', 'like', '%' . $searchDataModel->user_name . '%');
+                        });
+                    }
+                } else if (is_string($searchDataModel)) {
+                    // اگر یک رشته ساده بود، در عنوان و نام کاربر جستجو می‌کند
+                    $q->where('title', 'like', '%' . $searchDataModel . '%')
+                      ->orWhereHas('user', function($userQuery) use ($searchDataModel) {
+                          $userQuery->where('name', 'like', '%' . $searchDataModel . '%');
+                      });
+                }
+            });
+        }
+
         // فیلتر تاریخ
         if ($request->has('filter')) {
             if ($request->filter === 'today') {

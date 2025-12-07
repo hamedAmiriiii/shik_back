@@ -20,6 +20,22 @@ class PurchasedProductController extends Controller
 {
     $query = Purchase::with('purchasedProducts.product')->orderBy('id', 'desc');
 
+    // جستجو بر اساس searchFilterModel
+    $searchDataModel = json_decode($request->input('searchFilterModel'));
+    if ($searchDataModel) {
+        $query->where(function($q) use ($searchDataModel) {
+            if (is_object($searchDataModel)) {
+                // جستجو بر اساس شماره تلفن
+                if (isset($searchDataModel->phone)) {
+                    $q->where('phone', 'like', '%' . $searchDataModel->phone . '%');
+                }
+            } else if (is_string($searchDataModel)) {
+                // اگر یک رشته ساده بود، در شماره تلفن جستجو می‌کند
+                $q->where('phone', 'like', '%' . $searchDataModel . '%');
+            }
+        });
+    }
+
     // فیلتر تاریخ
     if ($request->has('filter')) {
         if ($request->filter === 'today') {

@@ -51,6 +51,11 @@ Route::prefix('purchased-products')->name('purchased-products.')->group(function
     Route::delete('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'destroy']);
 });
 
+Route::prefix('customers')->name('customers.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\CustomerController::class, 'index']);
+    Route::get('/{phone}', [\App\Http\Controllers\CustomerController::class, 'show']);
+});
+
 
 Route::resource("product", ProductController::class);
 Route::group(['middleware' => ['auth:sanctum']], function () {

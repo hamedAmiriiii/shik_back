@@ -13,7 +13,30 @@ class ProductController extends Controller
      */
     public function index(Request $request)
     {
-        $products = Product::orderBy('id', 'desc')->paginate(200);
+        $query = Product::query();
+        
+        // جستجو بر اساس searchFilterModel
+        $searchDataModel = json_decode($request->input('searchFilterModel'));
+        if ($searchDataModel) {
+            $query->where(function($q) use ($searchDataModel) {
+                if (is_object($searchDataModel)) {
+                    // جستجو بر اساس نام محصول
+                    if (isset($searchDataModel->name)) {
+                        $q->where('name', 'like', '%' . $searchDataModel->name . '%');
+                    }
+                    // جستجو بر اساس بارکد
+                    if (isset($searchDataModel->barcode)) {
+                        $q->orWhere('barcode', 'like', '%' . $searchDataModel->barcode . '%');
+                    }
+                } else if (is_string($searchDataModel)) {
+                    // اگر یک رشته ساده بود، در نام و بارکد جستجو می‌کند
+                    $q->where('name', 'like', '%' . $searchDataModel . '%')
+                      ->orWhere('barcode', 'like', '%' . $searchDataModel . '%');
+                }
+            });
+        }
+        
+        $products = $query->orderBy('id', 'desc')->paginate(200);
         return response($products);
     }
 
