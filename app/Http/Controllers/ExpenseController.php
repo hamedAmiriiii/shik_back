@@ -25,6 +25,10 @@ class ExpenseController extends Controller
                     if (isset($searchDataModel->title)) {
                         $q->where('title', 'like', '%' . $searchDataModel->title . '%');
                     }
+                    // جستجو بر اساس نوع هزینه
+                    if (isset($searchDataModel->type)) {
+                        $q->orWhere('type', $searchDataModel->type);
+                    }
                     // جستجو بر اساس نام کاربر
                     if (isset($searchDataModel->user_name)) {
                         $q->orWhereHas('user', function($userQuery) use ($searchDataModel) {
@@ -55,10 +59,22 @@ class ExpenseController extends Controller
                 $endOfWeek = $endOfWeekJalali->toCarbon()->endOfDay();
                 $query->whereBetween('date', [$startOfWeek, $endOfWeek]);
             } elseif ($request->filter === 'month') {
-                $query->whereMonth('date', Carbon::now()->month)
-                      ->whereYear('date', Carbon::now()->year);
+                // فیلتر ماه شمسی
+                $now = Jalalian::now();
+                $year = $now->getYear();
+                $month = $now->getMonth();
+                $daysInMonth = $now->getDaysInMonth();
+                $startOfMonth = (new Jalalian($year, $month, 1))->toCarbon()->startOfDay();
+                $endOfMonth = (new Jalalian($year, $month, $daysInMonth))->toCarbon()->endOfDay();
+                $query->whereBetween('date', [$startOfMonth, $endOfMonth]);
             } elseif ($request->filter === 'year') {
-                $query->whereYear('date', Carbon::now()->year);
+                // فیلتر سال شمسی
+                $now = Jalalian::now();
+                $year = $now->getYear();
+                // آخرین روز سال شمسی (29 اسفند)
+                $startOfYear = (new Jalalian($year, 1, 1))->toCarbon()->startOfDay();
+                $endOfYear = (new Jalalian($year, 12, 29))->toCarbon()->endOfDay();
+                $query->whereBetween('date', [$startOfYear, $endOfYear]);
             } elseif ($request->filter === 'range') {
                 // فیلتر بازه تاریخ شمسی
                 if ($request->has('from_date')) {
@@ -87,6 +103,7 @@ class ExpenseController extends Controller
             'user_id' => 'required|exists:users,id',
             'amount' => 'required|numeric|min:0',
             'title' => 'required|string|max:255',
+            'type' => 'required|in:جاری,سرمایه',
         ]);
 
         // ثبت خودکار تاریخ امروز
@@ -113,6 +130,7 @@ class ExpenseController extends Controller
             'user_id' => 'sometimes|required|exists:users,id',
             'amount' => 'sometimes|required|numeric|min:0',
             'title' => 'sometimes|required|string|max:255',
+            'type' => 'sometimes|required|in:جاری,سرمایه',
         ]);
 
         // تاریخ تغییر نمی‌کنه، فقط فیلدهای دیگر آپدیت می‌شن
