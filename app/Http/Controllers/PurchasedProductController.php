@@ -159,7 +159,7 @@ class PurchasedProductController extends Controller
 
             // ارسال پیامک بعد از ذخیره خرید
             $creditFormatted = number_format($creditEarned, 0);
-            $text = "مشتری گرامی مبلغ {$creditFormatted} تومان اعتبار شما برای خرید بعدی شارژ شد -- شیک شو";
+            $text = "شیک شو\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
             SmsTools::sendSms($phone, $text);
         }
 
