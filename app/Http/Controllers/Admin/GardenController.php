@@ -22,6 +22,27 @@ class GardenController extends Controller
             $query->where('city_id', auth()->user()->city_id);
         }
         
+        // جستجو بر اساس searchFilterModel
+        $searchDataModel = json_decode($request->input('searchFilterModel'));
+        if ($searchDataModel) {
+            $query->where(function($q) use ($searchDataModel) {
+                if (is_object($searchDataModel)) {
+                    // جستجو بر اساس نام
+                    if (isset($searchDataModel->name)) {
+                        $q->where('name', 'like', '%' . $searchDataModel->name . '%');
+                    }
+                    // جستجو بر اساس شماره تلفن
+                    if (isset($searchDataModel->phone)) {
+                        $q->orWhere('phone', 'like', '%' . $searchDataModel->phone . '%');
+                    }
+                } else if (is_string($searchDataModel)) {
+                    // اگر یک رشته ساده بود، در نام و شماره تلفن جستجو می‌کند
+                    $q->where('name', 'like', '%' . $searchDataModel . '%')
+                      ->orWhere('phone', 'like', '%' . $searchDataModel . '%');
+                }
+            });
+        }
+        
         $gardens = $query->relatedSearch($request)->orderBy('id', 'desc')->paginate();
         return response($gardens);
     }

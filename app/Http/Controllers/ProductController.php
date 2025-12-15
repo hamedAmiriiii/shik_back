@@ -36,7 +36,14 @@ class ProductController extends Controller
             });
         }
         
-        $products = $query->orderBy('id', 'desc')->paginate(200);
+        // دریافت تعداد آیتم در هر صفحه از request (پیش‌فرض 50)
+        $perPage = $request->input('per_page', 10);
+        
+        $products = $query->orderBy('id', 'desc')->paginate($perPage);
+        
+        // حفظ مسیر URL برای pagination
+        $products->withPath(url()->current());
+        
         return response($products);
     }
 

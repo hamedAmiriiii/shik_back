@@ -14,14 +14,31 @@ class CityController extends Controller
      */
     public function index(Request $request)
     {
-        $stateId = $request->query('state_id');
+        $query = City::query();
         
+        // فیلتر بر اساس استان
+        $stateId = $request->query('state_id');
         if ($stateId) {
-            $cities = City::where('state_id', $stateId)->get();
-        } else {
-            $cities = City::all();
+            $query->where('state_id', $stateId);
         }
         
+        // جستجو بر اساس searchFilterModel
+        $searchDataModel = json_decode($request->input('searchFilterModel'));
+        if ($searchDataModel) {
+            $query->where(function($q) use ($searchDataModel) {
+                if (is_object($searchDataModel)) {
+                    // جستجو بر اساس نام شهر
+                    if (isset($searchDataModel->name)) {
+                        $q->where('name', 'like', '%' . $searchDataModel->name . '%');
+                    }
+                } else if (is_string($searchDataModel)) {
+                    // اگر یک رشته ساده بود، در نام شهر جستجو می‌کند
+                    $q->where('name', 'like', '%' . $searchDataModel . '%');
+                }
+            });
+        }
+        
+        $cities = $query->get();
         return Response($cities);
     }
 

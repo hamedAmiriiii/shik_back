@@ -100,14 +100,32 @@ class ExpenseController extends Controller
     public function store(Request $request)
     {
         $fields = $request->validate([
-            'user_id' => 'required|exists:users,id',
+            'username' => 'required|string',
             'amount' => 'required|numeric|min:0',
             'title' => 'required|string|max:255',
-            'type' => 'required|in:جاری,سرمایه',
+            'type' => 'nullable|in:جاری,سرمایه',
         ]);
+
+        // تبدیل username به user_id
+        $user = \App\Models\User::where('name', $fields['username'])
+            ->orWhere('phone', $fields['username'])
+            ->orWhere('national_code', $fields['username'])
+            ->first();
+        
+        if (!$user) {
+            return response(['error' => 'کاربر یافت نشد'], 404);
+        }
+        
+        $fields['user_id'] = $user->id;
+        unset($fields['username']);
 
         // ثبت خودکار تاریخ امروز
         $fields['date'] = Carbon::now()->format('Y-m-d');
+        
+        // اگر type ارسال نشده باشد، مقدار پیش‌فرض 'جاری' قرار می‌دهیم
+        if (!isset($fields['type']) || empty($fields['type'])) {
+            $fields['type'] = 'جاری';
+        }
 
         $expense = Expense::create($fields);
         return response($expense->load('user'), 201);

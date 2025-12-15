@@ -18,7 +18,34 @@ class LeaveController extends Controller
      */
     public function index(Request $request): \Illuminate\Http\Response
     {
-        $leaves = Leave::where('user_id', Auth::user()->id)->orderBy('id', 'desc')->paginate();
+        $query = Leave::where('user_id', Auth::user()->id);
+        
+        // جستجو بر اساس searchFilterModel
+        $searchDataModel = json_decode($request->input('searchFilterModel'));
+        if ($searchDataModel) {
+            $query->where(function($q) use ($searchDataModel) {
+                if (is_object($searchDataModel)) {
+                    // جستجو بر اساس تاریخ از
+                    if (isset($searchDataModel->date_from)) {
+                        $dateFrom = json_decode($searchDataModel->date_from);
+                        if ($dateFrom) {
+                            $jalaliFrom = new Jalalian($dateFrom->year, $dateFrom->month, $dateFrom->day);
+                            $q->whereDate('date_from', '>=', $jalaliFrom->toCarbon());
+                        }
+                    }
+                    // جستجو بر اساس تاریخ تا
+                    if (isset($searchDataModel->date_to)) {
+                        $dateTo = json_decode($searchDataModel->date_to);
+                        if ($dateTo) {
+                            $jalaliTo = new Jalalian($dateTo->year, $dateTo->month, $dateTo->day);
+                            $q->whereDate('date_to', '<=', $jalaliTo->toCarbon());
+                        }
+                    }
+                }
+            });
+        }
+        
+        $leaves = $query->orderBy('id', 'desc')->paginate();
         return response($leaves);
     }
 

@@ -18,13 +18,33 @@ class CeremonyController extends Controller
     public function index(Request $request)
     {
         $user = Auth::user();
-        $ceremonies = Ceremony::whereHas('cameraman', function($query) use ($user) {
-                $query->where('user_id', $user->id);
+        $query = Ceremony::whereHas('cameraman', function($q) use ($user) {
+                $q->where('user_id', $user->id);
             })
-            ->with(['talar', 'garden', 'atelier'])
-            ->orderBy('date', 'desc')
-            ->paginate();
-
+            ->with(['talar', 'garden', 'atelier']);
+        
+        // جستجو بر اساس searchFilterModel
+        $searchDataModel = json_decode($request->input('searchFilterModel'));
+        if ($searchDataModel) {
+            $query->where(function($q) use ($searchDataModel) {
+                if (is_object($searchDataModel)) {
+                    // جستجو بر اساس نام داماد
+                    if (isset($searchDataModel->groom_full_name)) {
+                        $q->where('groom_full_name', 'like', '%' . $searchDataModel->groom_full_name . '%');
+                    }
+                    // جستجو بر اساس شماره تلفن داماد
+                    if (isset($searchDataModel->groom_phone)) {
+                        $q->orWhere('groom_phone', 'like', '%' . $searchDataModel->groom_phone . '%');
+                    }
+                } else if (is_string($searchDataModel)) {
+                    // اگر یک رشته ساده بود، در نام و شماره تلفن داماد جستجو می‌کند
+                    $q->where('groom_full_name', 'like', '%' . $searchDataModel . '%')
+                      ->orWhere('groom_phone', 'like', '%' . $searchDataModel . '%');
+                }
+            });
+        }
+        
+        $ceremonies = $query->orderBy('date', 'desc')->paginate();
         return response()->json($ceremonies);
     }
 }
