@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Purchase;
 use App\Models\PurchasedProduct;
+use App\Models\Product;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -71,6 +72,13 @@ class ReportController extends Controller
             'total_profit' => $yearData['profit']
         ];
 
+        // 7. مجموع قیمت خرید و فروش کل کالاها (با توجه به موجودی)
+        $productsInventory = $this->getProductsInventoryValue();
+        $reports['products_inventory'] = [
+            'total_purchase_value' => $productsInventory['total_purchase_value'],
+            'total_sale_value' => $productsInventory['total_sale_value']
+        ];
+
         return response($reports, 200);
     }
 
@@ -105,6 +113,22 @@ class ReportController extends Controller
         return [
             'sales' => (float) $totalSales,
             'profit' => (float) $totalProfit
+        ];
+    }
+
+    /**
+     * محاسبه مجموع قیمت خرید و فروش کل کالاها با توجه به موجودی
+     */
+    private function getProductsInventoryValue()
+    {
+        $products = Product::select(
+            DB::raw('SUM(purchase_price * quantity) as total_purchase_value'),
+            DB::raw('SUM(sale_price * quantity) as total_sale_value')
+        )->first();
+
+        return [
+            'total_purchase_value' => (float) ($products->total_purchase_value ?? 0),
+            'total_sale_value' => (float) ($products->total_sale_value ?? 0)
         ];
     }
 }
