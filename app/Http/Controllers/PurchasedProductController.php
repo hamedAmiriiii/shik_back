@@ -100,14 +100,26 @@ class PurchasedProductController extends Controller
         $productIds = array_column($request->input('products'), 'product_id');
         $products = Product::whereIn('id', $productIds)->get()->keyBy('id');
         
-        // محاسبه مجموع مبلغ خرید بر اساس sale_price (قبل از تخفیف)
-        $originalTotalAmount = 0;
-        $productsData = [];
+        // بررسی موجودی محصولات قبل از ثبت خرید
         foreach ($request->input('products') as $productData) {
             $product = $products->get($productData['product_id']);
             if (!$product) {
                 return response(['error' => 'محصول یافت نشد'], 404);
             }
+            
+            $requestedQuantity = $productData['quantity'];
+            if ($product->quantity < $requestedQuantity) {
+                return response([
+                    'error' => "موجودی محصول '{$product->name}' کافی نیست. موجودی: {$product->quantity}، درخواستی: {$requestedQuantity}"
+                ], 400);
+            }
+        }
+        
+        // محاسبه مجموع مبلغ خرید بر اساس sale_price (قبل از تخفیف)
+        $originalTotalAmount = 0;
+        $productsData = [];
+        foreach ($request->input('products') as $productData) {
+            $product = $products->get($productData['product_id']);
             
             $salePrice = $product->sale_price;
             $quantity = $productData['quantity'];
@@ -163,6 +175,12 @@ class PurchasedProductController extends Controller
                 'quantity' => $productData['quantity'],
                 'purchase_price' => $productData['purchase_price'], // قیمت خرید محصول برای ثبت
             ]);
+        }
+
+        // کسر موجودی محصولات بعد از ثبت خرید
+        foreach ($productsData as $productData) {
+            $product = $products->get($productData['product_id']);
+            $product->decrement('quantity', $productData['quantity']);
         }
 
         // اگر شماره تلفن وجود دارد، اعتبار را به‌روزرسانی کن و پیامک بفرست
