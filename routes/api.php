@@ -40,6 +40,7 @@ Route::prefix('reports')->name('reports.')->group(function () {
     Route::get('/', [\App\Http\Controllers\ReportController::class, 'index']);
 });
 
+Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
 Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);
 
 Route::prefix('purchased-products')->name('purchased-products.')->group(function () {

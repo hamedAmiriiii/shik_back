@@ -10,7 +10,7 @@ class Expense extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['user_id', 'date', 'amount', 'title', 'type'];
+    protected $fillable = ['user_name', 'date', 'amount', 'title', 'type'];
 
     protected $casts = [
         'date' => 'date',
@@ -22,9 +22,5 @@ class Expense extends Model
         return Jalalian::fromDateTime($value)->format('Y-m-d');
     }
 
-    public function user()
-    {
-        return $this->belongsTo(User::class);
-    }
 }
 

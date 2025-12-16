@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Expense;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Morilog\Jalali\Jalalian;
 
 class ExpenseController extends Controller
@@ -14,7 +15,7 @@ class ExpenseController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Expense::with('user')->orderBy('id', 'desc');
+        $query = Expense::orderBy('id', 'desc');
 
         // جستجو بر اساس searchFilterModel
         $searchDataModel = json_decode($request->input('searchFilterModel'));
@@ -31,18 +32,24 @@ class ExpenseController extends Controller
                     }
                     // جستجو بر اساس نام کاربر
                     if (isset($searchDataModel->user_name)) {
-                        $q->orWhereHas('user', function($userQuery) use ($searchDataModel) {
-                            $userQuery->where('name', 'like', '%' . $searchDataModel->user_name . '%');
-                        });
+                        $q->orWhere('user_name', 'like', '%' . $searchDataModel->user_name . '%');
                     }
                 } else if (is_string($searchDataModel)) {
                     // اگر یک رشته ساده بود، در عنوان و نام کاربر جستجو می‌کند
                     $q->where('title', 'like', '%' . $searchDataModel . '%')
-                      ->orWhereHas('user', function($userQuery) use ($searchDataModel) {
-                          $userQuery->where('name', 'like', '%' . $searchDataModel . '%');
-                      });
+                      ->orWhere('user_name', 'like', '%' . $searchDataModel . '%');
                 }
             });
+        }
+
+        // فیلتر type (مستقل از searchFilterModel)
+        if ($request->has('type') && in_array($request->input('type'), ['جاری', 'سرمایه'])) {
+            $query->where('type', $request->input('type'));
+        }
+
+        // فیلتر user_name (مستقل از searchFilterModel)
+        if ($request->has('user_name')) {
+            $query->where('user_name', 'like', '%' . $request->input('user_name') . '%');
         }
 
         // فیلتر تاریخ
@@ -63,9 +70,11 @@ class ExpenseController extends Controller
                 $now = Jalalian::now();
                 $year = $now->getYear();
                 $month = $now->getMonth();
-                $daysInMonth = $now->getDaysInMonth();
-                $startOfMonth = (new Jalalian($year, $month, 1))->toCarbon()->startOfDay();
-                $endOfMonth = (new Jalalian($year, $month, $daysInMonth))->toCarbon()->endOfDay();
+                $startOfMonthJalali = new Jalalian($year, $month, 1);
+                $startOfMonth = $startOfMonthJalali->toCarbon()->startOfDay();
+                // محاسبه آخرین روز ماه شمسی: اضافه کردن یک ماه و کسر یک روز
+                $endOfMonthJalali = (new Jalalian($year, $month, 1))->addMonths(1)->subDays(1);
+                $endOfMonth = $endOfMonthJalali->toCarbon()->endOfDay();
                 $query->whereBetween('date', [$startOfMonth, $endOfMonth]);
             } elseif ($request->filter === 'year') {
                 // فیلتر سال شمسی
@@ -100,24 +109,11 @@ class ExpenseController extends Controller
     public function store(Request $request)
     {
         $fields = $request->validate([
-            'username' => 'required|string',
+            'user_name' => 'required|string',
             'amount' => 'required|numeric|min:0',
             'title' => 'required|string|max:255',
             'type' => 'nullable|in:جاری,سرمایه',
         ]);
-
-        // تبدیل username به user_id
-        $user = \App\Models\User::where('name', $fields['username'])
-            ->orWhere('phone', $fields['username'])
-            ->orWhere('national_code', $fields['username'])
-            ->first();
-        
-        if (!$user) {
-            return response(['error' => 'کاربر یافت نشد'], 404);
-        }
-        
-        $fields['user_id'] = $user->id;
-        unset($fields['username']);
 
         // ثبت خودکار تاریخ امروز
         $fields['date'] = Carbon::now()->format('Y-m-d');
@@ -127,8 +123,9 @@ class ExpenseController extends Controller
             $fields['type'] = 'جاری';
         }
 
+        // ذخیره مستقیم بدون هیچ وابستگی
         $expense = Expense::create($fields);
-        return response($expense->load('user'), 201);
+        return response($expense, 201);
     }
 
     /**
@@ -136,7 +133,7 @@ class ExpenseController extends Controller
      */
     public function show(Expense $expense)
     {
-        return response($expense->load('user'), 200);
+        return response($expense, 200);
     }
 
     /**
@@ -145,7 +142,7 @@ class ExpenseController extends Controller
     public function update(Request $request, Expense $expense)
     {
         $fields = $request->validate([
-            'user_id' => 'sometimes|required|exists:users,id',
+            'user_name' => 'sometimes|required|string',
             'amount' => 'sometimes|required|numeric|min:0',
             'title' => 'sometimes|required|string|max:255',
             'type' => 'sometimes|required|in:جاری,سرمایه',
@@ -154,7 +151,7 @@ class ExpenseController extends Controller
         // تاریخ تغییر نمی‌کنه، فقط فیلدهای دیگر آپدیت می‌شن
 
         $expense->update($fields);
-        return response($expense->load('user'), 200);
+        return response($expense, 200);
     }
 
     /**
@@ -164,6 +161,39 @@ class ExpenseController extends Controller
     {
         $expense->delete();
         return response(['message' => 'هزینه با موفقیت حذف شد'], 200);
+    }
+
+    /**
+     * آمار کلی هزینه‌ها
+     */
+    public function statistics()
+    {
+        // کل هزینه‌ها (مجموع همه)
+        $totalExpenses = Expense::sum('amount');
+
+        // کل هزینه‌های جاری
+        $totalCurrentExpenses = Expense::where('type', 'جاری')->sum('amount');
+
+        // کل هزینه‌های سرمایه
+        $totalCapitalExpenses = Expense::where('type', 'سرمایه')->sum('amount');
+
+        // تفکیک هزینه‌ها بر اساس user_name (جاری و سرمایه)
+        $expensesByUser = Expense::select(
+            'user_name',
+            DB::raw('SUM(CASE WHEN type = "جاری" THEN amount ELSE 0 END) as total_current'),
+            DB::raw('SUM(CASE WHEN type = "سرمایه" THEN amount ELSE 0 END) as total_capital'),
+            DB::raw('SUM(amount) as total')
+        )
+        ->groupBy('user_name')
+        ->orderBy('user_name')
+        ->get();
+
+        return response([
+            'total_expenses' => (float) $totalExpenses,
+            'total_current_expenses' => (float) $totalCurrentExpenses,
+            'total_capital_expenses' => (float) $totalCapitalExpenses,
+            'expenses_by_user' => $expensesByUser
+        ], 200);
     }
 }
 
