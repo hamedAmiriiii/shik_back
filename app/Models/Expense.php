@@ -22,5 +22,14 @@ class Expense extends Model
         return Jalalian::fromDateTime($value)->format('Y-m-d');
     }
 
+    public function getCreatedAtAttribute($value): string
+    {
+        return Jalalian::fromDateTime($value)->format('Y-m-d H:i:s');
+    }
+
+    public function getUpdatedAtAttribute($value): string
+    {
+        return Jalalian::fromDateTime($value)->format('Y-m-d H:i:s');
+    }
 }
 
