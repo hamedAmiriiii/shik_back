@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Purchase;
 use App\Models\PurchasedProduct;
 use App\Models\Product;
+use App\Models\Expense;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -79,6 +80,10 @@ class ReportController extends Controller
             'total_sale_value' => $productsInventory['total_sale_value']
         ];
 
+        // 8. آمار هزینه‌ها
+        $expensesStats = $this->getExpensesStatistics();
+        $reports['expenses'] = $expensesStats;
+
         return response($reports, 200);
     }
 
@@ -129,6 +134,39 @@ class ReportController extends Controller
         return [
             'total_purchase_value' => (float) ($products->total_purchase_value ?? 0),
             'total_sale_value' => (float) ($products->total_sale_value ?? 0)
+        ];
+    }
+
+    /**
+     * محاسبه آمار هزینه‌ها
+     */
+    private function getExpensesStatistics()
+    {
+        // کل هزینه‌ها (مجموع همه)
+        $totalExpenses = Expense::sum('amount');
+
+        // کل هزینه‌های جاری
+        $totalCurrentExpenses = Expense::where('type', 'جاری')->sum('amount');
+
+        // کل هزینه‌های سرمایه
+        $totalCapitalExpenses = Expense::where('type', 'سرمایه')->sum('amount');
+
+        // تفکیک هزینه‌ها بر اساس user_name (جاری و سرمایه)
+        $expensesByUser = Expense::select(
+            'user_name',
+            DB::raw('SUM(CASE WHEN type = "جاری" THEN amount ELSE 0 END) as total_current'),
+            DB::raw('SUM(CASE WHEN type = "سرمایه" THEN amount ELSE 0 END) as total_capital'),
+            DB::raw('SUM(amount) as total')
+        )
+        ->groupBy('user_name')
+        ->orderBy('user_name')
+        ->get();
+
+        return [
+            'total_expenses' => (float) $totalExpenses,
+            'total_current_expenses' => (float) $totalCurrentExpenses,
+            'total_capital_expenses' => (float) $totalCapitalExpenses,
+            'expenses_by_user' => $expensesByUser
         ];
     }
 }
