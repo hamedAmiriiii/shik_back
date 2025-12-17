@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS `expenses` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_name` VARCHAR(255) NOT NULL,
   `date` DATE NOT NULL,
-  `amount` DECIMAL(10, 2) NOT NULL,
+  `amount` DECIMAL(15, 2) NOT NULL,
   `title` VARCHAR(255) NOT NULL,
   `type` ENUM('جاری', 'سرمایه') NOT NULL DEFAULT 'جاری',
   `created_at` TIMESTAMP NULL DEFAULT NULL,
