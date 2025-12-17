@@ -6,6 +6,7 @@ use App\Models\Purchase;
 use App\Models\PurchasedProduct;
 use App\Models\Product;
 use App\Models\Expense;
+use App\Models\ReturnedProduct;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -112,12 +113,42 @@ class ReportController extends Controller
             $totalCreditEarned += $purchase->credit_earned;
         }
 
-        // سود = فروش - هزینه خرید - اعتبار هدیه داده شده
-        $totalProfit = $totalSales - $totalPurchase - $totalCreditEarned;
+        // محاسبه برگشتی‌ها با اطلاعات محصولات
+        $returnedProducts = ReturnedProduct::with('product')
+            ->whereBetween('created_at', [$startDate, $endDate])
+            ->get();
+
+        $totalReturns = 0; // مجموع قیمت فروش برگشتی‌ها
+        $totalReturnsPurchase = 0; // مجموع قیمت خرید برگشتی‌ها
+        $totalReturnsProfit = 0; // مجموع سود برگشتی‌ها
+
+        foreach ($returnedProducts as $returned) {
+            $salePrice = $returned->sale_price;
+            $purchasePrice = $returned->product->purchase_price;
+            $profit = $salePrice - $purchasePrice;
+
+            $totalReturns += $salePrice;
+            $totalReturnsPurchase += $purchasePrice;
+            $totalReturnsProfit += $profit;
+        }
+
+        // فروش خالص = فروش - برگشتی‌ها
+        $netSales = $totalSales - $totalReturns;
+
+        // هزینه خرید خالص = هزینه خرید - هزینه خرید کالاهای برگشتی
+        // (فقط کالاهایی که واقعاً فروخته و برگشت نشده‌اند)
+        $netPurchase = $totalPurchase - $totalReturnsPurchase;
+
+        // سود = فروش خالص - هزینه خرید خالص - اعتبار هدیه داده شده
+        // چون هزینه خرید کالاهای برگشتی را از totalPurchase کم کرده‌ایم،
+        // دیگر نیاز به کسر سود برگشتی نیست
+        $totalProfit = $netSales - $netPurchase - $totalCreditEarned;
 
         return [
-            'sales' => (float) $totalSales,
-            'profit' => (float) $totalProfit
+            'sales' => (float) $netSales, // فروش خالص (منهای برگشتی‌ها)
+            'profit' => (float) $totalProfit,
+            'returns' => (float) $totalReturns,
+            'gross_sales' => (float) $totalSales // فروش خام (قبل از کسر برگشتی‌ها)
         ];
     }
 

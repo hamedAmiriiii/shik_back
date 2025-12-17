@@ -43,6 +43,11 @@ Route::prefix('reports')->name('reports.')->group(function () {
 Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
 Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);
 
+Route::prefix('returned-products')->name('returned-products.')->group(function () {
+    Route::post('/', [\App\Http\Controllers\ReturnedProductController::class, 'store']);
+    Route::get('/', [\App\Http\Controllers\ReturnedProductController::class, 'index']);
+});
+
 Route::prefix('purchased-products')->name('purchased-products.')->group(function () {
     Route::get('/', [\App\Http\Controllers\PurchasedProductController::class, 'index']);
     Route::post('/', [\App\Http\Controllers\PurchasedProductController::class, 'store']);
