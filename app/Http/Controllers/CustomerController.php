@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\DB;
 class CustomerController extends Controller
 {
     /**
-     * لیست خریداران از فروشگاه (آنهایی که شماره تلفنشان ثبت شده)
+     * لیست  خریداران از فروشگاه (آنهایی که شماره تلفنشان ثبت شده)
      */
     public function index(Request $request)
     {
