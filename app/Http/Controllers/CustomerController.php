@@ -15,6 +15,9 @@ class CustomerController extends Controller
      */
     public function index(Request $request)
     {
+        // دریافت کاربر لاگین شده
+        $user = $request->user();
+        
         // جستجو بر اساس searchFilterModel
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         
@@ -60,6 +63,9 @@ class CustomerController extends Controller
      */
     public function show(Request $request, $phone)
     {
+        // دریافت کاربر لاگین شده
+        $user = $request->user();
+        
         // اطلاعات خریدهای مشتری
         $purchases = Purchase::where('phone', $phone)
             ->with('purchasedProducts.product')
