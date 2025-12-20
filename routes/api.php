@@ -66,6 +66,14 @@ Route::prefix('customers')->name('customers.')->group(function () {
 Route::resource("product", ProductController::class);
 Route::get("product-all", [ProductController::class, 'getAll']);
 Route::post("products/apply-discount", [ProductController::class, 'applyDiscount']);
+
+Route::prefix('settings')->name('settings.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\SettingController::class, 'index']);
+    Route::get('/loyalty-credit', [\App\Http\Controllers\SettingController::class, 'getLoyaltyCreditStatus']);
+    Route::post('/loyalty-credit/toggle', [\App\Http\Controllers\SettingController::class, 'toggleLoyaltyCredit']);
+    Route::get('/{key}', [\App\Http\Controllers\SettingController::class, 'show']);
+    Route::put('/{key}', [\App\Http\Controllers\SettingController::class, 'update']);
+});
 Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::name('admin.')->prefix('admin')->group(function () {
         

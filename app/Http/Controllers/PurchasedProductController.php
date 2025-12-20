@@ -172,8 +172,9 @@ class PurchasedProductController extends Controller
 
         $creditEarned = 0;
         
-        // اگر شماره تلفن وجود دارد، اعتبار جدید را محاسبه کن
-        if ($phone) {
+        // اگر شماره تلفن وجود دارد و اعتبار فعال است، اعتبار جدید را محاسبه کن
+        $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
+        if ($phone && $enableLoyaltyCredit) {
             // محاسبه اعتبار کسب شده (بر اساس مبلغ اصلی خرید، قبل از کسر اعتبار استفاده شده)
             $creditEarned = UserShiksho::calculateCredit($originalTotalAmount);
         }
@@ -204,18 +205,26 @@ class PurchasedProductController extends Controller
             $product->decrement('quantity', $productData['quantity']);
         }
 
-        // اگر شماره تلفن وجود دارد، اعتبار را به‌روزرسانی کن و پیامک بفرست
+        // اگر شماره تلفن وجود دارد
         if ($phone) {
-            // به‌روزرسانی اعتبار (اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود)
-            UserShiksho::updateCredit($phone, $creditEarned);
+            $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
+            
+            if ($enableLoyaltyCredit) {
+                // به‌روزرسانی اعتبار (اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود)
+                UserShiksho::updateCredit($phone, $creditEarned);
+
+                // ارسال پیامک بعد از ذخیره خرید
+                $creditFormatted = number_format($creditEarned, 0);
+                $text = "شیک شو\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
+                SmsTools::sendSms($phone, $text);
+            } else {
+                // اگر اعتبار غیرفعال باشد، فقط پیام ساده بفرست
+                $text = "شیکشو\nبا تشکر از خرید شما";
+                SmsTools::sendSms($phone, $text);
+            }
 
             // ثبت شماره تلفن در جدول customer_phones
             CustomerPhone::createNewPhone($phone);
-
-            // ارسال پیامک بعد از ذخیره خرید
-            $creditFormatted = number_format($creditEarned, 0);
-            $text = "شیک شو\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
-            SmsTools::sendSms($phone, $text);
         }
 
         // برگرداندن سبد خرید با محصولاتش
