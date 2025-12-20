@@ -100,9 +100,13 @@ class ReportController extends Controller
         $totalCreditEarned = 0;
 
         foreach ($purchases as $purchase) {
-            // total_amount قبلاً credit_used را کسر کرده است
-            // پس این مبلغ واقعی است که مشتری پرداخت کرده
-            $totalSales += $purchase->total_amount;
+            // محاسبه فروش واقعی بر اساس sale_price ذخیره شده در purchased_products
+            // (که شامل تخفیف‌ها هم می‌شود)
+            foreach ($purchase->purchasedProducts as $purchasedProduct) {
+                // اگر sale_price ذخیره شده باشد از آن استفاده کن، در غیر این صورت از product.sale_price
+                $salePrice = $purchasedProduct->sale_price ?? $purchasedProduct->product->sale_price;
+                $totalSales += $purchasedProduct->quantity * $salePrice;
+            }
 
             // محاسبه هزینه خرید محصولات
             foreach ($purchase->purchasedProducts as $purchasedProduct) {
@@ -112,6 +116,12 @@ class ReportController extends Controller
             // جمع کردن اعتبار هدیه داده شده (که باید از سود کسر شود)
             $totalCreditEarned += $purchase->credit_earned;
         }
+        
+        // کسر اعتبار استفاده شده از فروش (چون total_amount آن را کسر کرده بود)
+        // اما ما sale_price را استفاده کرده‌ایم، پس باید credit_used را کسر کنیم
+        $totalCreditUsed = Purchase::whereBetween('created_at', [$startDate, $endDate])
+            ->sum('credit_used');
+        $totalSales = $totalSales - $totalCreditUsed;
 
         // محاسبه برگشتی‌ها با اطلاعات محصولات
         $returnedProducts = ReturnedProduct::with('product')

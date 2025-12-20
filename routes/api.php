@@ -65,6 +65,7 @@ Route::prefix('customers')->name('customers.')->group(function () {
 
 Route::resource("product", ProductController::class);
 Route::get("product-all", [ProductController::class, 'getAll']);
+Route::post("products/apply-discount", [ProductController::class, 'applyDiscount']);
 Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::name('admin.')->prefix('admin')->group(function () {
         

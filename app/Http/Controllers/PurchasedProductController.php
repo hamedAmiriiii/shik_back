@@ -90,6 +90,8 @@ class PurchasedProductController extends Controller
             'products' => 'required|array|min:1',
             'products.*.product_id' => 'required|exists:products,id',
             'products.*.quantity' => 'required|integer|min:1',
+            'products.*.sale_price' => 'nullable|numeric|min:0', // قیمت فروش با تخفیف (اختیاری)
+            'products.*.discount_percent' => 'nullable|numeric|min:0|max:100', // درصد تخفیف (اختیاری)
             'use_credit' => 'nullable|boolean', // آیا کاربر می‌خواهد از اعتبارش استفاده کند؟
         ]);
 
@@ -115,21 +117,39 @@ class PurchasedProductController extends Controller
             }
         }
         
-        // محاسبه مجموع مبلغ خرید بر اساس sale_price (قبل از تخفیف)
+        // محاسبه مجموع مبلغ خرید بر اساس sale_price (با در نظر گیری تخفیف)
         $originalTotalAmount = 0;
         $productsData = [];
         foreach ($request->input('products') as $productData) {
             $product = $products->get($productData['product_id']);
             
-            $salePrice = $product->sale_price;
+            // تعیین قیمت فروش: اگر sale_price ارسال شده از آن استفاده کن، در غیر این صورت از product.sale_price
+            // یا اگر discount_percent داده شده، درصد تخفیف را اعمال کن
+            $baseSalePrice = $product->sale_price;
             $quantity = $productData['quantity'];
+            
+            if (isset($productData['sale_price']) && $productData['sale_price'] !== null) {
+                // اگر sale_price مستقیم داده شده
+                $salePrice = $productData['sale_price'];
+            } elseif (isset($productData['discount_percent']) && $productData['discount_percent'] > 0) {
+                // اگر discount_percent داده شده
+                $discountAmount = ($baseSalePrice * $productData['discount_percent']) / 100;
+                $priceAfterDiscount = max(0, $baseSalePrice - $discountAmount);
+                
+                // رند کردن به عدد فرد که سه رقم آخرش 0 باشد
+                $salePrice = $this->roundToOddWithZeroEnding($priceAfterDiscount);
+            } else {
+                // بدون تخفیف
+                $salePrice = $baseSalePrice;
+            }
+            
             $originalTotalAmount += $quantity * $salePrice;
             
             // ذخیره اطلاعات محصول برای استفاده بعدی
             $productsData[] = [
                 'product_id' => $productData['product_id'],
                 'quantity' => $quantity,
-                'sale_price' => $salePrice,
+                'sale_price' => $salePrice, // قیمت واقعی فروش (با تخفیف)
                 'purchase_price' => $product->purchase_price, // برای ذخیره در purchased_products
             ];
         }
@@ -174,6 +194,7 @@ class PurchasedProductController extends Controller
                 'product_id' => $productData['product_id'],
                 'quantity' => $productData['quantity'],
                 'purchase_price' => $productData['purchase_price'], // قیمت خرید محصول برای ثبت
+                'sale_price' => $productData['sale_price'], // قیمت واقعی فروش (با تخفیف)
             ]);
         }
 
@@ -226,6 +247,55 @@ class PurchasedProductController extends Controller
     {
         $purchase->delete();
         return response(['message' => 'سبد خرید حذف شد'], 200);
+    }
+
+    /**
+     * رند کردن به عدد فرد که دهگان و صدگانش 0 باشد
+     * مثال: 130.5 -> 101, 1300 -> 1301, 1450 -> 1501
+     * 
+     * @param float $number
+     * @return float
+     */
+    private function roundToOddWithZeroEnding($number)
+    {
+        if ($number <= 0) {
+            return 0;
+        }
+
+        // رند کردن به نزدیک‌ترین 100 (دهگان و صدگان 0 می‌شود)
+        $roundedToHundred = round($number, -2);
+        
+        // اعداد ممکن: ..., 101, 103, 105, 107, 109, 201, 203, ..., 1301, 1303, ...
+        // یعنی باید یکان فرد باشد (1, 3, 5, 7, 9)
+        
+        // پیدا کردن نزدیک‌ترین عدد فرد که دهگان و صدگانش 0 باشد
+        $base = (int)($roundedToHundred);
+        $closest = $base;
+        $minDiff = abs($number - $base);
+        
+        // بررسی 5 گزینه: base + 1, base + 3, base + 5, base + 7, base + 9
+        for ($i = 1; $i <= 9; $i += 2) {
+            $candidate = $base + $i;
+            $diff = abs($number - $candidate);
+            if ($diff < $minDiff) {
+                $minDiff = $diff;
+                $closest = $candidate;
+            }
+        }
+        
+        // همچنین بررسی base - 9, base - 7, base - 5, base - 3, base - 1
+        for ($i = 1; $i <= 9; $i += 2) {
+            $candidate = $base - $i;
+            if ($candidate > 0) {
+                $diff = abs($number - $candidate);
+                if ($diff < $minDiff) {
+                    $minDiff = $diff;
+                    $closest = $candidate;
+                }
+            }
+        }
+        
+        return (float)$closest;
     }
 
     /**
