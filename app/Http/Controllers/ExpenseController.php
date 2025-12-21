@@ -109,11 +109,19 @@ class ExpenseController extends Controller
     public function store(Request $request)
     {
         $fields = $request->validate([
-            'user_name' => 'required|string',
             'amount' => 'required|numeric|min:0',
             'title' => 'required|string|max:255',
             'type' => 'nullable|in:جاری,سرمایه',
         ]);
+
+        // دریافت نام کاربر از لاگین
+        $user = $request->user();
+        if (!$user) {
+            return response(['error' => 'کاربر احراز هویت نشده است'], 401);
+        }
+
+        // ترکیب name و last_name برای user_name
+        $fields['user_name'] = trim($user->name . ' ' . $user->last_name);
 
         // ثبت خودکار تاریخ امروز
         $fields['date'] = Carbon::now()->format('Y-m-d');

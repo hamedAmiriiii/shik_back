@@ -17,6 +17,15 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+// Route موقت برای پاک کردن cache - بعد از استفاده حذف کنید!
+Route::get('/clear-cache', function () {
+    \Illuminate\Support\Facades\Artisan::call('config:clear');
+    \Illuminate\Support\Facades\Artisan::call('cache:clear');
+    $timezone = config('app.timezone');
+    $now = \Carbon\Carbon::now();
+    return "Cache cleared successfully!<br>Timezone: {$timezone}<br>Current time: {$now->format('Y-m-d H:i:s')}";
+});
+
 /*Route::get('/test', function () {
     $target = '/home2/kermanph/atelier/storage/app/public';
     $shortcut = '/home2/kermanph/public_html/api/storage';
