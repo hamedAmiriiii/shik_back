@@ -40,32 +40,32 @@ Route::prefix('reports')->name('reports.')->group(function () {
     Route::get('/', [\App\Http\Controllers\ReportController::class, 'index']);
 });
 
-// Public route - get all products without pagination (no authentication required)
+// Public routes - no authentication required
 Route::get("product-all", [ProductController::class, 'getAll']);
+
+Route::prefix('purchased-products')->name('purchased-products.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\PurchasedProductController::class, 'index']);
+    Route::post('/', [\App\Http\Controllers\PurchasedProductController::class, 'store']);
+    Route::get('/credit', [\App\Http\Controllers\PurchasedProductController::class, 'getCreditByPhone']);
+    Route::get('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'show']);
+    Route::put('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'update']);
+    Route::delete('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'destroy']);
+});
+
+Route::prefix('customers')->name('customers.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\CustomerController::class, 'index']);
+    Route::get('/{phone}', [\App\Http\Controllers\CustomerController::class, 'show']);
+});
+
+Route::prefix('returned-products')->name('returned-products.')->group(function () {
+    Route::post('/', [\App\Http\Controllers\ReturnedProductController::class, 'store']);
+    Route::get('/', [\App\Http\Controllers\ReturnedProductController::class, 'index']);
+});
 
 Route::group(['middleware' => ['auth:sanctum']], function () {
     // Store/Shop related routes - require authentication
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
     Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);
-
-    Route::prefix('returned-products')->name('returned-products.')->group(function () {
-        Route::post('/', [\App\Http\Controllers\ReturnedProductController::class, 'store']);
-        Route::get('/', [\App\Http\Controllers\ReturnedProductController::class, 'index']);
-    });
-
-    Route::prefix('purchased-products')->name('purchased-products.')->group(function () {
-        Route::get('/', [\App\Http\Controllers\PurchasedProductController::class, 'index']);
-        Route::post('/', [\App\Http\Controllers\PurchasedProductController::class, 'store']);
-        Route::get('/credit', [\App\Http\Controllers\PurchasedProductController::class, 'getCreditByPhone']);
-        Route::get('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'show']);
-        Route::put('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'update']);
-        Route::delete('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'destroy']);
-    });
-
-    Route::prefix('customers')->name('customers.')->group(function () {
-        Route::get('/', [\App\Http\Controllers\CustomerController::class, 'index']);
-        Route::get('/{phone}', [\App\Http\Controllers\CustomerController::class, 'show']);
-    });
 
     Route::resource("product", ProductController::class);
     Route::post("products/apply-discount", [ProductController::class, 'applyDiscount']);
