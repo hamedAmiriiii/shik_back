@@ -265,47 +265,39 @@ class PurchasedProductController extends Controller
      * @param float $number
      * @return float
      */
-    private function roundToOddWithZeroEnding($number)
-    {
-        if ($number <= 0) {
-            return 0;
-        }
+  
 
-        // رند کردن به نزدیک‌ترین 100 (دهگان و صدگان 0 می‌شود)
-        $roundedToHundred = round($number, -2);
-        
-        // اعداد ممکن: ..., 101, 103, 105, 107, 109, 201, 203, ..., 1301, 1303, ...
-        // یعنی باید یکان فرد باشد (1, 3, 5, 7, 9)
-        
-        // پیدا کردن نزدیک‌ترین عدد فرد که دهگان و صدگانش 0 باشد
-        $base = (int)($roundedToHundred);
-        $closest = $base;
-        $minDiff = abs($number - $base);
-        
-        // بررسی 5 گزینه: base + 1, base + 3, base + 5, base + 7, base + 9
-        for ($i = 1; $i <= 9; $i += 2) {
-            $candidate = $base + $i;
-            $diff = abs($number - $candidate);
-            if ($diff < $minDiff) {
-                $minDiff = $diff;
-                $closest = $candidate;
-            }
-        }
-        
-        // همچنین بررسی base - 9, base - 7, base - 5, base - 3, base - 1
-        for ($i = 1; $i <= 9; $i += 2) {
-            $candidate = $base - $i;
-            if ($candidate > 0) {
-                $diff = abs($number - $candidate);
-                if ($diff < $minDiff) {
-                    $minDiff = $diff;
-                    $closest = $candidate;
-                }
-            }
-        }
-        
-        return (float)$closest;
-    }
+     private function roundToOddWithZeroEnding($number)
+     {
+         if ($number <= 0) {
+             return 0;
+         }
+     
+         $baseThousand = floor($number / 1000);
+     
+         // اگر زوج بود، یکی کم کن تا فرد شود
+         if ($baseThousand % 2 === 0) {
+             $lowerOdd = $baseThousand - 1;
+         } else {
+             $lowerOdd = $baseThousand;
+         }
+     
+         // فرد بعدی
+         $upperOdd = $lowerOdd + 2;
+     
+         $lowerValue = $lowerOdd * 1000;
+         $upperValue = $upperOdd * 1000;
+     
+         // انتخاب نزدیک‌ترین
+         return (abs($number - $lowerValue) <= abs($number - $upperValue))
+             ? $lowerValue
+             : $upperValue;
+     }
+     
+
+
+
+
 
     /**
      * دریافت اعتبار کاربر بر اساس شماره تلفن

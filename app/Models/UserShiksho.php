@@ -36,10 +36,10 @@ class UserShiksho extends Model
             $credit = $purchaseAmount * 0.05;
         } elseif ($purchaseAmount <= 2000000) {
             // تا 2 میلیون: 4 درصد
-            $credit = $purchaseAmount * 0.04;
+            $credit = $purchaseAmount * 0.05;
         } else {
             // بالاتر از 2 میلیون: 3 درصد
-            $credit = $purchaseAmount * 0.03;
+            $credit = $purchaseAmount * 0.05;
         }
 
         // رند کردن به نزدیک‌ترین عدد با سه رقم آخر 0
