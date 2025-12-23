@@ -35,10 +35,19 @@ class ReportController extends Controller
         ];
 
         // 3. مجموع فروش و سود هفتگی (هفته شمسی - شنبه تا جمعه)
-        $now = Jalalian::now();
-        $dayOfWeek = $now->getDayOfWeek(); // 0 = شنبه, 6 = جمعه
-        $startOfWeekJalali = Jalalian::now()->subDays($dayOfWeek);
-        $endOfWeekJalali = Jalalian::now()->addDays(6 - $dayOfWeek);
+        // استفاده از Carbon برای محاسبه دقیق‌تر
+        $carbonNow = Carbon::now()->setTimezone('Asia/Tehran');
+        $dayOfWeekCarbon = $carbonNow->dayOfWeek; // 0 = یکشنبه, 1 = دوشنبه, ..., 6 = شنبه
+        
+        // تبدیل به فرمت شمسی: شنبه = 0, یکشنبه = 1, ..., جمعه = 6
+        // در Carbon: یکشنبه=0, دوشنبه=1, ..., شنبه=6
+        // در شمسی: شنبه=0, یکشنبه=1, ..., جمعه=6
+        // پس: dayOfWeekCarbon == 6 (شنبه) => 0, else => dayOfWeekCarbon + 1
+        $dayOfWeekJalali = $dayOfWeekCarbon == 6 ? 0 : $dayOfWeekCarbon + 1;
+        
+        $nowJalali = Jalalian::fromCarbon($carbonNow);
+        $startOfWeekJalali = (clone $nowJalali)->subDays($dayOfWeekJalali);
+        $endOfWeekJalali = (clone $startOfWeekJalali)->addDays(6);
         $startOfWeek = $startOfWeekJalali->toCarbon()->startOfDay();
         $endOfWeek = $endOfWeekJalali->toCarbon()->endOfDay();
         $weekData = $this->getSalesAndProfit($startOfWeek, $endOfWeek);
@@ -47,27 +56,41 @@ class ReportController extends Controller
             'total_profit' => $weekData['profit']
         ];
 
-        // 4. مجموع فروش و سود ماه
-        $startOfMonth = Carbon::now()->startOfMonth();
-        $endOfMonth = Carbon::now()->endOfMonth();
+        // 4. مجموع فروش و سود ماه (ماه شمسی)
+        $now = Jalalian::now();
+        $year = $now->getYear();
+        $month = $now->getMonth();
+        $startOfMonthJalali = new Jalalian($year, $month, 1);
+        $startOfMonth = $startOfMonthJalali->toCarbon()->startOfDay();
+        // محاسبه آخرین روز ماه شمسی: اضافه کردن یک ماه و کسر یک روز
+        $endOfMonthJalali = (new Jalalian($year, $month, 1))->addMonths(1)->subDays(1);
+        $endOfMonth = $endOfMonthJalali->toCarbon()->endOfDay();
         $monthData = $this->getSalesAndProfit($startOfMonth, $endOfMonth);
         $reports['month'] = [
             'total_sales' => $monthData['sales'],
             'total_profit' => $monthData['profit']
         ];
 
-        // 5. مجموع فروش و سود ماه قبل
-        $startOfLastMonth = Carbon::now()->subMonth()->startOfMonth();
-        $endOfLastMonth = Carbon::now()->subMonth()->endOfMonth();
+        // 5. مجموع فروش و سود ماه قبل (ماه شمسی قبل)
+        $lastMonthJalali = Jalalian::now()->subMonths(1);
+        $lastYear = $lastMonthJalali->getYear();
+        $lastMonth = $lastMonthJalali->getMonth();
+        $startOfLastMonthJalali = new Jalalian($lastYear, $lastMonth, 1);
+        $startOfLastMonth = $startOfLastMonthJalali->toCarbon()->startOfDay();
+        // محاسبه آخرین روز ماه شمسی قبل: اضافه کردن یک ماه و کسر یک روز
+        $endOfLastMonthJalali = (new Jalalian($lastYear, $lastMonth, 1))->addMonths(1)->subDays(1);
+        $endOfLastMonth = $endOfLastMonthJalali->toCarbon()->endOfDay();
         $lastMonthData = $this->getSalesAndProfit($startOfLastMonth, $endOfLastMonth);
         $reports['last_month'] = [
             'total_sales' => $lastMonthData['sales'],
             'total_profit' => $lastMonthData['profit']
         ];
 
-        // 6. مجموع فروش و سود سالانه
-        $startOfYear = Carbon::now()->startOfYear();
-        $endOfYear = Carbon::now()->endOfYear();
+        // 6. مجموع فروش و سود سالانه (سال شمسی)
+        $yearNow = Jalalian::now()->getYear();
+        $startOfYear = (new Jalalian($yearNow, 1, 1))->toCarbon()->startOfDay();
+        // آخرین روز سال شمسی (29 اسفند)
+        $endOfYear = (new Jalalian($yearNow, 12, 29))->toCarbon()->endOfDay();
         $yearData = $this->getSalesAndProfit($startOfYear, $endOfYear);
         $reports['year'] = [
             'total_sales' => $yearData['sales'],
