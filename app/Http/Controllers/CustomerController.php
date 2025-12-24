@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\CustomerPhone;
 use App\Models\Purchase;
 use App\Models\UserShiksho;
+use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -83,6 +84,96 @@ class CustomerController extends Controller
             'stats' => $stats,
             'purchases' => $purchases
         ], 200);
+    }
+
+    /**
+     * دریافت لیست مشتریان برای انتخاب (برای ارسال پیام)
+     */
+    public function getCustomersForBroadcast(Request $request)
+    {
+        // دریافت لیست شماره تلفن‌های یکتای مشتریان از جدول purchases
+        $query = DB::table('purchases')
+            ->select(
+                'purchases.phone',
+                DB::raw('COUNT(purchases.id) as total_purchases'),
+                DB::raw('MAX(purchases.created_at) as last_purchase_date')
+            )
+            ->whereNotNull('purchases.phone')
+            ->where('purchases.phone', '!=', '')
+            ->groupBy('purchases.phone')
+            ->orderBy('last_purchase_date', 'desc');
+
+        $customers = $query->get()->map(function($item) {
+            return [
+                'phone' => $item->phone,
+                'total_purchases' => (int) $item->total_purchases,
+            ];
+        })->values();
+
+        return response([
+            'customers' => $customers
+        ], 200);
+    }
+
+    /**
+     * ارسال پیام مشترک به مشتریان انتخاب شده
+     */
+    public function broadcastMessage(Request $request)
+    {
+        $request->validate([
+            'message' => 'required|string|max:1000',
+            'phones' => 'required|array|min:1',
+            'phones.*' => 'required|string|digits:11',
+        ]);
+
+        // دریافت لیست شماره تلفن‌های انتخاب شده
+        $phones = $request->input('phones');
+
+        if (empty($phones)) {
+            return response([
+                'error' => 'هیچ شماره تلفنی انتخاب نشده است'
+            ], 400);
+        }
+
+        $successCount = 0;
+        $failedCount = 0;
+        $results = [];
+
+        // ارسال SMS به هر شماره
+        foreach ($phones as $phone) {
+            try {
+                $result = SmsTools::sendSms($phone, $request->input('message'));
+                $successCount++;
+                $results[] = [
+                    'phone' => $phone,
+                    'status' => 'success',
+                    'result' => $result
+                ];
+            } catch (\Exception $e) {
+                $failedCount++;
+                $results[] = [
+                    'phone' => $phone,
+                    'status' => 'failed',
+                    'error' => $e->getMessage()
+                ];
+            }
+        }
+
+        $response = [
+            'message' => 'پیام به مشتریان ارسال شد',
+            'total_customers' => count($phones),
+            'success_count' => $successCount,
+            'failed_count' => $failedCount,
+        ];
+
+        // فقط در صورت وجود خطا، جزئیات خطاها را برگردان
+        if ($failedCount > 0 && $failedCount <= 10) {
+            $response['failed_results'] = array_filter($results, function($item) {
+                return $item['status'] === 'failed';
+            });
+        }
+
+        return response($response, 200);
     }
 }
 

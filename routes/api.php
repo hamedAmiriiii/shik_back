@@ -67,6 +67,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
     Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);
 
+    // Broadcast message to selected customers
+    Route::get('customer-broadcast/list', [\App\Http\Controllers\CustomerController::class, 'getCustomersForBroadcast']);
+    Route::post('customer-broadcast/message', [\App\Http\Controllers\CustomerController::class, 'broadcastMessage']);
+
     Route::resource("product", ProductController::class);
     Route::post("products/apply-discount", [ProductController::class, 'applyDiscount']);
 
