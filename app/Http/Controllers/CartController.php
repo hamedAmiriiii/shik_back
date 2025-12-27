@@ -160,7 +160,7 @@ class CartController extends Controller
             ], 404);
         }
 
-        // به‌روزرسانی اطلاعات ارسال
+        // به‌روزرسانی اطلاعات ارسال در سبد خرید
         $cart->update([
             'shipping_name' => $request->input('name'),
             'shipping_last_name' => $request->input('last_name'),
@@ -173,6 +173,16 @@ class CartController extends Controller
             'shipping_postal_code' => $request->input('postal_code'),
         ]);
 
+        // ذخیره اطلاعات به عنوان آدرس پیش‌فرض در پروفایل مشتری (phone در cart ذخیره می‌شود، نه در customer)
+        $customer->update([
+            'name' => $request->input('name'),
+            'last_name' => $request->input('last_name'),
+            'state_id' => $request->input('state_id'),
+            'city_id' => $request->input('city_id'),
+            'address' => $request->input('address'),
+            'postal_code' => $request->input('postal_code'),
+        ]);
+
         // بارگذاری روابط
         $cart->load(['items.product.images', 'items.product.categories']);
 
@@ -182,6 +192,27 @@ class CartController extends Controller
             'items' => $cart->items,
             'total' => $cart->total,
             'items_count' => $cart->items_count
+        ]);
+    }
+
+    /**
+     * دریافت آدرس پیش‌فرض مشتری
+     */
+    public function getDefaultAddress(Request $request)
+    {
+        $customer = $request->user();
+        $customer->load(['state', 'city']);
+
+        return response([
+            'name' => $customer->name,
+            'last_name' => $customer->last_name,
+            'phone' => $customer->phone,
+            'address' => $customer->address,
+            'state_id' => $customer->state_id,
+            'state_name' => $customer->state ? $customer->state->name : null,
+            'city_id' => $customer->city_id,
+            'city_name' => $customer->city ? $customer->city->name : null,
+            'postal_code' => $customer->postal_code,
         ]);
     }
 

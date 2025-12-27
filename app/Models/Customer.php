@@ -19,6 +19,7 @@ class Customer extends Model
         'state_id',
         'city_id',
         'address',
+        'postal_code',
         'is_verified'
     ];
 
