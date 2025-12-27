@@ -171,5 +171,6 @@ Route::middleware('auth:sanctum')->prefix('cart')->name('cart.')->group(function
     Route::post('/', [\App\Http\Controllers\CartController::class, 'store']);
     Route::put('/shipping-info', [\App\Http\Controllers\CartController::class, 'updateShippingInfo']);
     Route::get('/default-address', [\App\Http\Controllers\CartController::class, 'getDefaultAddress']);
+    Route::post('/complete-order', [\App\Http\Controllers\CartController::class, 'completeOrder']);
     Route::delete('/', [\App\Http\Controllers\CartController::class, 'destroy']);
 });

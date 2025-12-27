@@ -7,6 +7,10 @@ use App\Models\CartItem;
 use App\Models\Product;
 use App\Models\State;
 use App\Models\City;
+use App\Models\Purchase;
+use App\Models\PurchasedProduct;
+use App\Models\UserShiksho;
+use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -214,6 +218,154 @@ class CartController extends Controller
             'city_name' => $customer->city ? $customer->city->name : null,
             'postal_code' => $customer->postal_code,
         ]);
+    }
+
+    /**
+     * تکمیل سفارش بعد از پرداخت بانکی
+     */
+    public function completeOrder(Request $request)
+    {
+        $request->validate([
+            'use_credit' => 'nullable|boolean', // آیا کاربر می‌خواهد از اعتبارش استفاده کند؟
+        ]);
+
+        $customer = $request->user();
+        $useCredit = $request->input('use_credit', false);
+
+        $cart = Cart::where('customer_id', $customer->id)
+            ->where('status', 'pending')
+            ->with(['items.product'])
+            ->first();
+
+        if (!$cart) {
+            return response([
+                'error' => 'سبد خرید یافت نشد'
+            ], 404);
+        }
+
+        // بررسی اینکه اطلاعات ارسال کامل است
+        if (!$cart->shipping_name || !$cart->shipping_address || !$cart->shipping_phone) {
+            return response([
+                'error' => 'اطلاعات ارسال کامل نیست. لطفاً ابتدا اطلاعات ارسال را تکمیل کنید.'
+            ], 400);
+        }
+
+        // بررسی اینکه سبد خالی نیست
+        if ($cart->items->count() === 0) {
+            return response([
+                'error' => 'سبد خرید خالی است'
+            ], 400);
+        }
+
+        // بررسی موجودی محصولات (دوباره بررسی می‌کنیم)
+        foreach ($cart->items as $item) {
+            $product = $item->product;
+            if (!$product) {
+                return response(['error' => 'محصول یافت نشد'], 404);
+            }
+
+            if ($product->quantity < $item->quantity) {
+                return response([
+                    'error' => "موجودی محصول '{$product->name}' کافی نیست. موجودی: {$product->quantity}، درخواستی: {$item->quantity}"
+                ], 400);
+            }
+        }
+
+        DB::beginTransaction();
+        try {
+            // محاسبه مجموع مبلغ خرید
+            $originalTotalAmount = $cart->total;
+            $phone = $cart->shipping_phone;
+
+            $totalAmount = $originalTotalAmount;
+            $creditUsed = 0;
+            $userShiksho = null;
+
+            // اگر کاربر می‌خواهد از اعتبار استفاده کند
+            if ($phone && $useCredit) {
+                $userShiksho = UserShiksho::where('phone', $phone)->first();
+                if ($userShiksho && $userShiksho->credit > 0) {
+                    // استفاده از اعتبار (تا حداکثر مبلغ خرید)
+                    $creditUsed = min($userShiksho->credit, $originalTotalAmount);
+                    $userShiksho->useCredit($creditUsed);
+                    // مبلغ نهایی بعد از کسر اعتبار
+                    $totalAmount = $originalTotalAmount - $creditUsed;
+                }
+            }
+
+            $creditEarned = 0;
+            
+            // اگر اعتبار فعال است، اعتبار جدید را محاسبه کن
+            $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
+            if ($phone && $enableLoyaltyCredit) {
+                // محاسبه اعتبار کسب شده (بر اساس مبلغ اصلی خرید، قبل از کسر اعتبار استفاده شده)
+                $creditEarned = UserShiksho::calculateCredit($originalTotalAmount);
+            }
+
+            // ایجاد Purchase
+            $purchase = Purchase::create([
+                'phone' => $phone,
+                'total_amount' => $totalAmount,
+                'credit_used' => $creditUsed,
+                'credit_earned' => $creditEarned,
+            ]);
+
+            // ذخیره محصولات خریداری شده
+            foreach ($cart->items as $item) {
+                PurchasedProduct::create([
+                    'purchase_id' => $purchase->id,
+                    'product_id' => $item->product_id,
+                    'quantity' => $item->quantity,
+                    'purchase_price' => $item->product->purchase_price,
+                    'sale_price' => $item->price, // قیمت ذخیره شده در cart
+                ]);
+
+                // کسر موجودی محصول
+                $item->product->decrement('quantity', $item->quantity);
+            }
+
+            // تغییر status سبد به completed
+            $cart->update([
+                'status' => 'completed'
+            ]);
+
+            // اگر شماره تلفن وجود دارد
+            if ($phone) {
+                $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
+                
+                if ($enableLoyaltyCredit) {
+                    // به‌روزرسانی اعتبار
+                    UserShiksho::updateCredit($phone, $creditEarned);
+
+                    // ارسال پیامک
+                    $creditFormatted = number_format($creditEarned, 0);
+                    $text = "شیک شو\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
+                    SmsTools::sendSms($phone, $text);
+                } else {
+                    // اگر اعتبار غیرفعال باشد، فقط پیام ساده بفرست
+                    $text = "شیکشو\nبا تشکر از خرید شما";
+                    SmsTools::sendSms($phone, $text);
+                }
+            }
+
+            DB::commit();
+
+            // بارگذاری روابط
+            $purchase->load('purchasedProducts.product');
+
+            return response([
+                'message' => 'سفارش با موفقیت ثبت شد',
+                'purchase' => $purchase,
+                'cart' => $cart
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response([
+                'error' => 'خطا در ثبت سفارش',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**

@@ -18,8 +18,15 @@ class ProductController extends Controller
     {
         $query = Product::query();
         
-        // جستجو بر اساس searchFilterModel
-        $searchDataModel = json_decode($request->input('searchFilterModel'));
+        // جستجو بر اساس searchFilterModel یا search
+        $searchDataModel = null;
+        if ($request->has('searchFilterModel')) {
+            $searchDataModel = json_decode($request->input('searchFilterModel'));
+        } elseif ($request->has('search')) {
+            // اگر search استفاده شده، آن را به عنوان رشته ساده در نظر می‌گیریم
+            $searchDataModel = $request->input('search');
+        }
+        
         if ($searchDataModel) {
             $query->where(function($q) use ($searchDataModel) {
                 if (is_object($searchDataModel)) {
@@ -164,8 +171,15 @@ class ProductController extends Controller
     {
         $query = Product::query();
         
-        // جستجو بر اساس searchFilterModel
-        $searchDataModel = json_decode($request->input('searchFilterModel'));
+        // جستجو بر اساس searchFilterModel یا search
+        $searchDataModel = null;
+        if ($request->has('searchFilterModel')) {
+            $searchDataModel = json_decode($request->input('searchFilterModel'));
+        } elseif ($request->has('search')) {
+            // اگر search استفاده شده، آن را به عنوان رشته ساده در نظر می‌گیریم
+            $searchDataModel = $request->input('search');
+        }
+        
         if ($searchDataModel) {
             $query->where(function($q) use ($searchDataModel) {
                 if (is_object($searchDataModel)) {
