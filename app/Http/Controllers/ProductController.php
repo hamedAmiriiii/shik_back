@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\Product;
+use App\Models\ProductImage;
+use App\Tools\ImageTools;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use http\Env\Response;
 
 class ProductController extends Controller
@@ -39,7 +42,7 @@ class ProductController extends Controller
         // دریافت تعداد آیتم در هر صفحه از request (پیش‌فرض 50)
         $perPage = $request->input('per_page', 10);
         
-        $products = $query->orderBy('id', 'desc')->paginate($perPage);
+        $products = $query->with(['images', 'categories'])->orderBy('id', 'desc')->paginate($perPage);
         
         // اضافه کردن اطلاعات تخفیف به هر محصول
         $products->getCollection()->transform(function ($product) {
@@ -83,6 +86,10 @@ class ProductController extends Controller
             'barcode' => 'nullable|string|unique:products|max:255',
             'original_sale_price' => 'nullable|numeric|min:0',
             'discount_percent' => 'nullable|numeric|min:0|max:100',
+            'images' => 'nullable|array',
+            'images.*' => 'nullable|string',
+            'category_ids' => 'nullable|array',
+            'category_ids.*' => 'exists:categories,id',
         ]);
 
         // محاسبه قیمت با تخفیف در صورت وجود
@@ -120,6 +127,19 @@ class ProductController extends Controller
             $product->barcode = (string) $product->id;
             $product->save();
         }
+
+        // ذخیره عکس‌ها
+        if ($request->has('images') && is_array($request->images)) {
+            $this->saveProductImages($product, $request->images);
+        }
+
+        // اتصال کتگوری‌ها
+        if ($request->has('category_ids') && is_array($request->category_ids)) {
+            $product->categories()->sync($request->category_ids);
+        }
+
+        // بارگذاری مجدد محصول با عکس‌ها و کتگوری‌ها
+        $product->load(['images', 'categories']);
 
         return response($product, 201);
     }
@@ -165,7 +185,7 @@ class ProductController extends Controller
             });
         }
         
-        $products = $query->orderBy('id', 'desc')->get();
+        $products = $query->with(['images', 'categories'])->orderBy('id', 'desc')->get();
         
         // اضافه کردن اطلاعات تخفیف به هر محصول
         $products->transform(function ($product) {
@@ -198,6 +218,7 @@ class ProductController extends Controller
      */
     public function show(Product $product)
     {
+        $product->load(['images', 'categories']);
         return response($product);
     }
 
@@ -214,6 +235,10 @@ class ProductController extends Controller
             'barcode' => 'required|string|unique:products,barcode,' . $product->id . '|max:255',
             'original_sale_price' => 'nullable|numeric|min:0',
             'discount_percent' => 'nullable|numeric|min:0|max:100',
+            'images' => 'nullable|array',
+            'images.*' => 'nullable|string',
+            'category_ids' => 'nullable|array',
+            'category_ids.*' => 'exists:categories,id',
         ]);
 
         // محاسبه قیمت با تخفیف در صورت وجود
@@ -251,6 +276,26 @@ class ProductController extends Controller
         }
 
         $product->update($fields);
+
+        // مدیریت عکس‌ها - اضافه کردن به عکس‌های قبلی
+        if ($request->has('images') && is_array($request->images) && !empty($request->images)) {
+            // فقط عکس‌های جدید را اضافه می‌کنیم (جایگزین نمی‌کنیم)
+            $this->saveProductImages($product, $request->images);
+        }
+
+        // مدیریت کتگوری‌ها
+        if ($request->has('category_ids')) {
+            if (is_array($request->category_ids) && !empty($request->category_ids)) {
+                $product->categories()->sync($request->category_ids);
+            } else {
+                // اگر آرایه خالی باشد، تمام کتگوری‌ها را حذف می‌کنیم
+                $product->categories()->detach();
+            }
+        }
+
+        // بارگذاری مجدد محصول با عکس‌ها و کتگوری‌ها
+        $product->load(['images', 'categories']);
+
         return response($product);
     }
 
@@ -259,6 +304,9 @@ class ProductController extends Controller
      */
     public function destroy(Product $product)
     {
+        // حذف عکس‌های محصول
+        $this->deleteProductImages($product);
+        
         $product->delete();
         return response(['message' => 'محصول با موفقیت حذف شد']);
     }
@@ -321,6 +369,95 @@ class ProductController extends Controller
             'updated_count' => count($updatedProducts),
             'products' => $updatedProducts
         ], 200);
+    }
+
+    /**
+     * ذخیره عکس‌های محصول
+     */
+    private function saveProductImages(Product $product, array $images)
+    {
+        // دریافت آخرین order برای ادامه دادن از آن (برای اضافه کردن به عکس‌های قبلی)
+        $lastOrder = ProductImage::where('product_id', $product->id)->max('order') ?? 0;
+        
+        foreach ($images as $imageData) {
+            if (empty($imageData)) {
+                continue;
+            }
+
+            // استخراج base64 از string (اگر به صورت data:image/png;base64,xxx باشد)
+            $imageString = $imageData;
+            if (strpos($imageData, ',') !== false) {
+                $parts = explode(',', $imageData);
+                $imageString = $parts[1];
+            }
+
+            // decode base64
+            $imageContent = base64_decode($imageString);
+            if ($imageContent === false) {
+                continue;
+            }
+
+            // افزایش order برای عکس جدید
+            $lastOrder++;
+
+            // ذخیره عکس با نام منحصر به فرد
+            $imagePath = ImageTools::saveFile(
+                "/products/{$product->id}/image_" . time() . "_" . $lastOrder . ".jpeg",
+                $imageContent
+            );
+
+            // ذخیره در دیتابیس
+            ProductImage::create([
+                'product_id' => $product->id,
+                'image_path' => $imagePath,
+                'order' => $lastOrder,
+            ]);
+        }
+    }
+
+    /**
+     * حذف یک عکس خاص از محصول
+     */
+    public function deleteImage(Product $product, $imageId)
+    {
+        // پیدا کردن عکس
+        $productImage = ProductImage::where('id', $imageId)
+            ->where('product_id', $product->id)
+            ->first();
+
+        if (!$productImage) {
+            return response(['error' => 'عکس یافت نشد'], 404);
+        }
+
+        // حذف فایل از storage
+        $originalPath = $productImage->getOriginal('image_path');
+        if ($originalPath && Storage::exists('public/' . $originalPath)) {
+            Storage::delete('public/' . $originalPath);
+        }
+
+        // حذف از دیتابیس
+        $productImage->delete();
+
+        return response(['message' => 'عکس با موفقیت حذف شد'], 200);
+    }
+
+    /**
+     * حذف عکس‌های محصول
+     */
+    private function deleteProductImages(Product $product)
+    {
+        // بارگذاری عکس‌ها برای اطمینان
+        $product->load('images');
+        
+        foreach ($product->images as $image) {
+            // حذف فایل از storage
+            $originalPath = $image->getOriginal('image_path');
+            if ($originalPath && Storage::exists('public/' . $originalPath)) {
+                Storage::delete('public/' . $originalPath);
+            }
+            // حذف از دیتابیس
+            $image->delete();
+        }
     }
 
     /**

@@ -1,0 +1,267 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Category;
+use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+
+class CategoryController extends Controller
+{
+    /**
+     * نمایش لیست کتگوری‌ها (به صورت درختی)
+     */
+    public function index(Request $request)
+    {
+        $query = Category::query();
+
+        // فیلتر بر اساس فعال/غیرفعال
+        if ($request->has('is_active')) {
+            $query->where('is_active', $request->boolean('is_active'));
+        }
+
+        // فیلتر فقط کتگوری‌های ریشه (بدون والد)
+        if ($request->boolean('roots_only')) {
+            $query->whereNull('parent_id');
+        }
+
+        // فیلتر بر اساس والد
+        if ($request->has('parent_id')) {
+            $query->where('parent_id', $request->input('parent_id'));
+        }
+
+        // مرتب‌سازی بر اساس order و name
+        $query->orderBy('order')->orderBy('name');
+
+        // اگر درختی بخواهیم (با فرزندان)
+        if ($request->boolean('tree')) {
+            $categories = $query->whereNull('parent_id')
+                ->with('children.children')
+                ->get();
+            
+            return response($this->buildTree($categories));
+        }
+
+        // لیست ساده
+        $categories = $query->with('parent')->get();
+
+        return response($categories);
+    }
+
+    /**
+     * ساخت ساختار درختی از کتگوری‌ها
+     */
+    private function buildTree($categories)
+    {
+        return $categories->map(function ($category) {
+            $item = [
+                'id' => $category->id,
+                'name' => $category->name,
+                'slug' => $category->slug,
+                'description' => $category->description,
+                'parent_id' => $category->parent_id,
+                'order' => $category->order,
+                'is_active' => $category->is_active,
+                'full_path' => $category->full_path,
+                'children' => [],
+            ];
+
+            if ($category->children->count() > 0) {
+                $item['children'] = $this->buildTree($category->children);
+            }
+
+            return $item;
+        });
+    }
+
+    /**
+     * دریافت لیست تمام کتگوری‌ها به صورت flat (بدون ساختار درختی)
+     */
+    public function getAll(Request $request)
+    {
+        $categories = Category::orderBy('order')->orderBy('name')->get();
+        return response($categories);
+    }
+
+    /**
+     * افزودن کتگوری جدید
+     */
+    public function store(Request $request)
+    {
+        $fields = $request->validate([
+            'name' => 'required|string|max:255',
+            'slug' => 'nullable|string|max:255|unique:categories,slug',
+            'description' => 'nullable|string',
+            'parent_id' => 'nullable|exists:categories,id',
+            'order' => 'nullable|integer|min:0',
+            'is_active' => 'nullable|boolean',
+        ]);
+
+        // اگر slug داده نشده، از name ایجاد می‌کنیم
+        if (empty($fields['slug'])) {
+            $fields['slug'] = Str::slug($fields['name']);
+            
+            // اطمینان از یکتا بودن slug
+            $originalSlug = $fields['slug'];
+            $counter = 1;
+            while (Category::where('slug', $fields['slug'])->exists()) {
+                $fields['slug'] = $originalSlug . '-' . $counter;
+                $counter++;
+            }
+        }
+
+        // مقادیر پیش‌فرض
+        if (!isset($fields['order'])) {
+            $fields['order'] = 0;
+        }
+        if (!isset($fields['is_active'])) {
+            $fields['is_active'] = true;
+        }
+
+        $category = Category::create($fields);
+        $category->load('parent');
+
+        return response($category, 201);
+    }
+
+    /**
+     * نمایش جزئیات یک کتگوری
+     */
+    public function show(Category $category)
+    {
+        $category->load(['parent', 'children', 'products']);
+        return response($category);
+    }
+
+    /**
+     * ویرایش کتگوری
+     */
+    public function update(Request $request, Category $category)
+    {
+        $fields = $request->validate([
+            'name' => 'required|string|max:255',
+            'slug' => 'nullable|string|max:255|unique:categories,slug,' . $category->id,
+            'description' => 'nullable|string',
+            'parent_id' => 'nullable|exists:categories,id',
+            'order' => 'nullable|integer|min:0',
+            'is_active' => 'nullable|boolean',
+        ]);
+
+        // جلوگیری از ایجاد حلقه در ساختار درختی (کتگوری نمی‌تواند والد خودش باشد)
+        if (isset($fields['parent_id']) && $fields['parent_id'] == $category->id) {
+            return response(['error' => 'کتگوری نمی‌تواند والد خودش باشد'], 422);
+        }
+
+        // جلوگیری از ایجاد حلقه: اگر parent_id برابر یکی از فرزندان باشد
+        $descendants = $category->descendants()->pluck('id')->toArray();
+        if (isset($fields['parent_id']) && in_array($fields['parent_id'], $descendants)) {
+            return response(['error' => 'کتگوری نمی‌تواند والد خودش یا یکی از فرزندانش باشد'], 422);
+        }
+
+        // اگر slug داده نشده، از name ایجاد می‌کنیم
+        if (empty($fields['slug'])) {
+            $fields['slug'] = Str::slug($fields['name']);
+            
+            // اطمینان از یکتا بودن slug
+            $originalSlug = $fields['slug'];
+            $counter = 1;
+            while (Category::where('slug', $fields['slug'])->where('id', '!=', $category->id)->exists()) {
+                $fields['slug'] = $originalSlug . '-' . $counter;
+                $counter++;
+            }
+        }
+
+        $category->update($fields);
+        $category->load('parent');
+
+        return response($category);
+    }
+
+    /**
+     * حذف کتگوری
+     */
+    public function destroy(Category $category)
+    {
+        // اگر کتگوری دارای فرزند است، نمی‌توان حذف کرد (یا باید ابتدا فرزندان را حذف کرد)
+        if ($category->children()->count() > 0) {
+            return response([
+                'error' => 'این کتگوری دارای زیرکتگوری است. لطفاً ابتدا زیرکتگوری‌ها را حذف کنید.'
+            ], 422);
+        }
+
+        $category->delete();
+        return response(['message' => 'کتگوری با موفقیت حذف شد']);
+    }
+
+    /**
+     * دریافت فرزندان یک کتگوری
+     */
+    public function children(Category $category)
+    {
+        $children = $category->children()->with('children')->get();
+        return response($children);
+    }
+
+    /**
+     * دریافت محصولات یک کتگوری (با pagination و جستجو)
+     */
+    public function products(Request $request, Category $category)
+    {
+        $query = $category->products();
+        
+        // جستجو بر اساس searchFilterModel
+        $searchDataModel = json_decode($request->input('searchFilterModel'));
+        if ($searchDataModel) {
+            $query->where(function($q) use ($searchDataModel) {
+                if (is_object($searchDataModel)) {
+                    // جستجو بر اساس نام محصول
+                    if (isset($searchDataModel->name)) {
+                        $q->where('name', 'like', '%' . $searchDataModel->name . '%');
+                    }
+                    // جستجو بر اساس بارکد
+                    if (isset($searchDataModel->barcode)) {
+                        $q->orWhere('barcode', 'like', '%' . $searchDataModel->barcode . '%');
+                    }
+                } else if (is_string($searchDataModel)) {
+                    // اگر یک رشته ساده بود، در نام و بارکد جستجو می‌کند
+                    $q->where('name', 'like', '%' . $searchDataModel . '%')
+                      ->orWhere('barcode', 'like', '%' . $searchDataModel . '%');
+                }
+            });
+        }
+        
+        // دریافت تعداد آیتم در هر صفحه از request (پیش‌فرض 10)
+        $perPage = $request->input('per_page', 10);
+        
+        $products = $query->with(['images', 'categories'])->orderBy('id', 'desc')->paginate($perPage);
+        
+        // اضافه کردن اطلاعات تخفیف به هر محصول
+        $products->getCollection()->transform(function ($product) {
+            // اگر original_sale_price null باشد، آن را برابر sale_price قرار بده
+            if ($product->original_sale_price === null) {
+                $product->original_sale_price = $product->sale_price;
+            }
+            
+            // محاسبه درصد تخفیف
+            $discountPercent = 0;
+            $discountAmount = 0;
+            if ($product->original_sale_price > 0 && $product->sale_price < $product->original_sale_price) {
+                $discountAmount = $product->original_sale_price - $product->sale_price;
+                $discountPercent = ($discountAmount / $product->original_sale_price) * 100;
+            }
+            
+            // اضافه کردن فیلدهای محاسبه شده
+            $product->discount_percent = round($discountPercent, 2);
+            $product->discount_amount = $discountAmount;
+            $product->has_discount = $discountPercent > 0;
+            
+            return $product;
+        });
+        
+        // حفظ مسیر URL برای pagination
+        $products->withPath(url()->current());
+        
+        return response($products);
+    }
+}
+

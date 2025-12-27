@@ -1,0 +1,57 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Laravel\Sanctum\HasApiTokens;
+
+class Customer extends Model
+{
+    use HasFactory, HasApiTokens;
+
+    protected $fillable = [
+        'phone',
+        'password',
+        'name',
+        'last_name',
+        'national_code',
+        'state_id',
+        'city_id',
+        'address',
+        'is_verified'
+    ];
+
+    protected $hidden = [
+        'password',
+    ];
+
+    protected $casts = [
+        'is_verified' => 'boolean',
+    ];
+
+    /**
+     * استان مشتری
+     */
+    public function state()
+    {
+        return $this->belongsTo(State::class);
+    }
+
+    /**
+     * شهر مشتری
+     */
+    public function city()
+    {
+        return $this->belongsTo(City::class);
+    }
+
+    /**
+     * خریدهای این مشتری
+     */
+    public function purchases()
+    {
+        return $this->hasMany(Purchase::class, 'phone', 'phone');
+    }
+}
+

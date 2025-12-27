@@ -3,6 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\CategoryController;
 
 /*
 |--------------------------------------------------------------------------
@@ -35,6 +36,17 @@ Route::name('confirmationCode.')->prefix('confirmation-code')->group(function ()
     Route::post('check', [\App\Http\Controllers\ConfirmationCode\ConfirmationCodeController::class, 'check']);
 });
 
+// Customer registration routes - no authentication required
+Route::prefix('customer-register')->name('customer-register.')->group(function () {
+    Route::post('send-code', [\App\Http\Controllers\CustomerRegisterController::class, 'sendVerificationCode']);
+    Route::post('verify', [\App\Http\Controllers\CustomerRegisterController::class, 'verifyAndRegister']);
+    Route::post('check-phone', [\App\Http\Controllers\CustomerRegisterController::class, 'checkPhone']);
+    Route::post('login', [\App\Http\Controllers\CustomerRegisterController::class, 'verifyAndLogin']);
+});
+
+// Customer login route (shorter path)
+Route::post('customer/login', [\App\Http\Controllers\CustomerRegisterController::class, 'verifyAndLogin']);
+
 
 Route::prefix('reports')->name('reports.')->group(function () {
     Route::get('/', [\App\Http\Controllers\ReportController::class, 'index']);
@@ -42,6 +54,15 @@ Route::prefix('reports')->name('reports.')->group(function () {
 
 // Public routes - no authentication required
 Route::get("product-all", [ProductController::class, 'getAll']);
+Route::get("product", [ProductController::class, 'index']);
+Route::get("product/{product}", [ProductController::class, 'show']);
+
+// Category routes - public GET, authenticated POST/PUT/DELETE
+Route::get("category", [CategoryController::class, 'index']);
+Route::get("category-all", [CategoryController::class, 'getAll']);
+Route::get("category/{category}", [CategoryController::class, 'show']);
+Route::get("category/{category}/children", [CategoryController::class, 'children']);
+Route::get("category/{category}/products", [CategoryController::class, 'products']);
 
 Route::prefix('purchased-products')->name('purchased-products.')->group(function () {
     Route::get('/', [\App\Http\Controllers\PurchasedProductController::class, 'index']);
@@ -71,8 +92,17 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('customer-broadcast/list', [\App\Http\Controllers\CustomerController::class, 'getCustomersForBroadcast']);
     Route::post('customer-broadcast/message', [\App\Http\Controllers\CustomerController::class, 'broadcastMessage']);
 
-    Route::resource("product", ProductController::class);
+    // Product routes that require authentication
+    Route::post("product", [ProductController::class, 'store']);
+    Route::put("product/{product}", [ProductController::class, 'update']);
+    Route::delete("product/{product}", [ProductController::class, 'destroy']);
+    Route::delete("product/{product}/image/{imageId}", [ProductController::class, 'deleteImage']);
     Route::post("products/apply-discount", [ProductController::class, 'applyDiscount']);
+
+    // Category routes that require authentication
+    Route::post("category", [CategoryController::class, 'store']);
+    Route::put("category/{category}", [CategoryController::class, 'update']);
+    Route::delete("category/{category}", [CategoryController::class, 'destroy']);
 
     Route::prefix('settings')->name('settings.')->group(function () {
         Route::get('/', [\App\Http\Controllers\SettingController::class, 'index']);
@@ -131,3 +161,6 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
+
+// Customer logout route - requires authentication
+Route::middleware('auth:sanctum')->post('customer-register/logout', [\App\Http\Controllers\CustomerRegisterController::class, 'logout']);

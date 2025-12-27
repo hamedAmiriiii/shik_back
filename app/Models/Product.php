@@ -21,6 +21,22 @@ class Product extends Model
     {
         return $query->whereBetween('sale_price', [$minPrice, $maxPrice]);
     }
+
+    /**
+     * عکس‌های این محصول
+     */
+    public function images()
+    {
+        return $this->hasMany(ProductImage::class)->orderBy('order');
+    }
+
+    /**
+     * کتگوری‌های این محصول
+     */
+    public function categories()
+    {
+        return $this->belongsToMany(Category::class);
+    }
 }
 
 
