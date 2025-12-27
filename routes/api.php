@@ -173,6 +173,10 @@ Route::middleware('auth:sanctum')->prefix('cart')->name('cart.')->group(function
     Route::get('/default-address', [\App\Http\Controllers\CartController::class, 'getDefaultAddress']);
     Route::post('/complete-order', [\App\Http\Controllers\CartController::class, 'completeOrder']);
     Route::delete('/', [\App\Http\Controllers\CartController::class, 'destroy']);
+    
+    // Customer orders routes (only their own orders)
+    Route::get('/my-orders', [\App\Http\Controllers\CartController::class, 'myOrders']);
+    Route::get('/my-orders/{cart}', [\App\Http\Controllers\CartController::class, 'showOrder']);
 });
 
 // Order routes - requires admin authentication (for managing online orders)

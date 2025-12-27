@@ -10,6 +10,7 @@ use App\Models\City;
 use App\Models\Purchase;
 use App\Models\PurchasedProduct;
 use App\Models\UserShiksho;
+use App\Models\CustomerPhone;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -346,18 +347,24 @@ class CartController extends Controller
                     $text = "شیکشو\nبا تشکر از خرید شما";
                     SmsTools::sendSms($phone, $text);
                 }
+
+                // ثبت شماره تلفن در جدول customer_phones
+                CustomerPhone::createNewPhone($phone);
             }
 
-            DB::commit();
-
-            // بارگذاری روابط
+            // بارگذاری روابط قبل از commit
             $purchase->load('purchasedProducts.product');
+            
+            // refresh cart برای دریافت آخرین وضعیت
+            $cart->refresh();
+
+            DB::commit();
 
             return response([
                 'message' => 'سفارش با موفقیت ثبت شد',
                 'purchase' => $purchase,
                 'cart' => $cart
-            ], 201);
+            ], 200);
 
         } catch (\Exception $e) {
             DB::rollBack();
@@ -390,6 +397,73 @@ class CartController extends Controller
         return response([
             'message' => 'سبد خرید با موفقیت حذف شد'
         ]);
+    }
+
+    /**
+     * لیست سفارشات مشتری (فقط سفارشات خودش)
+     */
+    public function myOrders(Request $request)
+    {
+        $customer = $request->user();
+
+        $query = Cart::where('customer_id', $customer->id)
+            ->where('status', '!=', Cart::STATUS_PENDING)
+            ->with(['items.product.images', 'items.product.categories'])
+            ->orderBy('id', 'desc');
+
+        // فیلتر بر اساس status
+        if ($request->has('status')) {
+            $query->where('status', $request->input('status'));
+        }
+
+        // فیلتر بر اساس تاریخ
+        if ($request->has('date_from')) {
+            $query->whereDate('created_at', '>=', $request->input('date_from'));
+        }
+        if ($request->has('date_to')) {
+            $query->whereDate('created_at', '<=', $request->input('date_to'));
+        }
+
+        // دریافت تعداد آیتم در هر صفحه از request (پیش‌فرض 20)
+        $perPage = $request->input('per_page', 20);
+        
+        $orders = $query->paginate($perPage);
+        
+        // حفظ مسیر URL برای pagination
+        $orders->withPath(url()->current());
+        
+        return response($orders);
+    }
+
+    /**
+     * نمایش جزئیات یک سفارش مشتری (فقط سفارشات خودش)
+     */
+    public function showOrder(Request $request, $cartId)
+    {
+        $customer = $request->user();
+
+        // پیدا کردن cart
+        $cart = Cart::where('id', $cartId)
+            ->where('status', '!=', Cart::STATUS_PENDING)
+            ->first();
+
+        // بررسی اینکه cart وجود دارد
+        if (!$cart) {
+            return response([
+                'error' => 'سفارش یافت نشد'
+            ], 404);
+        }
+
+        // بررسی اینکه cart متعلق به این مشتری است
+        if ($cart->customer_id !== $customer->id) {
+            return response([
+                'error' => 'شما دسترسی به این سفارش ندارید'
+            ], 403);
+        }
+
+        $cart->load(['items.product.images', 'items.product.categories']);
+        
+        return response($cart);
     }
 }
 

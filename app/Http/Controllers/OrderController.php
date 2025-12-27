@@ -3,15 +3,46 @@
 namespace App\Http\Controllers;
 
 use App\Models\Cart;
+use App\Models\Customer;
+use App\Models\User;
 use Illuminate\Http\Request;
 
 class OrderController extends Controller
 {
     /**
+     * بررسی اینکه کاربر یک ادمین است (نه Customer)
+     */
+    private function checkAdmin(Request $request)
+    {
+        $user = $request->user();
+        
+        // بررسی اینکه کاربر یک Customer نیست
+        if ($user instanceof Customer) {
+            return response([
+                'error' => 'این endpoint فقط برای ادمین است'
+            ], 403);
+        }
+        
+        // بررسی اینکه کاربر یک User (ادمین) است
+        if (!($user instanceof User)) {
+            return response([
+                'error' => 'دسترسی غیرمجاز'
+            ], 403);
+        }
+        
+        return null;
+    }
+
+    /**
      * لیست سفارشات اینترنتی
      */
     public function index(Request $request)
     {
+        // بررسی دسترسی ادمین
+        $adminCheck = $this->checkAdmin($request);
+        if ($adminCheck) {
+            return $adminCheck;
+        }
         $query = Cart::where('status', '!=', Cart::STATUS_PENDING)
             ->with(['customer', 'items.product.images', 'items.product.categories'])
             ->orderBy('id', 'desc');
@@ -75,8 +106,14 @@ class OrderController extends Controller
     /**
      * نمایش جزئیات یک سفارش
      */
-    public function show(Cart $cart)
+    public function show(Request $request, Cart $cart)
     {
+        // بررسی دسترسی ادمین
+        $adminCheck = $this->checkAdmin($request);
+        if ($adminCheck) {
+            return $adminCheck;
+        }
+
         // بررسی اینکه cart یک سفارش است (نه pending)
         if ($cart->status === Cart::STATUS_PENDING) {
             return response([
@@ -94,6 +131,12 @@ class OrderController extends Controller
      */
     public function updateStatus(Request $request, Cart $cart)
     {
+        // بررسی دسترسی ادمین
+        $adminCheck = $this->checkAdmin($request);
+        if ($adminCheck) {
+            return $adminCheck;
+        }
+
         $request->validate([
             'status' => 'required|string|in:' . Cart::STATUS_COMPLETED . ',' . Cart::STATUS_SHIPPED . ',' . Cart::STATUS_CANCELLED
         ]);
