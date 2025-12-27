@@ -164,3 +164,11 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 
 // Customer logout route - requires authentication
 Route::middleware('auth:sanctum')->post('customer-register/logout', [\App\Http\Controllers\CustomerRegisterController::class, 'logout']);
+
+// Cart routes - requires customer authentication
+Route::middleware('auth:sanctum')->prefix('cart')->name('cart.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\CartController::class, 'show']);
+    Route::post('/', [\App\Http\Controllers\CartController::class, 'store']);
+    Route::put('/shipping-info', [\App\Http\Controllers\CartController::class, 'updateShippingInfo']);
+    Route::delete('/', [\App\Http\Controllers\CartController::class, 'destroy']);
+});

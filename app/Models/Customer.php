@@ -53,5 +53,21 @@ class Customer extends Model
     {
         return $this->hasMany(Purchase::class, 'phone', 'phone');
     }
+
+    /**
+     * سبدهای خرید این مشتری
+     */
+    public function carts()
+    {
+        return $this->hasMany(Cart::class);
+    }
+
+    /**
+     * سبد خرید فعلی (pending) این مشتری
+     */
+    public function currentCart()
+    {
+        return $this->hasOne(Cart::class)->where('status', 'pending');
+    }
 }
 
