@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Category;
+use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -204,10 +205,17 @@ class CategoryController extends Controller
 
     /**
      * دریافت محصولات یک کتگوری (با pagination و جستجو)
+     * شامل محصولات زیرمجموعه‌ها نیز می‌شود
      */
     public function products(Request $request, Category $category)
     {
-        $query = $category->products();
+        // دریافت تمام IDهای زیرمجموعه‌ها (شامل خود category)
+        $categoryIds = $category->getAllDescendantIds();
+        
+        // دریافت محصولاتی که به این category یا زیرمجموعه‌هایش تعلق دارند
+        $query = Product::whereHas('categories', function($q) use ($categoryIds) {
+            $q->whereIn('categories.id', $categoryIds);
+        });
         
         // جستجو بر اساس searchFilterModel
         $searchDataModel = json_decode($request->input('searchFilterModel'));

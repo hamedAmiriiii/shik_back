@@ -78,5 +78,27 @@ class Category extends Model
         
         return implode(' > ', $path);
     }
+
+    /**
+     * دریافت تمام IDهای زیرمجموعه‌ها (شامل خود category)
+     */
+    public function getAllDescendantIds()
+    {
+        $ids = [$this->id];
+        $this->collectDescendantIds($ids);
+        return $ids;
+    }
+
+    /**
+     * جمع‌آوری IDهای زیرمجموعه‌ها به صورت بازگشتی
+     */
+    private function collectDescendantIds(&$ids)
+    {
+        $children = $this->children()->get();
+        foreach ($children as $child) {
+            $ids[] = $child->id;
+            $child->collectDescendantIds($ids);
+        }
+    }
 }
 
