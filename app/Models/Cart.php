@@ -9,6 +9,12 @@ class Cart extends Model
 {
     use HasFactory;
 
+    // Status constants
+    const STATUS_PENDING = 'pending';
+    const STATUS_COMPLETED = 'completed';
+    const STATUS_SHIPPED = 'shipped';
+    const STATUS_CANCELLED = 'cancelled';
+
     protected $fillable = [
         'customer_id',
         'status',

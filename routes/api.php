@@ -174,3 +174,10 @@ Route::middleware('auth:sanctum')->prefix('cart')->name('cart.')->group(function
     Route::post('/complete-order', [\App\Http\Controllers\CartController::class, 'completeOrder']);
     Route::delete('/', [\App\Http\Controllers\CartController::class, 'destroy']);
 });
+
+// Order routes - requires admin authentication (for managing online orders)
+Route::middleware('auth:sanctum')->prefix('orders')->name('orders.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\OrderController::class, 'index']);
+    Route::get('/{cart}', [\App\Http\Controllers\OrderController::class, 'show']);
+    Route::put('/{cart}/status', [\App\Http\Controllers\OrderController::class, 'updateStatus']);
+});

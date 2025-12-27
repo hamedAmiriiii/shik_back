@@ -24,7 +24,7 @@ class CartController extends Controller
         $customer = $request->user();
         
         $cart = Cart::where('customer_id', $customer->id)
-            ->where('status', 'pending')
+            ->where('status', Cart::STATUS_PENDING)
             ->with(['items.product.images', 'items.product.categories'])
             ->first();
 
@@ -145,7 +145,7 @@ class CartController extends Controller
         $customer = $request->user();
 
         $cart = Cart::where('customer_id', $customer->id)
-            ->where('status', 'pending')
+            ->where('status', Cart::STATUS_PENDING)
             ->first();
 
         if (!$cart) {
@@ -233,7 +233,7 @@ class CartController extends Controller
         $useCredit = $request->input('use_credit', false);
 
         $cart = Cart::where('customer_id', $customer->id)
-            ->where('status', 'pending')
+            ->where('status', Cart::STATUS_PENDING)
             ->with(['items.product'])
             ->first();
 
@@ -326,7 +326,7 @@ class CartController extends Controller
 
             // تغییر status سبد به completed
             $cart->update([
-                'status' => 'completed'
+                'status' => Cart::STATUS_COMPLETED
             ]);
 
             // اگر شماره تلفن وجود دارد
@@ -376,7 +376,7 @@ class CartController extends Controller
         $customer = $request->user();
 
         $cart = Cart::where('customer_id', $customer->id)
-            ->where('status', 'pending')
+            ->where('status', Cart::STATUS_PENDING)
             ->first();
 
         if (!$cart) {
