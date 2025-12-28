@@ -5,7 +5,11 @@ namespace App\Http\Controllers;
 use App\Models\Cart;
 use App\Models\Customer;
 use App\Models\User;
+use App\Models\Purchase;
+use App\Models\PurchasedProduct;
+use App\Models\UserShiksho;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class OrderController extends Controller
 {
@@ -127,7 +131,7 @@ class OrderController extends Controller
     }
 
     /**
-     * تغییر status سفارش (مثلاً از completed به shipped)
+     * تغییر status سفارش (مثلاً از completed به shipped یا cancelled)
      */
     public function updateStatus(Request $request, Cart $cart)
     {
@@ -149,9 +153,106 @@ class OrderController extends Controller
         }
 
         $oldStatus = $cart->status;
-        $cart->update([
-            'status' => $request->input('status')
-        ]);
+        $newStatus = $request->input('status');
+
+        // اگر می‌خواهیم به cancelled تغییر دهیم
+        if ($newStatus === Cart::STATUS_CANCELLED && $oldStatus !== Cart::STATUS_CANCELLED) {
+            DB::beginTransaction();
+            try {
+                // پیدا کردن Purchase مربوط به این Cart
+                $phone = $cart->shipping_phone;
+                if ($phone) {
+                    // بارگذاری items
+                    $cart->load('items');
+                    
+                    // پیدا کردن Purchase بر اساس phone و total_amount و created_at
+                    // (چون در completeOrder، Purchase با همین اطلاعات ایجاد می‌شود)
+                    $totalAmount = $cart->total;
+                    $purchase = Purchase::where('phone', $phone)
+                        ->where('total_amount', $totalAmount)
+                        ->whereDate('created_at', $cart->created_at->toDateString())
+                        ->orderBy('created_at', 'desc')
+                        ->first();
+                    
+                    // اگر پیدا نشد، با استفاده از product_id های Cart سعی می‌کنیم
+                    if (!$purchase) {
+                        $cart->load('items');
+                        $productIds = $cart->items->pluck('product_id')->toArray();
+                        
+                        if (!empty($productIds)) {
+                            $purchasedProduct = PurchasedProduct::whereIn('product_id', $productIds)
+                                ->whereHas('purchase', function($q) use ($phone, $cart) {
+                                    $q->where('phone', $phone)
+                                      ->whereDate('created_at', $cart->created_at->toDateString());
+                                })
+                                ->first();
+                            
+                            if ($purchasedProduct) {
+                                $purchase = $purchasedProduct->purchase;
+                            }
+                        }
+                    }
+
+                    if ($purchase) {
+                        // بارگذاری purchasedProducts
+                        $purchase->load('purchasedProducts');
+                        
+                        // برگرداندن موجودی محصولات
+                        $cart->load('items.product');
+                        foreach ($cart->items as $item) {
+                            if ($item->product) {
+                                $item->product->increment('quantity', $item->quantity);
+                            }
+                        }
+
+                        // برگرداندن اعتبار استفاده شده
+                        if ($purchase->credit_used > 0) {
+                            $userShiksho = UserShiksho::where('phone', $phone)->first();
+                            if ($userShiksho) {
+                                $userShiksho->credit += $purchase->credit_used;
+                                $userShiksho->save();
+                            }
+                        }
+
+                        // کم کردن اعتبار کسب شده
+                        if ($purchase->credit_earned > 0) {
+                            $userShiksho = UserShiksho::where('phone', $phone)->first();
+                            if ($userShiksho && $userShiksho->credit >= $purchase->credit_earned) {
+                                $userShiksho->credit -= $purchase->credit_earned;
+                                $userShiksho->save();
+                            }
+                        }
+
+                        // حذف PurchasedProduct های مربوط به این Purchase
+                        // (برای اینکه در لیست خریدها نمایش داده نشوند)
+                        foreach ($purchase->purchasedProducts as $purchasedProduct) {
+                            $purchasedProduct->delete();
+                        }
+                        
+                        // حذف Purchase
+                        $purchase->delete();
+                    }
+                }
+
+                // تغییر status
+                $cart->update([
+                    'status' => $newStatus
+                ]);
+
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                return response([
+                    'error' => 'خطا در لغو سفارش',
+                    'message' => $e->getMessage()
+                ], 500);
+            }
+        } else {
+            // برای تغییر status به completed یا shipped
+            $cart->update([
+                'status' => $newStatus
+            ]);
+        }
 
         $cart->load(['customer', 'items.product.images', 'items.product.categories']);
 
@@ -160,6 +261,24 @@ class OrderController extends Controller
             'cart' => $cart,
             'old_status' => $oldStatus,
             'new_status' => $cart->status
+        ]);
+    }
+
+    /**
+     * تعداد سفارشات تکمیل شده
+     */
+    public function completedOrdersCount(Request $request)
+    {
+        // بررسی دسترسی ادمین
+        $adminCheck = $this->checkAdmin($request);
+        if ($adminCheck) {
+            return $adminCheck;
+        }
+
+        $count = Cart::where('status', Cart::STATUS_COMPLETED)->count();
+
+        return response([
+            'count' => $count
         ]);
     }
 }

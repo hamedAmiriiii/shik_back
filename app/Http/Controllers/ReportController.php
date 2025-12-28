@@ -153,12 +153,6 @@ class ReportController extends Controller
             // جمع کردن اعتبار هدیه داده شده (که باید از سود کسر شود)
             $totalCreditEarned += $purchase->credit_earned;
         }
-        
-        // کسر اعتبار استفاده شده از فروش (چون total_amount آن را کسر کرده بود)
-        // اما ما sale_price را استفاده کرده‌ایم، پس باید credit_used را کسر کنیم
-        $totalCreditUsed = Purchase::whereBetween('created_at', [$startString, $endString])
-            ->sum('credit_used');
-        $totalSales = $totalSales - $totalCreditUsed;
 
         // محاسبه برگشتی‌ها با اطلاعات محصولات
         $returnedProducts = ReturnedProduct::with('product')
@@ -229,12 +223,6 @@ class ReportController extends Controller
             // جمع کردن اعتبار هدیه داده شده (که باید از سود کسر شود)
             $totalCreditEarned += $purchase->credit_earned;
         }
-        
-        // کسر اعتبار استفاده شده از فروش (چون total_amount آن را کسر کرده بود)
-        // اما ما sale_price را استفاده کرده‌ایم، پس باید credit_used را کسر کنیم
-        $totalCreditUsed = Purchase::whereBetween('created_at', [$startDate, $endDate])
-            ->sum('credit_used');
-        $totalSales = $totalSales - $totalCreditUsed;
 
         // محاسبه برگشتی‌ها با اطلاعات محصولات
         $returnedProducts = ReturnedProduct::with('product')

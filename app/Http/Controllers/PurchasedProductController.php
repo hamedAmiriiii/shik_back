@@ -300,6 +300,71 @@ class PurchasedProductController extends Controller
 
 
     /**
+     * برگشت یک محصول از یک خرید
+     * محصول از لیست خرید حذف شده و موجودی برگردانده می‌شود
+     * 
+     * @param Purchase $purchase
+     * @param PurchasedProduct $purchasedProduct
+     * @return \Illuminate\Http\Response
+     */
+    public function returnItem(Purchase $purchase, PurchasedProduct $purchasedProduct)
+    {
+        // بررسی اینکه محصول متعلق به این خرید باشد
+        if ($purchasedProduct->purchase_id !== $purchase->id) {
+            return response(['error' => 'این محصول متعلق به این خرید نیست'], 400);
+        }
+
+        // افزایش موجودی محصول
+        $product = $purchasedProduct->product;
+        $product->increment('quantity', $purchasedProduct->quantity);
+
+        // کم کردن مبلغ از total_amount خرید
+        $returnAmount = $purchasedProduct->sale_price * $purchasedProduct->quantity;
+        $purchase->total_amount = max(0, $purchase->total_amount - $returnAmount);
+
+        // برگشت اعتبار کسب شده متناسب با مبلغ برگشتی
+        $creditReturned = 0;
+        if ($purchase->credit_earned > 0 && $purchase->phone) {
+            // محاسبه اعتبار برگشتی بر اساس نسبت مبلغ برگشتی
+            $creditReturned = UserShiksho::calculateCredit($returnAmount);
+            
+            // کم کردن از credit_earned خرید
+            $purchase->credit_earned = max(0, $purchase->credit_earned - $creditReturned);
+            
+            // کم کردن از اعتبار کاربر
+            $userShiksho = UserShiksho::where('phone', $purchase->phone)->first();
+            if ($userShiksho && $userShiksho->credit >= $creditReturned) {
+                $userShiksho->credit = max(0, $userShiksho->credit - $creditReturned);
+                $userShiksho->save();
+            }
+        }
+
+        $purchase->save();
+
+        // ذخیره اطلاعات برای پاسخ قبل از حذف
+        $returnedInfo = [
+            'product_id' => $purchasedProduct->product_id,
+            'product_name' => $product->name,
+            'quantity' => $purchasedProduct->quantity,
+            'sale_price' => $purchasedProduct->sale_price,
+            'return_amount' => $returnAmount,
+            'credit_returned' => $creditReturned,
+        ];
+
+        // حذف محصول از لیست خرید
+        $purchasedProduct->delete();
+
+        // بارگذاری مجدد خرید با محصولات باقیمانده
+        $purchase->load('purchasedProducts.product');
+
+        return response([
+            'message' => 'محصول با موفقیت برگشت داده شد',
+            'returned_item' => $returnedInfo,
+            'purchase' => $purchase,
+        ], 200);
+    }
+
+    /**
      * دریافت اعتبار کاربر بر اساس شماره تلفن
      * 
      * @param Request $request

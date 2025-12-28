@@ -71,6 +71,7 @@ Route::prefix('purchased-products')->name('purchased-products.')->group(function
     Route::get('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'show']);
     Route::put('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'update']);
     Route::delete('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'destroy']);
+    Route::delete('/{purchase}/items/{purchasedProduct}', [\App\Http\Controllers\PurchasedProductController::class, 'returnItem']);
 });
 
 Route::prefix('customers')->name('customers.')->group(function () {
@@ -182,6 +183,7 @@ Route::middleware('auth:sanctum')->prefix('cart')->name('cart.')->group(function
 // Order routes - requires admin authentication (for managing online orders)
 Route::middleware('auth:sanctum')->prefix('orders')->name('orders.')->group(function () {
     Route::get('/', [\App\Http\Controllers\OrderController::class, 'index']);
+    Route::get('/count/completed', [\App\Http\Controllers\OrderController::class, 'completedOrdersCount']);
     Route::get('/{cart}', [\App\Http\Controllers\OrderController::class, 'show']);
     Route::put('/{cart}/status', [\App\Http\Controllers\OrderController::class, 'updateStatus']);
 });
