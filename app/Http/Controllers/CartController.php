@@ -56,6 +56,8 @@ class CartController extends Controller
             'products' => 'required|array|min:1',
             'products.*.product_id' => 'required|exists:products,id',
             'products.*.quantity' => 'required|integer|min:1',
+            'products.*.size' => 'nullable|string|max:255', // سایز انتخاب شده (اختیاری)
+            'products.*.color' => 'nullable|string|max:255', // رنگ انتخاب شده (اختیاری)
         ]);
 
         $customer = $request->user();
@@ -103,6 +105,8 @@ class CartController extends Controller
                     'product_id' => $product->id,
                     'quantity' => $productData['quantity'],
                     'price' => $product->sale_price, // قیمت فعلی محصول
+                    'size' => $productData['size'] ?? null, // سایز انتخاب شده
+                    'color' => $productData['color'] ?? null, // رنگ انتخاب شده
                 ]);
             }
 
@@ -320,6 +324,8 @@ class CartController extends Controller
                     'quantity' => $item->quantity,
                     'purchase_price' => $item->product->purchase_price,
                     'sale_price' => $item->price, // قیمت ذخیره شده در cart
+                    'size' => $item->size, // سایز انتخاب شده
+                    'color' => $item->color, // رنگ انتخاب شده
                 ]);
 
                 // کسر موجودی محصول

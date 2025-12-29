@@ -244,15 +244,17 @@ class PurchasedProductController extends Controller
                 'shipping_phone' => $phone,
             ]);
 
-            // ایجاد CartItem ها از PurchasedProduct ها
-            foreach ($purchasedProducts as $purchasedProduct) {
-                CartItem::create([
-                    'cart_id' => $cart->id,
-                    'product_id' => $purchasedProduct->product_id,
-                    'quantity' => $purchasedProduct->quantity,
-                    'price' => $purchasedProduct->sale_price,
-                ]);
-            }
+                // ایجاد CartItem ها از PurchasedProduct ها
+                foreach ($purchasedProducts as $purchasedProduct) {
+                    CartItem::create([
+                        'cart_id' => $cart->id,
+                        'product_id' => $purchasedProduct->product_id,
+                        'quantity' => $purchasedProduct->quantity,
+                        'price' => $purchasedProduct->sale_price,
+                        'size' => $purchasedProduct->size, // سایز انتخاب شده
+                        'color' => $purchasedProduct->color, // رنگ انتخاب شده
+                    ]);
+                }
         }
 
         // اگر شماره تلفن وجود دارد
