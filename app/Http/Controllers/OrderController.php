@@ -53,7 +53,26 @@ class OrderController extends Controller
 
         // فیلتر بر اساس status
         if ($request->has('status')) {
-            $query->where('status', $request->input('status'));
+            $status = $request->input('status');
+            // اگر آرایه است (چند status)
+            if (is_array($status)) {
+                $query->whereIn('status', $status);
+            } else {
+                // اگر رشته است (یک status)
+                $query->where('status', $status);
+            }
+        }
+        
+        // فیلترهای جداگانه برای status های خاص
+        if ($request->has('shipped')) {
+            $query->where('status', Cart::STATUS_SHIPPED);
+        }
+        if ($request->has('completed')) {
+            $query->where('status', Cart::STATUS_COMPLETED);
+        }
+        // فیلتر برای ارسال شده یا تکمیل شده
+        if ($request->has('shipped_or_completed')) {
+            $query->whereIn('status', [Cart::STATUS_SHIPPED, Cart::STATUS_COMPLETED]);
         }
 
         // جستجو بر اساس searchFilterModel

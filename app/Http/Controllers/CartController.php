@@ -332,10 +332,9 @@ class CartController extends Controller
                 $item->product->decrement('quantity', $item->quantity);
             }
 
-            // تغییر status سبد به completed
-            $cart->update([
-                'status' => Cart::STATUS_COMPLETED
-            ]);
+            // تغییر status سبد به completed (قبل از commit)
+            $cart->status = Cart::STATUS_COMPLETED;
+            $cart->save();
 
             // اگر شماره تلفن وجود دارد
             if ($phone) {
@@ -359,13 +358,13 @@ class CartController extends Controller
                 CustomerPhone::createNewPhone($phone);
             }
 
-            // بارگذاری روابط قبل از commit
+            DB::commit();
+
+            // بارگذاری روابط بعد از commit - استفاده از find برای اطمینان از دریافت آخرین وضعیت
+            $purchase->refresh();
             $purchase->load('purchasedProducts.product');
             
-            // refresh cart برای دریافت آخرین وضعیت
-            $cart->refresh();
-
-            DB::commit();
+            $cart = Cart::with(['customer', 'items.product.images', 'items.product.categories'])->find($cart->id);
 
             return response([
                 'message' => 'سفارش با موفقیت ثبت شد',
