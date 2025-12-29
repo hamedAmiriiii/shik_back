@@ -252,6 +252,62 @@ class OrderController extends Controller
             $cart->update([
                 'status' => $newStatus
             ]);
+
+            // اگر status به shipped تغییر کرد و Purchase وجود ندارد، Purchase ایجاد کن
+            if ($newStatus === Cart::STATUS_SHIPPED && $oldStatus !== Cart::STATUS_SHIPPED) {
+                // بررسی اینکه آیا Purchase برای این Cart وجود دارد یا نه
+                $existingPurchase = Purchase::where('cart_id', $cart->id)->first();
+                
+                if (!$existingPurchase) {
+                    DB::beginTransaction();
+                    try {
+                        $cart->load(['items.product', 'customer']);
+                        $phone = $cart->shipping_phone;
+                        
+                        if ($phone && $cart->items->count() > 0) {
+                            // محاسبه مجموع مبلغ خرید
+                            $originalTotalAmount = $cart->total;
+                            
+                            // محاسبه credit_used و credit_earned (اگر در Cart ذخیره نشده)
+                            $creditUsed = 0;
+                            $creditEarned = 0;
+                            
+                            $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
+                            if ($phone && $enableLoyaltyCredit) {
+                                $creditEarned = \App\Models\UserShiksho::calculateCredit($originalTotalAmount);
+                            }
+                            
+                            // ایجاد Purchase
+                            $purchase = Purchase::create([
+                                'cart_id' => $cart->id,
+                                'phone' => $phone,
+                                'total_amount' => $originalTotalAmount,
+                                'credit_used' => $creditUsed,
+                                'credit_earned' => $creditEarned,
+                            ]);
+
+                            // ذخیره محصولات خریداری شده
+                            foreach ($cart->items as $item) {
+                                PurchasedProduct::create([
+                                    'purchase_id' => $purchase->id,
+                                    'product_id' => $item->product_id,
+                                    'quantity' => $item->quantity,
+                                    'purchase_price' => $item->product->purchase_price,
+                                    'sale_price' => $item->price,
+                                    'size' => $item->size,
+                                    'color' => $item->color,
+                                ]);
+                            }
+                        }
+                        
+                        DB::commit();
+                    } catch (\Exception $e) {
+                        DB::rollBack();
+                        // خطا را لاگ می‌کنیم اما ادامه می‌دهیم
+                        \Log::error('خطا در ایجاد Purchase هنگام تغییر وضعیت به shipped: ' . $e->getMessage());
+                    }
+                }
+            }
         }
 
         $cart->load(['customer', 'items.product.images', 'items.product.categories']);

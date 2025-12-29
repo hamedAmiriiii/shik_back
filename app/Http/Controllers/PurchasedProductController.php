@@ -224,39 +224,6 @@ class PurchasedProductController extends Controller
             $product->decrement('quantity', $productData['quantity']);
         }
 
-        // ایجاد Cart برای نمایش در لیست سفارشات (اگر phone وجود دارد)
-        $cart = null;
-        if ($phone) {
-            // پیدا کردن یا ایجاد Customer بر اساس phone
-            $customer = Customer::firstOrCreate(
-                ['phone' => $phone],
-                [
-                    'phone' => $phone,
-                    'password' => bcrypt(uniqid()), // رمز عبور موقت (مشتری باید بعداً تغییر دهد)
-                    'is_verified' => false,
-                ]
-            );
-            
-            // ایجاد Cart با status completed
-            $cart = Cart::create([
-                'customer_id' => $customer->id,
-                'status' => Cart::STATUS_COMPLETED,
-                'shipping_phone' => $phone,
-            ]);
-
-                // ایجاد CartItem ها از PurchasedProduct ها
-                foreach ($purchasedProducts as $purchasedProduct) {
-                    CartItem::create([
-                        'cart_id' => $cart->id,
-                        'product_id' => $purchasedProduct->product_id,
-                        'quantity' => $purchasedProduct->quantity,
-                        'price' => $purchasedProduct->sale_price,
-                        'size' => $purchasedProduct->size, // سایز انتخاب شده
-                        'color' => $purchasedProduct->color, // رنگ انتخاب شده
-                    ]);
-                }
-        }
-
         // اگر شماره تلفن وجود دارد
         if ($phone) {
             $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
