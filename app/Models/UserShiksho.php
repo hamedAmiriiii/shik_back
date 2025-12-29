@@ -33,10 +33,10 @@ class UserShiksho extends Model
         
         if ($purchaseAmount <= 1000000) {
             // تا 1 میلیون: 5 درصد
-            $credit = $purchaseAmount * 0.05;
+            $credit = $purchaseAmount * 0.03;
         } elseif ($purchaseAmount <= 2000000) {
             // تا 2 میلیون: 4 درصد
-            $credit = $purchaseAmount * 0.05;
+            $credit = $purchaseAmount * 0.04;
         } else {
             // بالاتر از 2 میلیون: 3 درصد
             $credit = $purchaseAmount * 0.05;

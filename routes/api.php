@@ -55,6 +55,7 @@ Route::prefix('reports')->name('reports.')->group(function () {
 // Public routes - no authentication required
 Route::get("product-all", [ProductController::class, 'getAll']);
 Route::get("product", [ProductController::class, 'index']);
+Route::get("product/best-selling", [ProductController::class, 'bestSelling']);
 Route::get("product/{product}", [ProductController::class, 'show']);
 
 // Category routes - public GET, authenticated POST/PUT/DELETE

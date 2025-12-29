@@ -9,12 +9,14 @@ class Product extends Model
 {
     use HasFactory;
 
-    protected $fillable = ["name", "price_buy", "quantity", "barcode","sale_price","purchase_price","original_sale_price"];
+    protected $fillable = ["name", "price_buy", "quantity", "barcode", "sale_price", "purchase_price", "original_sale_price", "sizes", "colors"];
 
     protected $casts = [
         'purchase_price' => 'decimal:2',
         'sale_price' => 'decimal:2',
         'original_sale_price' => 'decimal:2',
+        'sizes' => 'array',
+        'colors' => 'array',
     ];
 
     public function scopeFilterByPrice($query, $minPrice, $maxPrice)

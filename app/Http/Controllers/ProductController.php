@@ -97,6 +97,10 @@ class ProductController extends Controller
             'images.*' => 'nullable|string',
             'category_ids' => 'nullable|array',
             'category_ids.*' => 'exists:categories,id',
+            'sizes' => 'nullable|array', // لیست سایزها
+            'sizes.*' => 'string',
+            'colors' => 'nullable|array', // لیست رنگ‌ها
+            'colors.*' => 'string',
         ]);
 
         // محاسبه قیمت با تخفیف در صورت وجود
@@ -237,6 +241,53 @@ class ProductController extends Controller
     }
 
     /**
+     * دریافت محصولات پرفروش
+     * بر اساس تعداد فروش (مجموع quantity در purchased_products)
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\Response
+     */
+    public function bestSelling(Request $request)
+    {
+        $limit = $request->input('limit', 10); // پیش‌فرض 10 محصول
+        
+        // محاسبه تعداد فروش هر محصول
+        $bestSellingProducts = Product::select('products.*')
+            ->selectRaw('COALESCE(SUM(purchased_products.quantity), 0) as total_sold')
+            ->leftJoin('purchased_products', 'products.id', '=', 'purchased_products.product_id')
+            ->groupBy('products.id')
+            ->orderBy('total_sold', 'desc')
+            ->limit($limit)
+            ->with(['images', 'categories'])
+            ->get();
+
+        // اضافه کردن اطلاعات تخفیف به هر محصول
+        $bestSellingProducts->transform(function ($product) {
+            // اگر original_sale_price null باشد، آن را برابر sale_price قرار بده
+            if ($product->original_sale_price === null) {
+                $product->original_sale_price = $product->sale_price;
+            }
+            
+            // محاسبه درصد تخفیف
+            $discountPercent = 0;
+            $discountAmount = 0;
+            if ($product->original_sale_price > 0 && $product->sale_price < $product->original_sale_price) {
+                $discountAmount = $product->original_sale_price - $product->sale_price;
+                $discountPercent = ($discountAmount / $product->original_sale_price) * 100;
+            }
+            
+            // اضافه کردن فیلدهای محاسبه شده
+            $product->discount_percent = round($discountPercent, 2);
+            $product->discount_amount = $discountAmount;
+            $product->has_discount = $discountPercent > 0;
+            
+            return $product;
+        });
+
+        return response($bestSellingProducts, 200);
+    }
+
+    /**
      * ویرایش اطلاعات محصول
      */
     public function update(Request $request, Product $product)
@@ -253,6 +304,10 @@ class ProductController extends Controller
             'images.*' => 'nullable|string',
             'category_ids' => 'nullable|array',
             'category_ids.*' => 'exists:categories,id',
+            'sizes' => 'nullable|array', // لیست سایزها
+            'sizes.*' => 'string',
+            'colors' => 'nullable|array', // لیست رنگ‌ها
+            'colors.*' => 'string',
         ]);
 
         // محاسبه قیمت با تخفیف در صورت وجود
