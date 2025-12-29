@@ -7,6 +7,7 @@ use App\Models\ProductImage;
 use App\Tools\ImageTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 use http\Env\Response;
 
 class ProductController extends Controller
@@ -249,17 +250,51 @@ class ProductController extends Controller
      */
     public function bestSelling(Request $request)
     {
-        $limit = $request->input('limit', 10); // پیش‌فرض 10 محصول
+        $limit = (int)$request->input('limit', 10); // پیش‌فرض 10 محصول
         
         // محاسبه تعداد فروش هر محصول
-        $bestSellingProducts = Product::select('products.*')
-            ->selectRaw('COALESCE(SUM(purchased_products.quantity), 0) as total_sold')
-            ->leftJoin('purchased_products', 'products.id', '=', 'purchased_products.product_id')
-            ->groupBy('products.id')
+        $productIds = DB::table('purchased_products')
+            ->select('product_id', DB::raw('SUM(quantity) as total_sold'))
+            ->groupBy('product_id')
             ->orderBy('total_sold', 'desc')
             ->limit($limit)
-            ->with(['images', 'categories'])
-            ->get();
+            ->pluck('product_id')
+            ->toArray();
+        
+        // اگر هیچ فروشی وجود نداشت، تمام محصولات را برمی‌گردانیم
+        if (empty($productIds)) {
+            $bestSellingProducts = Product::with(['images', 'categories'])
+                ->limit($limit)
+                ->get();
+            
+            // اضافه کردن total_sold = 0 به هر محصول
+            $bestSellingProducts->each(function($product) {
+                $product->total_sold = 0;
+            });
+        } else {
+            // محاسبه total_sold برای هر محصول
+            $totalSoldMap = DB::table('purchased_products')
+                ->select('product_id', DB::raw('SUM(quantity) as total_sold'))
+                ->whereIn('product_id', $productIds)
+                ->groupBy('product_id')
+                ->pluck('total_sold', 'product_id')
+                ->toArray();
+            
+            // دریافت محصولات بر اساس ترتیب فروش
+            $products = Product::whereIn('id', $productIds)
+                ->with(['images', 'categories'])
+                ->get();
+            
+            // مرتب‌سازی بر اساس ترتیب productIds و اضافه کردن total_sold
+            $bestSellingProducts = collect($productIds)->map(function($productId) use ($products, $totalSoldMap) {
+                $product = $products->firstWhere('id', $productId);
+                if ($product) {
+                    $product->total_sold = $totalSoldMap[$productId] ?? 0;
+                    return $product;
+                }
+                return null;
+            })->filter()->values();
+        }
 
         // اضافه کردن اطلاعات تخفیف به هر محصول
         $bestSellingProducts->transform(function ($product) {
