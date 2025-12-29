@@ -305,6 +305,7 @@ class CartController extends Controller
 
             // ایجاد Purchase
             $purchase = Purchase::create([
+                'cart_id' => $cart->id, // لینک به Cart
                 'phone' => $phone,
                 'total_amount' => $totalAmount,
                 'credit_used' => $creditUsed,

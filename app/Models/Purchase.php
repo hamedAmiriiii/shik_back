@@ -11,6 +11,7 @@ class Purchase extends Model
     use HasFactory;
 
     protected $fillable = [
+        'cart_id',
         'phone',
         'total_amount',
         'credit_used',
@@ -38,6 +39,14 @@ class Purchase extends Model
     public function purchasedProducts()
     {
         return $this->hasMany(PurchasedProduct::class);
+    }
+
+    /**
+     * سبد خرید این خرید (اگر سفارش اینترنتی باشد)
+     */
+    public function cart()
+    {
+        return $this->belongsTo(Cart::class);
     }
 }
 

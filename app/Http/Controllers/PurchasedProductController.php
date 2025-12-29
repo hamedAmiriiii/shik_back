@@ -7,6 +7,9 @@ use App\Models\Purchase;
 use App\Models\Product;
 use App\Models\UserShiksho;
 use App\Models\CustomerPhone;
+use App\Models\Cart;
+use App\Models\CartItem;
+use App\Models\Customer;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
@@ -18,7 +21,17 @@ class PurchasedProductController extends Controller
 {
     public function index(Request $request)
 {
-    $query = Purchase::with('purchasedProducts.product')->orderBy('id', 'desc');
+    // فقط Purchase هایی که:
+    // 1. cart_id ندارند (فروش فیزیکی مستقیم)
+    // 2. یا cart_id دارند و Cart status آن‌ها shipped است
+    $query = Purchase::with('purchasedProducts.product')
+        ->where(function($q) {
+            $q->whereNull('cart_id') // فروش فیزیکی
+              ->orWhereHas('cart', function($cartQuery) {
+                  $cartQuery->where('status', Cart::STATUS_SHIPPED); // سفارش اینترنتی که shipped شده
+              });
+        })
+        ->orderBy('id', 'desc');
 
     // جستجو بر اساس searchFilterModel
     $searchDataModel = json_decode($request->input('searchFilterModel'));
@@ -209,6 +222,37 @@ class PurchasedProductController extends Controller
         foreach ($productsData as $productData) {
             $product = $products->get($productData['product_id']);
             $product->decrement('quantity', $productData['quantity']);
+        }
+
+        // ایجاد Cart برای نمایش در لیست سفارشات (اگر phone وجود دارد)
+        $cart = null;
+        if ($phone) {
+            // پیدا کردن یا ایجاد Customer بر اساس phone
+            $customer = Customer::firstOrCreate(
+                ['phone' => $phone],
+                [
+                    'phone' => $phone,
+                    'password' => bcrypt(uniqid()), // رمز عبور موقت (مشتری باید بعداً تغییر دهد)
+                    'is_verified' => false,
+                ]
+            );
+            
+            // ایجاد Cart با status completed
+            $cart = Cart::create([
+                'customer_id' => $customer->id,
+                'status' => Cart::STATUS_COMPLETED,
+                'shipping_phone' => $phone,
+            ]);
+
+            // ایجاد CartItem ها از PurchasedProduct ها
+            foreach ($purchasedProducts as $purchasedProduct) {
+                CartItem::create([
+                    'cart_id' => $cart->id,
+                    'product_id' => $purchasedProduct->product_id,
+                    'quantity' => $purchasedProduct->quantity,
+                    'price' => $purchasedProduct->sale_price,
+                ]);
+            }
         }
 
         // اگر شماره تلفن وجود دارد
