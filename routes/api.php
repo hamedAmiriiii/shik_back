@@ -56,6 +56,7 @@ Route::prefix('reports')->name('reports.')->group(function () {
 Route::get("product-all", [ProductController::class, 'getAll']);
 Route::get("product", [ProductController::class, 'index']);
 Route::get("product/best-selling", [ProductController::class, 'bestSelling']);
+// این route باید بعد از route های خاص (مثل best-selling) و قبل از route های authenticated باشد
 Route::get("product/{product}", [ProductController::class, 'show']);
 
 // Category routes - public GET, authenticated POST/PUT/DELETE
@@ -96,7 +97,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
     // Product routes that require authentication
     Route::post("product", [ProductController::class, 'store']);
-    Route::put("product/{product}", [ProductController::class, 'update']);
+    Route::put("product/{product}", [ProductController::class, 'update'])->name('product.update');
     Route::delete("product/{product}", [ProductController::class, 'destroy']);
     Route::delete("product/{product}/image/{imageId}", [ProductController::class, 'deleteImage']);
     Route::post("products/apply-discount", [ProductController::class, 'applyDiscount']);

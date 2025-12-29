@@ -92,6 +92,8 @@ class PurchasedProductController extends Controller
             'products.*.quantity' => 'required|integer|min:1',
             'products.*.sale_price' => 'nullable|numeric|min:0', // قیمت فروش با تخفیف (اختیاری)
             'products.*.discount_percent' => 'nullable|numeric|min:0|max:100', // درصد تخفیف (اختیاری)
+            'products.*.size' => 'nullable|string|max:255', // سایز انتخاب شده (اختیاری)
+            'products.*.color' => 'nullable|string|max:255', // رنگ انتخاب شده (اختیاری)
             'use_credit' => 'nullable|boolean', // آیا کاربر می‌خواهد از اعتبارش استفاده کند؟
         ]);
 
@@ -151,6 +153,8 @@ class PurchasedProductController extends Controller
                 'quantity' => $quantity,
                 'sale_price' => $salePrice, // قیمت واقعی فروش (با تخفیف)
                 'purchase_price' => $product->purchase_price, // برای ذخیره در purchased_products
+                'size' => $productData['size'] ?? null, // سایز انتخاب شده
+                'color' => $productData['color'] ?? null, // رنگ انتخاب شده
             ];
         }
 
@@ -196,6 +200,8 @@ class PurchasedProductController extends Controller
                 'quantity' => $productData['quantity'],
                 'purchase_price' => $productData['purchase_price'], // قیمت خرید محصول برای ثبت
                 'sale_price' => $productData['sale_price'], // قیمت واقعی فروش (با تخفیف)
+                'size' => $productData['size'] ?? null, // سایز انتخاب شده
+                'color' => $productData['color'] ?? null, // رنگ انتخاب شده
             ]);
         }
 
