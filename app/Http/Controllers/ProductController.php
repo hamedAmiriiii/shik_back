@@ -347,9 +347,9 @@ class ProductController extends Controller
 
         // محاسبه قیمت با تخفیف در صورت وجود
         if (isset($fields['discount_percent'])) {
-            if ($fields['discount_percent'] > 0) {
+            if ($fields['discount_percent'] >= 0) {
                 // اگر original_sale_price داده شده از آن استفاده کن، در غیر این صورت از original_sale_price موجود یا sale_price
-                $basePrice = $fields['original_sale_price'] ?? $product->original_sale_price ?? $fields['sale_price'];
+               $basePrice = $fields['sale_price'] ?? $fields['sale_price'] ?? $product->original_sale_price ;
                 
                 // محاسبه تخفیف
                 $discountAmount = ($basePrice * $fields['discount_percent']) / 100;
@@ -358,13 +358,7 @@ class ProductController extends Controller
                 // رند کردن به عدد فرد که دهگان و صدگانش 0 باشد
                 $fields['sale_price'] = $this->roundToOddWithZeroEnding($priceAfterDiscount);
                 $fields['original_sale_price'] = $basePrice;
-            } else {
-                // اگر discount_percent = 0 است، تخفیف را حذف کن (sale_price = original_sale_price)
-                // اولویت با original_sale_price موجود در دیتابیس است
-                $basePrice = $fields['original_sale_price'] ?? $product->original_sale_price ?? $fields['sale_price'];
-                $fields['sale_price'] = $basePrice;
-                $fields['original_sale_price'] = $basePrice;
-            }
+            } 
             unset($fields['discount_percent']); // حذف از fields چون در دیتابیس نیست
         } else {
             // اگر original_sale_price ارسال نشده باشد، از original_sale_price موجود استفاده کن
