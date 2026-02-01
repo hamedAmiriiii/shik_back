@@ -108,6 +108,7 @@ class PurchasedProductController extends Controller
             'products.*.size' => 'nullable|string|max:255', // سایز انتخاب شده (اختیاری)
             'products.*.color' => 'nullable|string|max:255', // رنگ انتخاب شده (اختیاری)
             'use_credit' => 'nullable|boolean', // آیا کاربر می‌خواهد از اعتبارش استفاده کند؟
+            'discount_amount' => 'nullable|numeric|min:0', // مبلغ تخفیف مستقیم (اختیاری)
         ]);
 
         $phone = $request->input('phone');
@@ -171,7 +172,14 @@ class PurchasedProductController extends Controller
             ];
         }
 
-        $totalAmount = $originalTotalAmount;
+        // دریافت مبلغ تخفیف مستقیم (اگر وجود داشته باشد)
+        $discountAmount = $request->input('discount_amount', 0);
+        if ($discountAmount < 0) {
+            $discountAmount = 0;
+        }
+        
+        // کسر مبلغ تخفیف از قیمت کل
+        $totalAmount = max(0, $originalTotalAmount - $discountAmount);
         $creditUsed = 0;
         $userShiksho = null;
 
@@ -179,19 +187,20 @@ class PurchasedProductController extends Controller
         if ($phone && $useCredit) {
             $userShiksho = UserShiksho::where('phone', $phone)->first();
             if ($userShiksho && $userShiksho->credit > 0) {
-                // استفاده از اعتبار (تا حداکثر مبلغ خرید)
-                $creditUsed = min($userShiksho->credit, $originalTotalAmount);
+                // استفاده از اعتبار (تا حداکثر مبلغ خرید بعد از تخفیف)
+                $creditUsed = min($userShiksho->credit, $totalAmount);
                 $userShiksho->useCredit($creditUsed);
-                // مبلغ نهایی بعد از تخفیف
-                $totalAmount = $originalTotalAmount - $creditUsed;
+                // مبلغ نهایی بعد از کسر اعتبار
+                $totalAmount = $totalAmount - $creditUsed;
             }
         }
 
         $creditEarned = 0;
         
-        // اگر شماره تلفن وجود دارد و اعتبار فعال است، اعتبار جدید را محاسبه کن
+        // اگر تخفیف مستقیم داده نشده باشد و شماره تلفن وجود دارد و اعتبار فعال است، اعتبار جدید را محاسبه کن
+        // اگر discount_amount > 0 باشد، اعتبار اضافه نمی‌شود
         $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
-        if ($phone && $enableLoyaltyCredit) {
+        if ($phone && $enableLoyaltyCredit && $discountAmount == 0) {
             // محاسبه اعتبار کسب شده (بر اساس مبلغ اصلی خرید، قبل از کسر اعتبار استفاده شده)
             $creditEarned = UserShiksho::calculateCredit($originalTotalAmount);
         }
@@ -228,16 +237,16 @@ class PurchasedProductController extends Controller
         if ($phone) {
             $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
             
-            if ($enableLoyaltyCredit) {
+            if ($enableLoyaltyCredit && $creditEarned > 0) {
                 // به‌روزرسانی اعتبار (اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود)
                 UserShiksho::updateCredit($phone, $creditEarned);
 
-                // ارسال پیامک بعد از ذخیره خرید
+                // ارسال پیامک بعد از ذخیره خرید (فقط اگر اعتبار کسب شده باشد)
                 $creditFormatted = number_format($creditEarned, 0);
                 $text = "شیک شو\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
                 SmsTools::sendSms($phone, $text);
             } else {
-                // اگر اعتبار غیرفعال باشد، فقط پیام ساده بفرست
+                // اگر اعتبار غیرفعال باشد یا اعتبار کسب نشده باشد (به دلیل تخفیف)، فقط پیام ساده بفرست
                 $text = "شیکشو\nبا تشکر از خرید شما";
                 SmsTools::sendSms($phone, $text);
             }
