@@ -244,11 +244,11 @@ class PurchasedProductController extends Controller
                 // ارسال پیامک بعد از ذخیره خرید (فقط اگر اعتبار کسب شده باشد)
                 $creditFormatted = number_format($creditEarned, 0);
                 $text = "شیک شو\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
-                SmsTools::sendSms($phone, $text);
+                SmsTools::sendShopSms($phone, $text, (string) $purchase->id, $creditEarned, 'credit');
             } else {
                 // اگر اعتبار غیرفعال باشد یا اعتبار کسب نشده باشد (به دلیل تخفیف)، فقط پیام ساده بفرست
                 $text = "شیکشو\nبا تشکر از خرید شما";
-                SmsTools::sendSms($phone, $text);
+                SmsTools::sendShopSms($phone, $text, (string) $purchase->id, null, 'purchase');
             }
 
             // ثبت شماره تلفن در جدول customer_phones

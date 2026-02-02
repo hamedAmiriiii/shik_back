@@ -4,6 +4,7 @@
 namespace App\Tools;
 
 use App\Models\LogSms;
+use App\Models\ShopSmsLog;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Kavenegar;
@@ -32,6 +33,36 @@ class SmsTools
             "number" => '1000528554',
             "receivers" => $receivers,
             "creator_id" => Auth::id()
+        ]);
+
+        return $response->json();
+    }
+
+    /**
+     * ارسال پیامک برای فروشگاه و ثبت در جدول shop_sms_logs
+     * 
+     * @param string $phone شماره تلفن گیرنده
+     * @param string $message متن پیام
+     * @param string|null $purchaseId ID خرید (اختیاری)
+     * @param float|null $creditAmount مبلغ اعتبار (اختیاری)
+     * @param string $smsType نوع پیامک (پیش‌فرض: purchase)
+     * @return array
+     */
+    public static function sendShopSms(string $phone, string $message, ?string $purchaseId = null, ?float $creditAmount = null, string $smsType = 'purchase')
+    {
+        $response = Http::get('http://api.shinapayamak.ir/v1/' . self::API_TOKEN . '/sms/send.json', [
+            'gateway' => '90003002',
+            'to' => $phone,
+            'text' => $message . " \n لغو11"
+        ]);
+
+        // ثبت در جدول shop_sms_logs
+        ShopSmsLog::create([
+            'phone' => $phone,
+            'message' => $message,
+            'purchase_id' => $purchaseId,
+            'credit_amount' => $creditAmount,
+            'sms_type' => $smsType
         ]);
 
         return $response->json();

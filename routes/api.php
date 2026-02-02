@@ -99,6 +99,17 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Invoice routes - require authentication
     Route::resource('invoices', \App\Http\Controllers\InvoiceController::class);
     
+    // SMS Logs routes - require authentication
+    Route::prefix('sms-logs')->name('sms-logs.')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Admin\LogSmsController::class, 'index']);
+    });
+    
+    // Shop SMS Logs routes - require authentication (برای فروشگاه)
+    Route::prefix('shop-sms-logs')->name('shop-sms-logs.')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ShopSmsLogController::class, 'index']);
+        Route::get('/{shopSmsLog}', [\App\Http\Controllers\ShopSmsLogController::class, 'show']);
+    });
+    
     // Manufacturer routes - require authentication (POST/PUT/DELETE)
     Route::post('manufacturers', [\App\Http\Controllers\ManufacturerController::class, 'store']);
     Route::put('manufacturers/{manufacturer}', [\App\Http\Controllers\ManufacturerController::class, 'update']);

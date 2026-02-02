@@ -83,8 +83,8 @@ class ExpireUserCredits extends Command
                 
                 $message = "شیکشو\nاعتبار شما به مبلغ {$creditAmount} تومان در حال اتمام است (7 روز دیگر)";
                 
-                // ارسال پیامک (در Command، Auth::id() null است که مشکلی ندارد)
-                SmsTools::sendSms($user->phone, $message);
+                // ارسال پیامک برای فروشگاه (ثبت در shop_sms_logs)
+                SmsTools::sendShopSms($user->phone, $message, null, $user->credit, 'warning');
                 
                 // به‌روزرسانی last_warning_sent_at
                 $user->last_warning_sent_at = Carbon::now();
