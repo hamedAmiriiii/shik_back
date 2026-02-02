@@ -90,6 +90,13 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Store/Shop related routes - require authentication
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
     Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);
+    
+    // Invoice routes - require authentication
+    Route::resource('invoices', \App\Http\Controllers\InvoiceController::class);
+    
+    // Manufacturer routes - require authentication
+    Route::resource('manufacturers', \App\Http\Controllers\ManufacturerController::class);
+    Route::get('manufacturers/report/sales', [\App\Http\Controllers\ManufacturerController::class, 'salesReport']);
 
     // Broadcast message to selected customers
     Route::get('customer-broadcast/list', [\App\Http\Controllers\CustomerController::class, 'getCustomersForBroadcast']);

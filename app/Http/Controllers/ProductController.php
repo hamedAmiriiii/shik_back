@@ -50,7 +50,7 @@ class ProductController extends Controller
         // دریافت تعداد آیتم در هر صفحه از request (پیش‌فرض 50)
         $perPage = $request->input('per_page', 10);
         
-        $products = $query->with(['images', 'categories'])->orderBy('id', 'desc')->paginate($perPage);
+        $products = $query->with(['images', 'categories', 'manufacturer'])->orderBy('id', 'desc')->paginate($perPage);
         
         // اضافه کردن اطلاعات تخفیف به هر محصول
         $products->getCollection()->transform(function ($product) {
@@ -94,6 +94,7 @@ class ProductController extends Controller
             'barcode' => 'nullable|string|unique:products|max:255',
             'original_sale_price' => 'nullable|numeric|min:0',
             'discount_percent' => 'nullable|numeric|min:0|max:100',
+            'manufacturer_id' => 'nullable|exists:manufacturers,id',
             'images' => 'nullable|array',
             'images.*' => 'nullable|string',
             'category_ids' => 'nullable|array',
@@ -204,7 +205,7 @@ class ProductController extends Controller
             });
         }
         
-        $products = $query->with(['images', 'categories'])->orderBy('id', 'desc')->get();
+        $products = $query->with(['images', 'categories', 'manufacturer'])->orderBy('id', 'desc')->get();
         
         // اضافه کردن اطلاعات تخفیف به هر محصول
         $products->transform(function ($product) {
@@ -237,7 +238,7 @@ class ProductController extends Controller
      */
     public function show(Product $product)
     {
-        $product->load(['images', 'categories']);
+        $product->load(['images', 'categories', 'manufacturer']);
         return response($product);
     }
 
@@ -263,7 +264,7 @@ class ProductController extends Controller
         
         // اگر هیچ فروشی وجود نداشت، تمام محصولات را برمی‌گردانیم
         if (empty($productIds)) {
-            $bestSellingProducts = Product::with(['images', 'categories'])
+            $bestSellingProducts = Product::with(['images', 'categories', 'manufacturer'])
                 ->limit($limit)
                 ->get();
             
@@ -282,7 +283,7 @@ class ProductController extends Controller
             
             // دریافت محصولات بر اساس ترتیب فروش
             $products = Product::whereIn('id', $productIds)
-                ->with(['images', 'categories'])
+                ->with(['images', 'categories', 'manufacturer'])
                 ->get();
             
             // مرتب‌سازی بر اساس ترتیب productIds و اضافه کردن total_sold
@@ -335,6 +336,7 @@ class ProductController extends Controller
             'barcode' => 'required|string|unique:products,barcode,' . $product->id . '|max:255',
             'original_sale_price' => 'nullable|numeric|min:0',
             'discount_percent' => 'nullable|numeric|min:0|max:100',
+            'manufacturer_id' => 'nullable|exists:manufacturers,id',
             'images' => 'nullable|array',
             'images.*' => 'nullable|string',
             'category_ids' => 'nullable|array',

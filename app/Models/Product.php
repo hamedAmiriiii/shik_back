@@ -9,7 +9,7 @@ class Product extends Model
 {
     use HasFactory;
 
-    protected $fillable = ["name", "price_buy", "quantity", "barcode", "sale_price", "purchase_price", "original_sale_price", "sizes", "colors"];
+    protected $fillable = ["name", "price_buy", "quantity", "barcode", "sale_price", "purchase_price", "original_sale_price", "sizes", "colors", "manufacturer_id"];
 
     protected $casts = [
         'purchase_price' => 'decimal:2',
@@ -38,6 +38,14 @@ class Product extends Model
     public function categories()
     {
         return $this->belongsToMany(Category::class);
+    }
+
+    /**
+     * تولیدکننده این محصول
+     */
+    public function manufacturer()
+    {
+        return $this->belongsTo(Manufacturer::class);
     }
 }
 
