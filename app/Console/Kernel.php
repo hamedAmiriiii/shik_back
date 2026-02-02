@@ -24,7 +24,8 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule)
     {
-        // $schedule->command('inspire')->hourly();
+        // بررسی و صفر کردن اعتبارهای منقضی شده - روزانه در ساعت 2 صبح
+        $schedule->command('credits:expire')->dailyAt('02:00');
     }
 
     /**

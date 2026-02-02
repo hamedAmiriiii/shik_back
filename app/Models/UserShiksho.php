@@ -13,11 +13,15 @@ class UserShiksho extends Model
 
     protected $fillable = [
         'phone',
-        'credit'
+        'credit',
+        'credit_last_updated_at',
+        'last_warning_sent_at'
     ];
 
     protected $casts = [
-        'credit' => 'decimal:2'
+        'credit' => 'decimal:2',
+        'credit_last_updated_at' => 'datetime',
+        'last_warning_sent_at' => 'datetime'
     ];
 
     /**
@@ -60,11 +64,13 @@ class UserShiksho extends Model
     {
         $user = self::firstOrCreate(
             ['phone' => $phone],
-            ['credit' => 0]
+            ['credit' => 0, 'credit_last_updated_at' => now()]
         );
 
         // اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود
         $user->credit = $creditAmount;
+        $user->credit_last_updated_at = now();
+        $user->last_warning_sent_at = null; // ریست کردن هشدار برای اعتبار جدید
         $user->save();
 
         return $user;
@@ -72,6 +78,7 @@ class UserShiksho extends Model
 
     /**
      * استفاده از اعتبار (کاهش اعتبار)
+     * توجه: استفاده از اعتبار، تاریخ credit_last_updated_at را تغییر نمی‌دهد
      * 
      * @param float $amount
      * @return bool
@@ -80,6 +87,7 @@ class UserShiksho extends Model
     {
         if ($this->credit >= $amount) {
             $this->credit -= $amount;
+            // credit_last_updated_at را تغییر نمی‌دهیم چون فقط استفاده شده، نه اعتبار جدید
             $this->save();
             return true;
         }

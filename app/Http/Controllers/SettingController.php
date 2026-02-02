@@ -73,5 +73,57 @@ class SettingController extends Controller
             'value' => $value
         ], 200);
     }
+
+    /**
+     * دریافت تعداد روز انقضای اعتبار
+     */
+    public function getCreditExpiryDays()
+    {
+        $days = (int) Setting::get('credit_expiry_days', 60);
+        return response([
+            'key' => 'credit_expiry_days',
+            'value' => (string) $days,
+            'days' => $days
+        ], 200);
+    }
+
+    /**
+     * تنظیم تعداد روز انقضای اعتبار
+     */
+    public function setCreditExpiryDays(Request $request)
+    {
+        $request->validate([
+            'days' => 'required|integer|min:1|max:365',
+        ]);
+
+        $days = $request->input('days');
+        Setting::set('credit_expiry_days', (string) $days);
+        
+        return response([
+            'message' => 'تعداد روز انقضای اعتبار با موفقیت تنظیم شد',
+            'key' => 'credit_expiry_days',
+            'value' => (string) $days,
+            'days' => $days
+        ], 200);
+    }
+
+    /**
+     * ایجاد یا به‌روزرسانی یک setting (POST)
+     */
+    public function store(Request $request)
+    {
+        $request->validate([
+            'key' => 'required|string|max:255',
+            'value' => 'required',
+        ]);
+
+        Setting::set($request->input('key'), $request->input('value'));
+        
+        return response([
+            'message' => 'تنظیمات با موفقیت ایجاد/به‌روزرسانی شد',
+            'key' => $request->input('key'),
+            'value' => $request->input('value')
+        ], 201);
+    }
 }
 

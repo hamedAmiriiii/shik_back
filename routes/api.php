@@ -86,6 +86,11 @@ Route::prefix('returned-products')->name('returned-products.')->group(function (
     Route::get('/', [\App\Http\Controllers\ReturnedProductController::class, 'index']);
 });
 
+// Manufacturer routes - public GET, authenticated POST/PUT/DELETE
+Route::get('manufacturers', [\App\Http\Controllers\ManufacturerController::class, 'index']);
+Route::get('manufacturers/{manufacturer}', [\App\Http\Controllers\ManufacturerController::class, 'show']);
+Route::get('manufacturers/report/sales', [\App\Http\Controllers\ManufacturerController::class, 'salesReport']);
+
 Route::group(['middleware' => ['auth:sanctum']], function () {
     // Store/Shop related routes - require authentication
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
@@ -94,9 +99,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Invoice routes - require authentication
     Route::resource('invoices', \App\Http\Controllers\InvoiceController::class);
     
-    // Manufacturer routes - require authentication
-    Route::resource('manufacturers', \App\Http\Controllers\ManufacturerController::class);
-    Route::get('manufacturers/report/sales', [\App\Http\Controllers\ManufacturerController::class, 'salesReport']);
+    // Manufacturer routes - require authentication (POST/PUT/DELETE)
+    Route::post('manufacturers', [\App\Http\Controllers\ManufacturerController::class, 'store']);
+    Route::put('manufacturers/{manufacturer}', [\App\Http\Controllers\ManufacturerController::class, 'update']);
+    Route::delete('manufacturers/{manufacturer}', [\App\Http\Controllers\ManufacturerController::class, 'destroy']);
 
     // Broadcast message to selected customers
     Route::get('customer-broadcast/list', [\App\Http\Controllers\CustomerController::class, 'getCustomersForBroadcast']);
@@ -104,8 +110,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
     // Product routes that require authentication
     Route::post("product", [ProductController::class, 'store']);
-    Route::put("product/{product}", [ProductController::class, 'update'])->name('product.update');
-    Route::delete("product/{product}", [ProductController::class, 'destroy']);
+    Route::put("product/{product}", [ProductController::class, 'update'])->where('product', '[0-9]+')->name('product.update');
+    Route::delete("product/{product}", [ProductController::class, 'destroy'])->where('product', '[0-9]+');
     Route::delete("product/{product}/image/{imageId}", [ProductController::class, 'deleteImage']);
     Route::post("products/apply-discount", [ProductController::class, 'applyDiscount']);
 
@@ -116,8 +122,12 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
     Route::prefix('settings')->name('settings.')->group(function () {
         Route::get('/', [\App\Http\Controllers\SettingController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\SettingController::class, 'store']);
         Route::get('/loyalty-credit', [\App\Http\Controllers\SettingController::class, 'getLoyaltyCreditStatus']);
         Route::post('/loyalty-credit/toggle', [\App\Http\Controllers\SettingController::class, 'toggleLoyaltyCredit']);
+        Route::get('/credit-expiry-days', [\App\Http\Controllers\SettingController::class, 'getCreditExpiryDays']);
+        Route::post('/credit-expiry-days', [\App\Http\Controllers\SettingController::class, 'setCreditExpiryDays']);
+        Route::put('/credit-expiry-days', [\App\Http\Controllers\SettingController::class, 'setCreditExpiryDays']);
         Route::get('/{key}', [\App\Http\Controllers\SettingController::class, 'show']);
         Route::put('/{key}', [\App\Http\Controllers\SettingController::class, 'update']);
     });

@@ -13,7 +13,14 @@ class ManufacturerController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Manufacturer::orderBy('name', 'asc');
+        $query = Manufacturer::withCount('products')
+            ->addSelect([
+                'total_sold_quantity' => DB::table('products')
+                    ->join('purchased_products', 'products.id', '=', 'purchased_products.product_id')
+                    ->whereColumn('products.manufacturer_id', 'manufacturers.id')
+                    ->select(DB::raw('COALESCE(SUM(purchased_products.quantity), 0)'))
+            ])
+            ->orderBy('name', 'asc');
 
         // جستجو بر اساس searchFilterModel
         $searchDataModel = json_decode($request->input('searchFilterModel'));
@@ -32,6 +39,13 @@ class ManufacturerController extends Controller
         $perPage = $request->input('per_page', 20);
         $manufacturers = $query->paginate($perPage);
         $manufacturers->withPath(url()->current());
+
+        // تبدیل products_count و total_sold_quantity برای سازگاری
+        $manufacturers->getCollection()->transform(function ($manufacturer) {
+            $manufacturer->products_count = $manufacturer->products_count ?? 0;
+            $manufacturer->total_sold_quantity = (int) ($manufacturer->total_sold_quantity ?? 0);
+            return $manufacturer;
+        });
 
         return response($manufacturers, 200);
     }
@@ -54,6 +68,17 @@ class ManufacturerController extends Controller
      */
     public function show(Manufacturer $manufacturer)
     {
+        $manufacturer->loadCount('products');
+        $manufacturer->products_count = $manufacturer->products_count ?? 0;
+        
+        // محاسبه تعداد فروش
+        $totalSoldQuantity = DB::table('products')
+            ->join('purchased_products', 'products.id', '=', 'purchased_products.product_id')
+            ->where('products.manufacturer_id', $manufacturer->id)
+            ->sum('purchased_products.quantity');
+        
+        $manufacturer->total_sold_quantity = (int) ($totalSoldQuantity ?? 0);
+        
         return response($manufacturer, 200);
     }
 
