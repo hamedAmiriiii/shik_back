@@ -24,7 +24,9 @@ class PurchasedProductController extends Controller
     // فقط Purchase هایی که:
     // 1. cart_id ندارند (فروش فیزیکی مستقیم)
     // 2. یا cart_id دارند و Cart status آن‌ها shipped است
+    // 3. مجموع مبلغشان بیشتر از 0 است
     $query = Purchase::with('purchasedProducts.product')
+        ->where('total_amount', '>', 0) // فقط خریدهایی که مجموع مبلغشان بیشتر از 0 است
         ->where(function($q) {
             $q->whereNull('cart_id') // فروش فیزیکی
               ->orWhereHas('cart', function($cartQuery) {
