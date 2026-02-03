@@ -137,13 +137,12 @@ class ReportController extends Controller
         $totalCreditEarned = 0;
 
         foreach ($purchases as $purchase) {
-            // محاسبه فروش واقعی بر اساس sale_price ذخیره شده در purchased_products
-            // (که شامل تخفیف‌ها هم می‌شود)
-            foreach ($purchase->purchasedProducts as $purchasedProduct) {
-                // اگر sale_price ذخیره شده باشد از آن استفاده کن، در غیر این صورت از product.sale_price
-                $salePrice = $purchasedProduct->sale_price ?? $purchasedProduct->product->sale_price;
-                $totalSales += $purchasedProduct->quantity * $salePrice;
-            }
+            // محاسبه فروش واقعی بر اساس total_amount در purchases
+            // (که شامل تخفیف مستقیم discount_amount هم می‌شود)
+            // total_amount = مجموع sale_price ها - discount_amount - credit_used
+            // پس برای محاسبه فروش واقعی: total_amount + credit_used
+            // (چون credit_used از سود کسر نمی‌شود، باید به فروش اضافه شود)
+            $totalSales += $purchase->total_amount + $purchase->credit_used;
 
             // محاسبه هزینه خرید محصولات
             foreach ($purchase->purchasedProducts as $purchasedProduct) {
@@ -207,13 +206,12 @@ class ReportController extends Controller
         $totalCreditEarned = 0;
 
         foreach ($purchases as $purchase) {
-            // محاسبه فروش واقعی بر اساس sale_price ذخیره شده در purchased_products
-            // (که شامل تخفیف‌ها هم می‌شود)
-            foreach ($purchase->purchasedProducts as $purchasedProduct) {
-                // اگر sale_price ذخیره شده باشد از آن استفاده کن، در غیر این صورت از product.sale_price
-                $salePrice = $purchasedProduct->sale_price ?? $purchasedProduct->product->sale_price;
-                $totalSales += $purchasedProduct->quantity * $salePrice;
-            }
+            // محاسبه فروش واقعی بر اساس total_amount در purchases
+            // (که شامل تخفیف مستقیم discount_amount هم می‌شود)
+            // total_amount = مجموع sale_price ها - discount_amount - credit_used
+            // پس برای محاسبه فروش واقعی: total_amount + credit_used
+            // (چون credit_used از سود کسر نمی‌شود، باید به فروش اضافه شود)
+            $totalSales += $purchase->total_amount + $purchase->credit_used;
 
             // محاسبه هزینه خرید محصولات
             foreach ($purchase->purchasedProducts as $purchasedProduct) {
