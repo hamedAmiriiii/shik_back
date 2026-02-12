@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\PurchasedProduct;
 use App\Models\Purchase;
 use App\Models\Product;
+use App\Models\Installment;
 use App\Models\UserShiksho;
 use App\Models\CustomerPhone;
 use App\Models\Cart;
@@ -25,7 +26,7 @@ class PurchasedProductController extends Controller
     // 1. cart_id ندارند (فروش فیزیکی مستقیم)
     // 2. یا cart_id دارند و Cart status آن‌ها shipped است
     // 3. مجموع مبلغشان بیشتر از 0 است
-    $query = Purchase::with('purchasedProducts.product')
+    $query = Purchase::with(['purchasedProducts.product', 'installments'])
         ->where('total_amount', '>', 0) // فقط خریدهایی که مجموع مبلغشان بیشتر از 0 است
         ->where(function($q) {
             $q->whereNull('cart_id') // فروش فیزیکی
@@ -82,16 +83,32 @@ class PurchasedProductController extends Controller
 
     $items = $query->paginate();
 
-    // محاسبه مجموع قیمت خرید برای آیتم‌های این صفحه
-    $total = Purchase::whereIn('id', $items->pluck('id'))
-        ->select(DB::raw('SUM(total_amount) as total'))
-        ->value('total');
+    // محاسبه مجموع مبلغ واقعی پرداخت شده برای آیتم‌های این صفحه
+    $total = 0;
+    foreach ($items->items() as $purchase) {
+        // برای خریدهای اقساطی: مجموع قسط‌های پرداخت شده
+        // برای خریدهای نقدی: مبلغ کل خرید
+        if ($purchase->isInstallment()) {
+            $total += $purchase->paid_amount;
+        } else {
+            $total += $purchase->total_amount;
+        }
+    }
 
     // اضافه کردن به meta به شکل درست
     $items->withPath(url()->current()); // حفظ مسیر URL
 
-    // اضافه کردن custom meta
+    // تبدیل به array و اضافه کردن فیلد paid_amount برای خریدهای اقساطی
     $itemsArray = $items->toArray();
+    foreach ($itemsArray['data'] as &$purchaseData) {
+        $purchase = $items->firstWhere('id', $purchaseData['id']);
+        if ($purchase && $purchase->isInstallment()) {
+            // اضافه کردن فیلد paid_amount برای خریدهای اقساطی
+            $purchaseData['paid_amount'] = (float) $purchase->paid_amount;
+        }
+    }
+    unset($purchaseData);
+
     $itemsArray['total_purchase_price'] = $total;
 
     return response($itemsArray, 200);
@@ -111,10 +128,14 @@ class PurchasedProductController extends Controller
             'products.*.color' => 'nullable|string|max:255', // رنگ انتخاب شده (اختیاری)
             'use_credit' => 'nullable|boolean', // آیا کاربر می‌خواهد از اعتبارش استفاده کند؟
             'discount_amount' => 'nullable|numeric|min:0', // مبلغ تخفیف مستقیم (اختیاری)
+            'payment_type' => 'nullable|string|in:cash,installment', // نوع پرداخت: نقدی یا اقساطی
+            'installment_count' => 'required_if:payment_type,installment|integer|min:2|max:24', // تعداد اقساط (حداقل 2، حداکثر 24)
         ]);
 
         $phone = $request->input('phone');
         $useCredit = $request->input('use_credit', false);
+        $paymentType = $request->input('payment_type', 'cash'); // پیش‌فرض: نقدی
+        $installmentCount = $request->input('installment_count');
         
         // خواندن همه محصولات در یک query
         $productIds = array_column($request->input('products'), 'product_id');
@@ -207,12 +228,21 @@ class PurchasedProductController extends Controller
             $creditEarned = UserShiksho::calculateCredit($originalTotalAmount);
         }
 
+        // محاسبه مبلغ هر قسط در صورت اقساطی بودن
+        $installmentAmount = null;
+        if ($paymentType === 'installment' && $installmentCount) {
+            $installmentAmount = round($totalAmount / $installmentCount, 2);
+        }
+
         // ایجاد سبد خرید (Purchase)
         $purchase = Purchase::create([
             'phone' => $phone,
             'total_amount' => $totalAmount,
             'credit_used' => $creditUsed,
             'credit_earned' => $creditEarned,
+            'payment_type' => $paymentType,
+            'installment_count' => $paymentType === 'installment' ? $installmentCount : null,
+            'installment_amount' => $installmentAmount,
         ]);
 
         // ذخیره محصولات خریداری شده و لینک کردن به سبد خرید
@@ -233,6 +263,11 @@ class PurchasedProductController extends Controller
         foreach ($productsData as $productData) {
             $product = $products->get($productData['product_id']);
             $product->decrement('quantity', $productData['quantity']);
+        }
+
+        // ایجاد قسط‌ها در صورت اقساطی بودن
+        if ($paymentType === 'installment' && $installmentCount && $installmentAmount) {
+            $this->createInstallments($purchase, $installmentCount, $installmentAmount, $totalAmount);
         }
 
         // اگر شماره تلفن وجود دارد
@@ -257,15 +292,22 @@ class PurchasedProductController extends Controller
             CustomerPhone::createNewPhone($phone);
         }
 
-        // برگرداندن سبد خرید با محصولاتش
+        // برگرداندن سبد خرید با محصولاتش و قسط‌ها (در صورت وجود)
         $purchase->load('purchasedProducts.product');
+        if ($paymentType === 'installment') {
+            $purchase->load('installments');
+        }
         
         return response($purchase, 201);
     }
 
     public function show(Purchase $purchase)
     {
-        return response($purchase->load('purchasedProducts.product'), 200);
+        $purchase->load('purchasedProducts.product');
+        if ($purchase->isInstallment()) {
+            $purchase->load('installments');
+        }
+        return response($purchase, 200);
     }
 
     public function update(Request $request, Purchase $purchase)
@@ -328,6 +370,49 @@ class PurchasedProductController extends Controller
 
 
 
+
+    /**
+     * ایجاد قسط‌ها برای خرید اقساطی
+     */
+    private function createInstallments(Purchase $purchase, int $installmentCount, float $installmentAmount, float $totalAmount)
+    {
+        $installments = [];
+        $today = Jalalian::now();
+        $baseDate = $today->toCarbon();
+        
+        $totalInstallmentAmount = $installmentAmount * $installmentCount;
+        $difference = $totalAmount - $totalInstallmentAmount;
+        
+        for ($i = 1; $i <= $installmentCount; $i++) {
+            if ($i === 1) {
+                $dueDate = $baseDate->toDateString();
+                $isPaid = true;
+                $paidAt = now();
+            } else {
+                $dueDate = $baseDate->copy()->addMonths($i - 1)->toDateString();
+                $isPaid = false;
+                $paidAt = null;
+            }
+            
+            $amount = $installmentAmount;
+            if ($i === $installmentCount && $difference != 0) {
+                $amount += $difference;
+            }
+            
+            $installments[] = [
+                'purchase_id' => $purchase->id,
+                'installment_number' => $i,
+                'amount' => round($amount, 2),
+                'due_date' => $dueDate,
+                'is_paid' => $isPaid,
+                'paid_at' => $paidAt,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+        }
+        
+        Installment::insert($installments);
+    }
 
     /**
      * برگشت یک محصول از یک خرید

@@ -25,7 +25,10 @@ class Kernel extends ConsoleKernel
     protected function schedule(Schedule $schedule)
     {
         // بررسی و صفر کردن اعتبارهای منقضی شده - روزانه در ساعت 2 صبح
-        $schedule->command('credits:expire')->dailyAt('02:00');
+        $schedule->command('credits:expire')->dailyAt('10:00');
+        
+        // ارسال یادآوری قسط‌ها - روزانه در ساعت 10 صبح
+        $schedule->command('installments:send-reminders')->dailyAt('10:00');
     }
 
     /**

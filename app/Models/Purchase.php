@@ -15,13 +15,17 @@ class Purchase extends Model
         'phone',
         'total_amount',
         'credit_used',
-        'credit_earned'
+        'credit_earned',
+        'payment_type',
+        'installment_count',
+        'installment_amount',
     ];
 
     protected $casts = [
         'total_amount' => 'decimal:2',
         'credit_used' => 'decimal:2',
         'credit_earned' => 'decimal:2',
+        'installment_amount' => 'decimal:2',
     ];
 
     public function getCreatedAtAttribute($value): string
@@ -47,6 +51,72 @@ class Purchase extends Model
     public function cart()
     {
         return $this->belongsTo(Cart::class);
+    }
+
+    /**
+     * قسط‌های این خرید
+     */
+    public function installments()
+    {
+        return $this->hasMany(Installment::class)->orderBy('installment_number');
+    }
+
+    /**
+     * قسط‌های پرداخت شده
+     */
+    public function paidInstallments()
+    {
+        return $this->hasMany(Installment::class)->where('is_paid', true);
+    }
+
+    /**
+     * قسط‌های پرداخت نشده
+     */
+    public function unpaidInstallments()
+    {
+        return $this->hasMany(Installment::class)->where('is_paid', false);
+    }
+
+    /**
+     * بررسی اینکه آیا خرید اقساطی است
+     */
+    public function isInstallment()
+    {
+        return $this->payment_type === 'installment';
+    }
+
+    /**
+     * محاسبه مبلغ پرداخت شده از قسط‌ها
+     */
+    public function getPaidAmountAttribute()
+    {
+        // اگر installments قبلاً load شده باشد، از آن استفاده می‌کنیم
+        if ($this->relationLoaded('installments')) {
+            return $this->installments->where('is_paid', true)->sum('amount');
+        }
+        // در غیر این صورت query می‌زنیم
+        return $this->paidInstallments()->sum('amount');
+    }
+
+    /**
+     * محاسبه مبلغ باقیمانده
+     */
+    public function getRemainingAmountAttribute()
+    {
+        return $this->total_amount - $this->paid_amount;
+    }
+
+    /**
+     * دریافت مبلغ واقعی پرداخت شده
+     * برای خریدهای اقساطی: مجموع قسط‌های پرداخت شده
+     * برای خریدهای نقدی: مبلغ کل خرید
+     */
+    public function getActualPaidAmountAttribute()
+    {
+        if ($this->isInstallment()) {
+            return $this->paid_amount;
+        }
+        return $this->total_amount;
     }
 }
 

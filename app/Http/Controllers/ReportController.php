@@ -128,7 +128,7 @@ class ReportController extends Controller
         $startString = $startOfDayTehran->format('Y-m-d H:i:s');
         $endString = $endOfDayTehran->format('Y-m-d H:i:s');
 
-        $purchases = Purchase::with('purchasedProducts.product')
+        $purchases = Purchase::with(['purchasedProducts.product', 'installments'])
             ->whereBetween('created_at', [$startString, $endString])
             ->get();
 
@@ -137,12 +137,15 @@ class ReportController extends Controller
         $totalCreditEarned = 0;
 
         foreach ($purchases as $purchase) {
-            // محاسبه فروش واقعی بر اساس total_amount در purchases
+            // محاسبه فروش واقعی
+            // برای خریدهای اقساطی: مجموع قسط‌های پرداخت شده
+            // برای خریدهای نقدی: مبلغ کل خرید
             // (که شامل تخفیف مستقیم discount_amount هم می‌شود)
             // total_amount = مجموع sale_price ها - discount_amount - credit_used
-            // پس برای محاسبه فروش واقعی: total_amount + credit_used
+            // پس برای محاسبه فروش واقعی: actual_paid_amount + credit_used
             // (چون credit_used از سود کسر نمی‌شود، باید به فروش اضافه شود)
-            $totalSales += $purchase->total_amount + $purchase->credit_used;
+            $actualPaidAmount = $purchase->isInstallment() ? $purchase->paid_amount : $purchase->total_amount;
+            $totalSales += $actualPaidAmount + $purchase->credit_used;
 
             // محاسبه هزینه خرید محصولات
             foreach ($purchase->purchasedProducts as $purchasedProduct) {
@@ -197,7 +200,7 @@ class ReportController extends Controller
         $startString = $startDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
         $endString = $endDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
 
-        $purchases = Purchase::with('purchasedProducts.product')
+        $purchases = Purchase::with(['purchasedProducts.product', 'installments'])
             ->whereBetween('created_at', [$startString, $endString])
             ->get();
 
@@ -206,12 +209,15 @@ class ReportController extends Controller
         $totalCreditEarned = 0;
 
         foreach ($purchases as $purchase) {
-            // محاسبه فروش واقعی بر اساس total_amount در purchases
+            // محاسبه فروش واقعی
+            // برای خریدهای اقساطی: مجموع قسط‌های پرداخت شده
+            // برای خریدهای نقدی: مبلغ کل خرید
             // (که شامل تخفیف مستقیم discount_amount هم می‌شود)
             // total_amount = مجموع sale_price ها - discount_amount - credit_used
-            // پس برای محاسبه فروش واقعی: total_amount + credit_used
+            // پس برای محاسبه فروش واقعی: actual_paid_amount + credit_used
             // (چون credit_used از سود کسر نمی‌شود، باید به فروش اضافه شود)
-            $totalSales += $purchase->total_amount + $purchase->credit_used;
+            $actualPaidAmount = $purchase->isInstallment() ? $purchase->paid_amount : $purchase->total_amount;
+            $totalSales += $actualPaidAmount + $purchase->credit_used;
 
             // محاسبه هزینه خرید محصولات
             foreach ($purchase->purchasedProducts as $purchasedProduct) {

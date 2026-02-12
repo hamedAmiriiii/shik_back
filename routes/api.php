@@ -143,6 +143,18 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::put('/{key}', [\App\Http\Controllers\SettingController::class, 'update']);
     });
 
+    // Installment routes - requires admin authentication
+    Route::prefix('installments')->name('installments.')->group(function () {
+        Route::get('/by-phone', [\App\Http\Controllers\InstallmentController::class, 'getByPhone']);
+        Route::get('/unpaid', [\App\Http\Controllers\InstallmentController::class, 'unpaid']);
+    });
+
+    // Purchase installment routes - requires admin authentication
+    Route::prefix('purchased-products')->name('purchased-products.installments.')->group(function () {
+        Route::get('/{purchase}/installments', [\App\Http\Controllers\InstallmentController::class, 'index']);
+        Route::post('/{purchase}/installments/{installment}/pay', [\App\Http\Controllers\InstallmentController::class, 'pay']);
+    });
+
     // Admin routes
     Route::name('admin.')->prefix('admin')->group(function () {
         
