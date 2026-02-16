@@ -125,5 +125,40 @@ class SettingController extends Controller
             'value' => $request->input('value')
         ], 201);
     }
+
+    /**
+     * دریافت نرخ سود ماهانه اقساط
+     */
+    public function getInstallmentInterestRate()
+    {
+        $rate = (float) Setting::get('installment_monthly_interest_rate', 0);
+        return response([
+            'key' => 'installment_monthly_interest_rate',
+            'value' => (string) $rate,
+            'rate' => $rate,
+            'rate_percent' => $rate . '%'
+        ], 200);
+    }
+
+    /**
+     * تنظیم نرخ سود ماهانه اقساط
+     */
+    public function setInstallmentInterestRate(Request $request)
+    {
+        $request->validate([
+            'rate' => 'required|numeric|min:0|max:100',
+        ]);
+
+        $rate = $request->input('rate');
+        Setting::set('installment_monthly_interest_rate', (string) $rate);
+        
+        return response([
+            'message' => 'نرخ سود ماهانه با موفقیت تنظیم شد',
+            'key' => 'installment_monthly_interest_rate',
+            'value' => (string) $rate,
+            'rate' => $rate,
+            'rate_percent' => $rate . '%'
+        ], 200);
+    }
 }
 

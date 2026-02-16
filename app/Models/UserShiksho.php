@@ -14,12 +14,14 @@ class UserShiksho extends Model
     protected $fillable = [
         'phone',
         'credit',
+        'installment_credit',
         'credit_last_updated_at',
         'last_warning_sent_at'
     ];
 
     protected $casts = [
         'credit' => 'decimal:2',
+        'installment_credit' => 'decimal:2',
         'credit_last_updated_at' => 'datetime',
         'last_warning_sent_at' => 'datetime'
     ];
@@ -92,6 +94,34 @@ class UserShiksho extends Model
             return true;
         }
         return false;
+    }
+
+    /**
+     * استفاده از اعتبار اقساطی (کاهش اعتبار اقساطی)
+     * 
+     * @param float $amount
+     * @return bool
+     */
+    public function useInstallmentCredit($amount)
+    {
+        if ($this->installment_credit >= $amount) {
+            $this->installment_credit -= $amount;
+            $this->save();
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * افزودن به اعتبار اقساطی
+     * 
+     * @param float $amount
+     * @return void
+     */
+    public function addInstallmentCredit($amount)
+    {
+        $this->installment_credit += $amount;
+        $this->save();
     }
 }
 

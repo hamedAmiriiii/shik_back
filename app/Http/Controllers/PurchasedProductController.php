@@ -228,16 +228,44 @@ class PurchasedProductController extends Controller
             $creditEarned = UserShiksho::calculateCredit($originalTotalAmount);
         }
 
-        // محاسبه مبلغ هر قسط در صورت اقساطی بودن
+        // محاسبه مبلغ هر قسط در صورت اقساطی بودن (با در نظر گیری سود ماهانه)
         $installmentAmount = null;
+        $finalTotalAmount = $totalAmount; // مبلغ نهایی (با سود در صورت اقساطی)
+        
         if ($paymentType === 'installment' && $installmentCount) {
-            $installmentAmount = round($totalAmount / $installmentCount, 2);
+            // خواندن نرخ سود ماهانه از ستینگ (پیش‌فرض: 0 یعنی بدون سود)
+            $monthlyInterestRate = (float) \App\Models\Setting::get('installment_monthly_interest_rate', 0);
+            
+            if ($monthlyInterestRate > 0) {
+                // محاسبه مبلغ کل با سود ماهانه
+                // هر ماه سود به مبلغ مانده تعلق می‌گیرد
+                $remainingAmount = $totalAmount;
+                $totalInterest = 0;
+                
+                // محاسبه مبلغ هر قسط بدون سود
+                $baseInstallmentAmount = $totalAmount / $installmentCount;
+                
+                for ($month = 1; $month <= $installmentCount; $month++) {
+                    // محاسبه سود این ماه بر اساس مبلغ مانده
+                    $monthlyInterest = $remainingAmount * ($monthlyInterestRate / 100);
+                    $totalInterest += $monthlyInterest;
+                    
+                    // کسر مبلغ قسط از مانده (بدون سود)
+                    $remainingAmount -= $baseInstallmentAmount;
+                }
+                
+                // مبلغ کل با سود - رند کردن به عددی که سه رقم آخرش 0 باشد
+                $finalTotalAmount = $this->roundToThreeZeroEnding($totalAmount + $totalInterest);
+            }
+            
+            // تقسیم مبلغ کل (با سود) به تعداد اقساط و رند کردن
+            $installmentAmount = $this->roundToThreeZeroEnding($finalTotalAmount / $installmentCount);
         }
 
         // ایجاد سبد خرید (Purchase)
         $purchase = Purchase::create([
             'phone' => $phone,
-            'total_amount' => $totalAmount,
+            'total_amount' => $finalTotalAmount, // مبلغ کل با سود (در صورت اقساطی)
             'credit_used' => $creditUsed,
             'credit_earned' => $creditEarned,
             'payment_type' => $paymentType,
@@ -267,7 +295,22 @@ class PurchasedProductController extends Controller
 
         // ایجاد قسط‌ها در صورت اقساطی بودن
         if ($paymentType === 'installment' && $installmentCount && $installmentAmount) {
-            $this->createInstallments($purchase, $installmentCount, $installmentAmount, $totalAmount);
+            $this->createInstallments($purchase, $installmentCount, $installmentAmount, $finalTotalAmount);
+            
+            // کسر اعتبار اقساطی: مبلغ باقیمانده (کل مبلغ منهای قسط اول که پرداخت شده)
+            if ($phone) {
+                $userShiksho = UserShiksho::where('phone', $phone)->first();
+                if ($userShiksho) {
+                    // مبلغ قسط اول که پرداخت شده است
+                    $firstInstallmentAmount = $installmentAmount;
+                    // مبلغ باقیمانده که باید از اعتبار اقساطی کسر شود
+                    $remainingAmount = $finalTotalAmount - $firstInstallmentAmount;
+                    
+                    if ($remainingAmount > 0 && $userShiksho->installment_credit >= $remainingAmount) {
+                        $userShiksho->useInstallmentCredit($remainingAmount);
+                    }
+                }
+            }
         }
 
         // اگر شماره تلفن وجود دارد
@@ -360,11 +403,28 @@ class PurchasedProductController extends Controller
          $lowerValue = $lowerOdd * 1000;
          $upperValue = $upperOdd * 1000;
      
-         // انتخاب نزدیک‌ترین
-         return (abs($number - $lowerValue) <= abs($number - $upperValue))
-             ? $lowerValue
-             : $upperValue;
-     }
+        // انتخاب نزدیک‌ترین
+        return (abs($number - $lowerValue) <= abs($number - $upperValue))
+            ? $lowerValue
+            : $upperValue;
+    }
+
+    /**
+     * رند کردن به عددی که سه رقم آخرش 0 باشد (یکان، دهگان، صدگان)
+     * مثال: 1234567 -> 1234000, 123456 -> 123000, 123789 -> 124000
+     * 
+     * @param float $number
+     * @return float
+     */
+    private function roundToThreeZeroEnding($number)
+    {
+        if ($number <= 0) {
+            return 0;
+        }
+
+        // رند کردن به نزدیک‌ترین عدد که سه رقم آخرش 0 باشد
+        return round($number / 1000) * 1000;
+    }
      
 
 
@@ -399,10 +459,13 @@ class PurchasedProductController extends Controller
                 $amount += $difference;
             }
             
+            // رند کردن مبلغ قسط به عددی که سه رقم آخرش 0 باشد
+            $amount = $this->roundToThreeZeroEnding($amount);
+            
             $installments[] = [
                 'purchase_id' => $purchase->id,
                 'installment_number' => $i,
-                'amount' => round($amount, 2),
+                'amount' => $amount,
                 'due_date' => $dueDate,
                 'is_paid' => $isPaid,
                 'paid_at' => $paidAt,
@@ -501,5 +564,154 @@ class PurchasedProductController extends Controller
             'use_credit' => $credit,
             'credit' => $credit,
         ], 200);
+    }
+
+    /**
+     * دریافت اعتبار و سقف خرید اقساطی کاربر
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\Response
+     */
+    public function getInstallmentCredit(Request $request)
+    {
+        $request->validate([
+            'phone' => 'required|string|digits:11',
+        ]);
+
+        $phone = $request->input('phone');
+        $userShiksho = UserShiksho::where('phone', $phone)->first();
+
+        $installmentCredit = $userShiksho ? (float) $userShiksho->installment_credit : 0;
+        
+        // سقف خرید اقساطی همان اعتبار اقساطی کاربر است
+        $installmentLimit = $installmentCredit;
+
+        return response([
+            'phone' => $phone,
+            'installment_credit' => $installmentCredit,
+            'installment_limit' => $installmentLimit,
+            'can_buy_installment' => $installmentCredit > 0,
+        ], 200);
+    }
+
+    /**
+     * محاسبه مبلغ اقساط بر اساس مبلغ خرید و تعداد ماه‌ها
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\Response
+     */
+    public function calculateInstallments(Request $request)
+    {
+        $request->validate([
+            'total_amount' => 'required|numeric|min:0',
+            'installment_count' => 'required|integer|min:2|max:24',
+            'phone' => 'nullable|string|digits:11', // شماره تلفن برای چک اعتبار (اختیاری)
+        ]);
+
+        $totalAmount = (float) $request->input('total_amount');
+        $installmentCount = (int) $request->input('installment_count');
+        $phone = $request->input('phone');
+
+        // خواندن نرخ سود ماهانه از ستینگ (پیش‌فرض: 0 یعنی بدون سود)
+        $monthlyInterestRate = (float) \App\Models\Setting::get('installment_monthly_interest_rate', 0);
+        
+        $finalTotalAmount = $totalAmount;
+        $totalInterest = 0;
+        $installmentDetails = [];
+
+        if ($monthlyInterestRate > 0) {
+            // محاسبه مبلغ کل با سود ماهانه
+            // هر ماه سود به مبلغ مانده تعلق می‌گیرد
+            $remainingAmount = $totalAmount;
+            
+            // محاسبه مبلغ هر قسط بدون سود
+            $baseInstallmentAmount = $totalAmount / $installmentCount;
+            
+            for ($month = 1; $month <= $installmentCount; $month++) {
+                // محاسبه سود این ماه بر اساس مبلغ مانده
+                $monthlyInterest = $remainingAmount * ($monthlyInterestRate / 100);
+                $totalInterest += $monthlyInterest;
+                
+                // ذخیره جزئیات هر ماه - رند کردن همه قیمت‌ها
+                $installmentDetails[] = [
+                    'month' => $month,
+                    'remaining_amount' => $this->roundToThreeZeroEnding($remainingAmount),
+                    'interest' => $this->roundToThreeZeroEnding($monthlyInterest),
+                    'base_payment' => $this->roundToThreeZeroEnding($baseInstallmentAmount),
+                ];
+                
+                // کسر مبلغ قسط از مانده (بدون سود)
+                $remainingAmount -= $baseInstallmentAmount;
+            }
+            
+            // مبلغ کل با سود - رند کردن به عددی که سه رقم آخرش 0 باشد
+            $finalTotalAmount = $this->roundToThreeZeroEnding($totalAmount + $totalInterest);
+        } else {
+            // بدون سود - رند کردن مبلغ کل
+            $finalTotalAmount = $this->roundToThreeZeroEnding($totalAmount);
+            
+            // فقط جزئیات ساده
+            $baseInstallmentAmount = $finalTotalAmount / $installmentCount;
+            for ($month = 1; $month <= $installmentCount; $month++) {
+                $remainingAmount = $this->roundToThreeZeroEnding($finalTotalAmount - ($baseInstallmentAmount * ($month - 1)));
+                $basePayment = $this->roundToThreeZeroEnding($baseInstallmentAmount);
+                
+                $installmentDetails[] = [
+                    'month' => $month,
+                    'remaining_amount' => $remainingAmount,
+                    'interest' => 0,
+                    'base_payment' => $basePayment,
+                ];
+            }
+        }
+
+        // تقسیم مبلغ کل (با سود) به تعداد اقساط و رند کردن
+        $installmentAmount = $this->roundToThreeZeroEnding($finalTotalAmount / $installmentCount);
+
+        // چک اعتبار اقساطی در صورت وجود شماره تلفن
+        $userInstallmentCredit = null;
+        $hasEnoughCredit = null;
+        $creditShortage = null;
+        
+        if ($phone) {
+            $userShiksho = UserShiksho::where('phone', $phone)->first();
+            $userInstallmentCredit = $userShiksho ? (float) $userShiksho->installment_credit : 0;
+            
+            // اعتبار اقساطی باید به اندازه کل مبلغ با سود باشد
+            $hasEnoughCredit = $userInstallmentCredit >= $finalTotalAmount;
+            
+            if (!$hasEnoughCredit) {
+                $creditShortage = $this->roundToThreeZeroEnding($finalTotalAmount - $userInstallmentCredit);
+            }
+        }
+
+        $response = [
+            'total_amount' => $this->roundToThreeZeroEnding($totalAmount),
+            'installment_count' => $installmentCount,
+            'monthly_interest_rate' => $monthlyInterestRate,
+            'total_interest' => $this->roundToThreeZeroEnding($totalInterest),
+            'final_total_amount' => $finalTotalAmount,
+            'installment_amount' => $installmentAmount,
+            'installment_details' => $installmentDetails,
+        ];
+
+        // اضافه کردن اطلاعات اعتبار اقساطی در صورت وجود شماره تلفن
+        if ($phone !== null) {
+            $response['phone'] = $phone;
+            $response['user_installment_credit'] = $this->roundToThreeZeroEnding($userInstallmentCredit);
+            $response['has_enough_credit'] = $hasEnoughCredit;
+            
+            if (!$hasEnoughCredit) {
+                $response['credit_shortage'] = $creditShortage;
+                $response['error'] = 'اعتبار اقساطی کاربر کافی نیست. اعتبار مورد نیاز: ' . number_format($finalTotalAmount, 0) . ' تومان، اعتبار موجود: ' . number_format($userInstallmentCredit, 0) . ' تومان';
+            }
+        }
+
+        // اگر اعتبار کافی نباشد، خطا برمی‌گردانیم
+        if ($phone && !$hasEnoughCredit) {
+            return response($response, 400);
+        }
+
+        return response($response, 200);
     }
 }

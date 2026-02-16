@@ -70,6 +70,8 @@ Route::prefix('purchased-products')->name('purchased-products.')->group(function
     Route::get('/', [\App\Http\Controllers\PurchasedProductController::class, 'index']);
     Route::post('/', [\App\Http\Controllers\PurchasedProductController::class, 'store']);
     Route::get('/credit', [\App\Http\Controllers\PurchasedProductController::class, 'getCreditByPhone']);
+    Route::get('/installment-credit', [\App\Http\Controllers\PurchasedProductController::class, 'getInstallmentCredit']);
+    Route::post('/calculate-installments', [\App\Http\Controllers\PurchasedProductController::class, 'calculateInstallments']);
     Route::get('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'show']);
     Route::put('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'update']);
     Route::delete('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'destroy']);
@@ -139,6 +141,9 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/credit-expiry-days', [\App\Http\Controllers\SettingController::class, 'getCreditExpiryDays']);
         Route::post('/credit-expiry-days', [\App\Http\Controllers\SettingController::class, 'setCreditExpiryDays']);
         Route::put('/credit-expiry-days', [\App\Http\Controllers\SettingController::class, 'setCreditExpiryDays']);
+        Route::get('/installment-interest-rate', [\App\Http\Controllers\SettingController::class, 'getInstallmentInterestRate']);
+        Route::post('/installment-interest-rate', [\App\Http\Controllers\SettingController::class, 'setInstallmentInterestRate']);
+        Route::put('/installment-interest-rate', [\App\Http\Controllers\SettingController::class, 'setInstallmentInterestRate']);
         Route::get('/{key}', [\App\Http\Controllers\SettingController::class, 'show']);
         Route::put('/{key}', [\App\Http\Controllers\SettingController::class, 'update']);
     });
@@ -147,6 +152,15 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::prefix('installments')->name('installments.')->group(function () {
         Route::get('/by-phone', [\App\Http\Controllers\InstallmentController::class, 'getByPhone']);
         Route::get('/unpaid', [\App\Http\Controllers\InstallmentController::class, 'unpaid']);
+    });
+
+    // Installment Credit CRUD routes - requires admin authentication
+    Route::prefix('installment-credits')->name('installment-credits.')->group(function () {
+        Route::get('/', [\App\Http\Controllers\InstallmentCreditController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\InstallmentCreditController::class, 'store']);
+        Route::get('/{phone}', [\App\Http\Controllers\InstallmentCreditController::class, 'show']);
+        Route::put('/{phone}', [\App\Http\Controllers\InstallmentCreditController::class, 'update']);
+        Route::delete('/{phone}', [\App\Http\Controllers\InstallmentCreditController::class, 'destroy']);
     });
 
     // Purchase installment routes - requires admin authentication

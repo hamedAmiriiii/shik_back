@@ -6,6 +6,7 @@ use App\Models\Installment;
 use App\Models\Purchase;
 use App\Models\User;
 use App\Models\Customer;
+use App\Models\UserShiksho;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -86,6 +87,15 @@ class InstallmentController extends Controller
                 'paid_at' => now(),
                 'notes' => $request->input('notes'),
             ]);
+
+            // افزودن اعتبار اقساطی به کاربر (مبلغ قسط پرداخت شده)
+            if ($purchase->phone) {
+                $userShiksho = UserShiksho::where('phone', $purchase->phone)->first();
+                if ($userShiksho) {
+                    // افزودن مبلغ قسط به اعتبار اقساطی کاربر
+                    $userShiksho->addInstallmentCredit($installment->amount);
+                }
+            }
 
             DB::commit();
 
