@@ -24,11 +24,35 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule)
     {
-        // بررسی و صفر کردن اعتبارهای منقضی شده - روزانه در ساعت 2 صبح
-        $schedule->command('credits:expire')->dailyAt('10:00');
         
-        // ارسال یادآوری قسط‌ها - روزانه در ساعت 10 صبح
-        $schedule->command('installments:send-reminders')->dailyAt('10:00');
+        // تنظیم timezone برای scheduled tasks به تهران
+        $schedule->timezone('Asia/Tehran');
+        
+        // بررسی و صفر کردن اعتبارهای منقضی شده - روزانه در ساعت 10 صبح (به وقت تهران)
+        $schedule->command('credits:expire')
+            ->dailyAt('10:00')
+            ->before(function () {
+                \Log::info('Scheduled task: credits:expire - شروع اجرا', [
+                    'time' => now()->format('Y-m-d H:i:s'),
+                    'timezone' => config('app.timezone')
+                ]);
+            })
+            ->after(function () {
+                \Log::info('Scheduled task: credits:expire - اجرا شد');
+            });
+        
+        // ارسال یادآوری قسط‌ها - روزانه در ساعت 10 صبح (به وقت تهران)
+        $schedule->command('installments:send-reminders')
+            ->dailyAt('10:00')
+            ->before(function () {
+                \Log::info('Scheduled task: installments:send-reminders - شروع اجرا', [
+                    'time' => now()->format('Y-m-d H:i:s'),
+                    'timezone' => config('app.timezone')
+                ]);
+            })
+            ->after(function () {
+                \Log::info('Scheduled task: installments:send-reminders - اجرا شد');
+            });
     }
 
     /**

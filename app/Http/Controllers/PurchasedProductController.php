@@ -236,30 +236,33 @@ class PurchasedProductController extends Controller
             // خواندن نرخ سود ماهانه از ستینگ (پیش‌فرض: 0 یعنی بدون سود)
             $monthlyInterestRate = (float) \App\Models\Setting::get('installment_monthly_interest_rate', 0);
             
-            if ($monthlyInterestRate > 0) {
-                // محاسبه مبلغ کل با سود ماهانه
-                // هر ماه سود به مبلغ مانده تعلق می‌گیرد
-                $remainingAmount = $totalAmount;
-                $totalInterest = 0;
-                
-                // محاسبه مبلغ هر قسط بدون سود
-                $baseInstallmentAmount = $totalAmount / $installmentCount;
-                
-                for ($month = 1; $month <= $installmentCount; $month++) {
-                    // محاسبه سود این ماه بر اساس مبلغ مانده
-                    $monthlyInterest = $remainingAmount * ($monthlyInterestRate / 100);
-                    $totalInterest += $monthlyInterest;
-                    
-                    // کسر مبلغ قسط از مانده (بدون سود)
-                    $remainingAmount -= $baseInstallmentAmount;
-                }
-                
-                // مبلغ کل با سود - رند کردن به عددی که سه رقم آخرش 0 باشد
-                $finalTotalAmount = $this->roundToThreeZeroEnding($totalAmount + $totalInterest);
-            }
+            // یک سوم مبلغ به صورت نقد (قسط اول)
+            $firstInstallmentAmount = $this->roundToThreeZeroEnding($totalAmount / 3);
             
-            // تقسیم مبلغ کل (با سود) به تعداد اقساط و رند کردن
-            $installmentAmount = $this->roundToThreeZeroEnding($finalTotalAmount / $installmentCount);
+            // بقیه مبلغ (دو سوم)
+            $remainingAmount = $totalAmount - $firstInstallmentAmount;
+            
+            // تعداد ماه‌های باقیمانده (بعد از قسط اول)
+            $remainingMonths = $installmentCount - 1;
+            
+            if ($monthlyInterestRate > 0 && $remainingMonths > 0) {
+                // محاسبه سود: مبلغ باقیمانده × نرخ سود × تعداد ماه‌های باقیمانده
+                $totalInterest = $remainingAmount * ($monthlyInterestRate / 100) * $remainingMonths;
+                
+                // مبلغ کل با سود = مبلغ باقیمانده + سود
+                $remainingAmountWithInterest = $remainingAmount + $totalInterest;
+                
+                // مبلغ کل نهایی = قسط اول + بقیه با سود
+                $finalTotalAmount = $this->roundToThreeZeroEnding($firstInstallmentAmount + $remainingAmountWithInterest);
+                
+                // مبلغ هر قسط باقیمانده
+                $installmentAmount = $this->roundToThreeZeroEnding($remainingAmountWithInterest / $remainingMonths);
+            } else {
+                // بدون سود
+                $finalTotalAmount = $totalAmount;
+                // مبلغ هر قسط باقیمانده
+                $installmentAmount = $this->roundToThreeZeroEnding($remainingAmount / $remainingMonths);
+            }
         }
 
         // ایجاد سبد خرید (Purchase)
@@ -297,12 +300,12 @@ class PurchasedProductController extends Controller
         if ($paymentType === 'installment' && $installmentCount && $installmentAmount) {
             $this->createInstallments($purchase, $installmentCount, $installmentAmount, $finalTotalAmount);
             
-            // کسر اعتبار اقساطی: مبلغ باقیمانده (کل مبلغ منهای قسط اول که پرداخت شده)
+            // کسر اعتبار اقساطی: مبلغ باقیمانده (کل مبلغ منهای قسط اول که پرداخت شده - یک سوم)
             if ($phone) {
                 $userShiksho = UserShiksho::where('phone', $phone)->first();
                 if ($userShiksho) {
-                    // مبلغ قسط اول که پرداخت شده است
-                    $firstInstallmentAmount = $installmentAmount;
+                    // مبلغ قسط اول که پرداخت شده است (یک سوم)
+                    $firstInstallmentAmount = $this->roundToThreeZeroEnding($finalTotalAmount / 3);
                     // مبلغ باقیمانده که باید از اعتبار اقساطی کسر شود
                     $remainingAmount = $finalTotalAmount - $firstInstallmentAmount;
                     
@@ -433,6 +436,13 @@ class PurchasedProductController extends Controller
 
     /**
      * ایجاد قسط‌ها برای خرید اقساطی
+     * قسط اول: یک سوم مبلغ کل (نقد)
+     * بقیه اقساط: تقسیم مبلغ باقیمانده با سود
+     * 
+     * @param Purchase $purchase
+     * @param int $installmentCount تعداد کل اقساط
+     * @param float $installmentAmount مبلغ هر قسط باقیمانده (بعد از قسط اول)
+     * @param float $totalAmount مبلغ کل با سود
      */
     private function createInstallments(Purchase $purchase, int $installmentCount, float $installmentAmount, float $totalAmount)
     {
@@ -440,23 +450,37 @@ class PurchasedProductController extends Controller
         $today = Jalalian::now();
         $baseDate = $today->toCarbon();
         
-        $totalInstallmentAmount = $installmentAmount * $installmentCount;
-        $difference = $totalAmount - $totalInstallmentAmount;
+        // یک سوم مبلغ کل (قسط اول - نقد)
+        $firstInstallmentAmount = $this->roundToThreeZeroEnding($totalAmount / 3);
+        
+        // تعداد ماه‌های باقیمانده
+        $remainingMonths = $installmentCount - 1;
+        
+        // مبلغ کل باقیمانده با سود
+        $remainingAmountWithInterest = $installmentAmount * $remainingMonths;
+        
+        // محاسبه تفاوت برای اضافه کردن به آخرین قسط
+        $expectedTotal = $firstInstallmentAmount + $remainingAmountWithInterest;
+        $difference = $totalAmount - $expectedTotal;
         
         for ($i = 1; $i <= $installmentCount; $i++) {
             if ($i === 1) {
+                // قسط اول: یک سوم نقد
                 $dueDate = $baseDate->toDateString();
                 $isPaid = true;
                 $paidAt = now();
+                $amount = $firstInstallmentAmount;
             } else {
+                // بقیه اقساط
                 $dueDate = $baseDate->copy()->addMonths($i - 1)->toDateString();
                 $isPaid = false;
                 $paidAt = null;
-            }
-            
-            $amount = $installmentAmount;
-            if ($i === $installmentCount && $difference != 0) {
-                $amount += $difference;
+                
+                $amount = $installmentAmount;
+                // اگر آخرین قسط است و تفاوتی وجود دارد، اضافه کن
+                if ($i === $installmentCount && abs($difference) > 0.01) {
+                    $amount += $difference;
+                }
             }
             
             // رند کردن مبلغ قسط به عددی که سه رقم آخرش 0 باشد
@@ -615,58 +639,78 @@ class PurchasedProductController extends Controller
         // خواندن نرخ سود ماهانه از ستینگ (پیش‌فرض: 0 یعنی بدون سود)
         $monthlyInterestRate = (float) \App\Models\Setting::get('installment_monthly_interest_rate', 0);
         
+        // یک سوم مبلغ به صورت نقد (قسط اول)
+        $firstInstallmentAmount = $this->roundToThreeZeroEnding($totalAmount / 3);
+        
+        // بقیه مبلغ (دو سوم)
+        $remainingAmount = $totalAmount - $firstInstallmentAmount;
+        
+        // تعداد ماه‌های باقیمانده (بعد از قسط اول)
+        $remainingMonths = $installmentCount - 1;
+        
         $finalTotalAmount = $totalAmount;
         $totalInterest = 0;
         $installmentDetails = [];
 
-        if ($monthlyInterestRate > 0) {
-            // محاسبه مبلغ کل با سود ماهانه
-            // هر ماه سود به مبلغ مانده تعلق می‌گیرد
-            $remainingAmount = $totalAmount;
+        if ($monthlyInterestRate > 0 && $remainingMonths > 0) {
+            // محاسبه سود: مبلغ باقیمانده × نرخ سود × تعداد ماه‌های باقیمانده
+            $totalInterest = $remainingAmount * ($monthlyInterestRate / 100) * $remainingMonths;
             
-            // محاسبه مبلغ هر قسط بدون سود
-            $baseInstallmentAmount = $totalAmount / $installmentCount;
+            // مبلغ کل با سود = مبلغ باقیمانده + سود
+            $remainingAmountWithInterest = $remainingAmount + $totalInterest;
             
-            for ($month = 1; $month <= $installmentCount; $month++) {
-                // محاسبه سود این ماه بر اساس مبلغ مانده
-                $monthlyInterest = $remainingAmount * ($monthlyInterestRate / 100);
-                $totalInterest += $monthlyInterest;
-                
-                // ذخیره جزئیات هر ماه - رند کردن همه قیمت‌ها
+            // مبلغ کل نهایی = قسط اول + بقیه با سود
+            $finalTotalAmount = $this->roundToThreeZeroEnding($firstInstallmentAmount + $remainingAmountWithInterest);
+            
+            // مبلغ هر قسط باقیمانده
+            $installmentAmount = $this->roundToThreeZeroEnding($remainingAmountWithInterest / $remainingMonths);
+            
+            // جزئیات قسط اول
+            $installmentDetails[] = [
+                'month' => 1,
+                'remaining_amount' => $totalAmount,
+                'interest' => 0,
+                'base_payment' => $firstInstallmentAmount,
+                'payment_type' => 'cash',
+            ];
+            
+            // جزئیات بقیه اقساط
+            for ($month = 2; $month <= $installmentCount; $month++) {
                 $installmentDetails[] = [
                     'month' => $month,
-                    'remaining_amount' => $this->roundToThreeZeroEnding($remainingAmount),
-                    'interest' => $this->roundToThreeZeroEnding($monthlyInterest),
-                    'base_payment' => $this->roundToThreeZeroEnding($baseInstallmentAmount),
+                    'remaining_amount' => $this->roundToThreeZeroEnding($remainingAmountWithInterest - ($installmentAmount * ($month - 2))),
+                    'interest' => $this->roundToThreeZeroEnding($totalInterest / $remainingMonths),
+                    'base_payment' => $installmentAmount,
+                    'payment_type' => 'installment',
                 ];
-                
-                // کسر مبلغ قسط از مانده (بدون سود)
-                $remainingAmount -= $baseInstallmentAmount;
             }
-            
-            // مبلغ کل با سود - رند کردن به عددی که سه رقم آخرش 0 باشد
-            $finalTotalAmount = $this->roundToThreeZeroEnding($totalAmount + $totalInterest);
         } else {
-            // بدون سود - رند کردن مبلغ کل
+            // بدون سود
             $finalTotalAmount = $this->roundToThreeZeroEnding($totalAmount);
             
-            // فقط جزئیات ساده
-            $baseInstallmentAmount = $finalTotalAmount / $installmentCount;
-            for ($month = 1; $month <= $installmentCount; $month++) {
-                $remainingAmount = $this->roundToThreeZeroEnding($finalTotalAmount - ($baseInstallmentAmount * ($month - 1)));
-                $basePayment = $this->roundToThreeZeroEnding($baseInstallmentAmount);
-                
+            // مبلغ هر قسط باقیمانده
+            $installmentAmount = $this->roundToThreeZeroEnding($remainingAmount / $remainingMonths);
+            
+            // جزئیات قسط اول
+            $installmentDetails[] = [
+                'month' => 1,
+                'remaining_amount' => $totalAmount,
+                'interest' => 0,
+                'base_payment' => $firstInstallmentAmount,
+                'payment_type' => 'cash',
+            ];
+            
+            // جزئیات بقیه اقساط
+            for ($month = 2; $month <= $installmentCount; $month++) {
                 $installmentDetails[] = [
                     'month' => $month,
-                    'remaining_amount' => $remainingAmount,
+                    'remaining_amount' => $this->roundToThreeZeroEnding($remainingAmount - ($installmentAmount * ($month - 2))),
                     'interest' => 0,
-                    'base_payment' => $basePayment,
+                    'base_payment' => $installmentAmount,
+                    'payment_type' => 'installment',
                 ];
             }
         }
-
-        // تقسیم مبلغ کل (با سود) به تعداد اقساط و رند کردن
-        $installmentAmount = $this->roundToThreeZeroEnding($finalTotalAmount / $installmentCount);
 
         // چک اعتبار اقساطی در صورت وجود شماره تلفن
         $userInstallmentCredit = null;
