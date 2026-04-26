@@ -91,24 +91,18 @@ class CustomerController extends Controller
      */
     public function getCustomersForBroadcast(Request $request)
     {
-        // دریافت لیست شماره تلفن‌های یکتای مشتریان از جدول purchases
-        $query = DB::table('purchases')
-            ->select(
-                'purchases.phone',
-                DB::raw('COUNT(purchases.id) as total_purchases'),
-                DB::raw('MAX(purchases.created_at) as last_purchase_date')
-            )
-            ->whereNotNull('purchases.phone')
-            ->where('purchases.phone', '!=', '')
-            ->groupBy('purchases.phone')
-            ->orderBy('last_purchase_date', 'desc');
+       // دریافت لیست شماره تلفن‌های یکتای مشتریان از جدول purchases
+       $query = DB::table('user_shiksho')
+       ->select(
+           'user_shiksho.phone'
+       )
+      ;
 
-        $customers = $query->get()->map(function($item) {
-            return [
-                'phone' => $item->phone,
-                'total_purchases' => (int) $item->total_purchases,
-            ];
-        })->values();
+   $customers = $query->get()->map(function($item) {
+       return [
+           'phone' => $item->phone,
+       ];
+   })->values();
 
         return response([
             'customers' => $customers

@@ -1,0 +1,396 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Purchase;
+use App\Models\PurchasedProduct;
+use App\Models\Expense;
+use App\Models\Invoice;
+use App\Models\ReturnedProduct;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Morilog\Jalali\Jalalian;
+use Carbon\Carbon;
+
+class FinancialReportController extends Controller
+{
+    /**
+     * گزارش مالی ماهانه
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\Response
+     */
+    public function monthlyReport(Request $request)
+    {
+        try {
+            // دریافت محدوده تاریخ (اختیاری)
+            $startDate = $request->input('start_date'); // فرمت: YYYY-MM-DD (شمسی)
+            $endDate = $request->input('end_date'); // فرمت: YYYY-MM-DD (شمسی)
+
+            // تبدیل تاریخ‌های شمسی به میلادی برای کوئری
+            $startCarbon = null;
+            $endCarbon = null;
+
+            if ($startDate) {
+                try {
+                    $startCarbon = Jalalian::fromFormat('Y-m-d', $startDate)->toCarbon();
+                } catch (\Exception $e) {
+                    return response([
+                        'errorText' => 'فرمت تاریخ شروع نامعتبر است. فرمت صحیح: YYYY-MM-DD (شمسی)',
+                        'hasError' => true,
+                        'statusCode' => 400
+                    ], 400);
+                }
+            }
+
+            if ($endDate) {
+                try {
+                    $endCarbon = Jalalian::fromFormat('Y-m-d', $endDate)->toCarbon();
+                } catch (\Exception $e) {
+                    return response([
+                        'errorText' => 'فرمت تاریخ پایان نامعتبر است. فرمت صحیح: YYYY-MM-DD (شمسی)',
+                        'hasError' => true,
+                        'statusCode' => 400
+                    ], 400);
+                }
+            }
+
+            // اگر تاریخ شروع مشخص نشده، اولین تاریخی که داده داریم را پیدا می‌کنیم
+            if (!$startCarbon) {
+                // پیدا کردن اولین تاریخ از جداول مختلف
+                $firstPurchaseDate = Purchase::min('created_at');
+                $firstExpenseDate = Expense::min('date');
+                $firstInvoiceDate = Invoice::min('date');
+                
+                // تبدیل تاریخ‌های expense و invoice به Carbon (اگر وجود داشته باشند)
+                $dates = [];
+                if ($firstPurchaseDate) {
+                    $dates[] = Carbon::parse($firstPurchaseDate);
+                }
+                if ($firstExpenseDate) {
+                    $dates[] = Carbon::parse($firstExpenseDate);
+                }
+                if ($firstInvoiceDate) {
+                    $dates[] = Carbon::parse($firstInvoiceDate);
+                }
+                
+                // اگر داده‌ای وجود داشت، از اولین تاریخ شروع می‌کنیم
+                if (!empty($dates)) {
+                    $startCarbon = min($dates);
+                } else {
+                    // اگر هیچ داده‌ای وجود نداشت، از ابتدای سال 1400 شمسی شروع می‌کنیم
+                    try {
+                        $startCarbon = (new Jalalian(1400, 1, 1, 0, 0, 0))->toCarbon();
+                    } catch (\Exception $e) {
+                        // اگر خطا در تبدیل تاریخ رخ داد، از ابتدای سال جاری میلادی شروع کن
+                        $startCarbon = Carbon::now()->startOfYear();
+                    }
+                }
+            }
+
+            // اگر تاریخ پایان مشخص نشده، تا الان
+            if (!$endCarbon) {
+                $endCarbon = Carbon::now();
+            }
+
+            // تبدیل به ابتدا و انتهای روز
+            $startCarbon = $startCarbon->startOfDay();
+            $endCarbon = $endCarbon->endOfDay();
+
+        // دریافت تمام ماه‌های موجود در بازه زمانی
+        $months = $this->getMonthsInRange($startCarbon, $endCarbon);
+
+        $monthlyData = [];
+        $totals = [
+            'total_sales' => 0,
+            'total_purchases' => 0,
+            'total_profit' => 0,
+            'total_expenses' => 0,
+            'total_invoices' => 0,
+            'total_net_profit' => 0,
+            'total_account_balance' => 0,
+        ];
+
+        foreach ($months as $month) {
+            $monthData = $this->calculateMonthData($month['start'], $month['end'], $month['year'], $month['month']);
+            
+            $monthlyData[] = $monthData;
+
+            // اضافه کردن به مجموع
+            $totals['total_sales'] += $monthData['total_sales'];
+            $totals['total_purchases'] += $monthData['total_purchases'];
+            $totals['total_profit'] += $monthData['total_profit'];
+            $totals['total_expenses'] += $monthData['total_expenses'];
+            $totals['total_invoices'] += $monthData['total_invoices'];
+            $totals['total_net_profit'] += $monthData['net_profit'];
+            $totals['total_account_balance'] += $monthData['account_balance'];
+        }
+
+            return response([
+                'data' => $monthlyData,
+                'totals' => $totals,
+            ], 200);
+        } catch (\Exception $e) {
+            return response([
+                'errorText' => $e->getMessage(),
+                'hasError' => true,
+                'statusCode' => 500,
+                'trace' => config('app.debug') ? $e->getTraceAsString() : null
+            ], 500);
+        }
+    }
+
+    /**
+     * دریافت لیست ماه‌ها در بازه زمانی
+     */
+    private function getMonthsInRange(Carbon $start, Carbon $end): array
+    {
+        $months = [];
+        
+        // بررسی معتبر بودن تاریخ شروع و پایان
+        $minCarbon = Carbon::create(1621, 1, 1); // سال 1000 شمسی
+        $maxCarbon = Carbon::create(2221, 12, 31); // سال 3000 شمسی
+        
+        // اگر تاریخ شروع خیلی قدیمی است، از ابتدای سال 1400 شمسی شروع کن
+        if ($start->lt($minCarbon)) {
+            try {
+                $start = (new Jalalian(1400, 1, 1, 0, 0, 0))->toCarbon();
+            } catch (\Exception $e) {
+                $start = Carbon::now()->startOfYear();
+            }
+        }
+        
+        // اگر تاریخ پایان خیلی جدید است، تا الان محدود کن
+        if ($end->gt($maxCarbon)) {
+            $end = Carbon::now();
+        }
+        
+        // اگر تاریخ شروع بعد از تاریخ پایان است، آرایه خالی برگردان
+        if ($start->gt($end)) {
+            return [];
+        }
+        
+        $current = $start->copy();
+        $processedMonths = []; // برای جلوگیری از تکرار
+        $maxIterations = 500; // جلوگیری از حلقه بی‌نهایت
+        $iteration = 0;
+
+        while ($current->lte($end) && $iteration < $maxIterations) {
+            $iteration++;
+            
+            // تبدیل به شمسی با بررسی معتبر بودن
+            try {
+                // بررسی اینکه تاریخ معتبر است یا نه (باید بعد از سال 1000 شمسی باشد)
+                if ($current->lt($minCarbon)) {
+                    // اگر تاریخ خیلی قدیمی است، به ماه بعد برو
+                    $current = $current->copy()->addMonth()->startOfMonth();
+                    continue;
+                }
+                
+                $jalali = Jalalian::fromCarbon($current);
+                $year = $jalali->getYear();
+                $month = $jalali->getMonth();
+                
+                // بررسی معتبر بودن سال (باید بین 1000 تا 3000 باشد)
+                if ($year < 1000 || $year > 3000) {
+                    // اگر سال معتبر نیست، به ماه بعد برو
+                    $current = $current->copy()->addMonth()->startOfMonth();
+                    continue;
+                }
+            } catch (\Exception $e) {
+                // اگر خطا در تبدیل تاریخ رخ داد، به ماه بعد برو
+                $current = $current->copy()->addMonth()->startOfMonth();
+                continue;
+            }
+
+            // بررسی اینکه این ماه قبلاً پردازش شده یا نه
+            $monthKey = $year . '-' . $month;
+            if (isset($processedMonths[$monthKey])) {
+                // رفتن به ماه بعد
+                $nextMonth = $month + 1;
+                $nextYear = $year;
+                if ($nextMonth > 12) {
+                    $nextMonth = 1;
+                    $nextYear++;
+                }
+                try {
+                    $current = (new Jalalian($nextYear, $nextMonth, 1, 0, 0, 0))->toCarbon();
+                } catch (\Exception $e) {
+                    break; // اگر خطا در تبدیل تاریخ رخ داد، حلقه را متوقف کن
+                }
+                continue;
+            }
+
+            $processedMonths[$monthKey] = true;
+
+            // ابتدا و انتهای ماه شمسی
+            try {
+                $monthStartJalali = new Jalalian($year, $month, 1, 0, 0, 0);
+                $monthStart = $monthStartJalali->toCarbon();
+                
+                // تعداد روزهای ماه شمسی
+                $daysInMonth = $monthStartJalali->getMonthDays();
+                $monthEndJalali = new Jalalian($year, $month, $daysInMonth, 23, 59, 59);
+                $monthEnd = $monthEndJalali->toCarbon();
+            } catch (\Exception $e) {
+                // اگر خطا در تبدیل تاریخ رخ داد، از تاریخ فعلی استفاده کن
+                $monthStart = $current->copy()->startOfMonth();
+                $monthEnd = $current->copy()->endOfMonth();
+            }
+
+            // محدود کردن به بازه درخواستی
+            if ($monthStart->lt($start)) {
+                $monthStart = $start->copy();
+            }
+            if ($monthEnd->gt($end)) {
+                $monthEnd = $end->copy();
+            }
+
+            $months[] = [
+                'year' => $year,
+                'month' => $month,
+                'start' => $monthStart,
+                'end' => $monthEnd,
+                'month_name' => $this->getMonthName($month),
+            ];
+
+            // رفتن به ماه بعد (اول ماه بعد)
+            $nextMonth = $month + 1;
+            $nextYear = $year;
+            if ($nextMonth > 12) {
+                $nextMonth = 1;
+                $nextYear++;
+            }
+            try {
+                $current = (new Jalalian($nextYear, $nextMonth, 1, 0, 0, 0))->toCarbon();
+            } catch (\Exception $e) {
+                break; // اگر خطا در تبدیل تاریخ رخ داد، حلقه را متوقف کن
+            }
+        }
+
+        return $months;
+    }
+
+    /**
+     * محاسبه داده‌های یک ماه
+     */
+    private function calculateMonthData(Carbon $start, Carbon $end, int $year, int $month): array
+    {
+        // تبدیل تاریخ‌ها به فرمت مناسب برای کوئری
+        $startString = $start->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
+        $endString = $end->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
+
+        // دریافت خریدها با روابط مورد نیاز
+        $purchases = Purchase::with(['purchasedProducts.product', 'installments'])
+            ->whereBetween('created_at', [$startString, $endString])
+            ->get();
+
+        $totalSales = 0;
+        $totalPurchase = 0;
+        $totalCreditEarned = 0;
+
+        foreach ($purchases as $purchase) {
+            // محاسبه فروش واقعی
+            // برای خریدهای اقساطی: مجموع قسط‌های پرداخت شده
+            // برای خریدهای نقدی: مبلغ کل خرید
+            // (که شامل تخفیف مستقیم discount_amount هم می‌شود)
+            // total_amount = مجموع sale_price ها - discount_amount - credit_used
+            // پس برای محاسبه فروش واقعی: actual_paid_amount + credit_used
+            // (چون credit_used از سود کسر نمی‌شود، باید به فروش اضافه شود)
+            $actualPaidAmount = $purchase->isInstallment() ? $purchase->paid_amount : $purchase->total_amount;
+            $totalSales += $actualPaidAmount + $purchase->credit_used;
+
+            // محاسبه هزینه خرید محصولات
+            foreach ($purchase->purchasedProducts as $purchasedProduct) {
+                $totalPurchase += $purchasedProduct->quantity * $purchasedProduct->purchase_price;
+            }
+
+            // جمع کردن اعتبار هدیه داده شده (که باید از سود کسر شود)
+            $totalCreditEarned += $purchase->credit_earned;
+        }
+
+        // محاسبه برگشتی‌ها با اطلاعات محصولات
+        $returnedProducts = ReturnedProduct::with('product')
+            ->whereBetween('created_at', [$startString, $endString])
+            ->get();
+
+        $totalReturns = 0; // مجموع قیمت فروش برگشتی‌ها
+        $totalReturnsPurchase = 0; // مجموع قیمت خرید برگشتی‌ها
+
+        foreach ($returnedProducts as $returned) {
+            $salePrice = $returned->sale_price;
+            $purchasePrice = $returned->product->purchase_price;
+
+            $totalReturns += $salePrice;
+            $totalReturnsPurchase += $purchasePrice;
+        }
+
+        // فروش خالص = فروش - برگشتی‌ها
+        $netSales = $totalSales - $totalReturns;
+
+        // هزینه خرید خالص = هزینه خرید - هزینه خرید کالاهای برگشتی
+        // (فقط کالاهایی که واقعاً فروخته و برگشت نشده‌اند)
+        $netPurchase = $totalPurchase - $totalReturnsPurchase;
+
+        // کل سود = فروش خالص - هزینه خرید خالص - اعتبار هدیه داده شده
+        // چون هزینه خرید کالاهای برگشتی را از totalPurchase کم کرده‌ایم،
+        // دیگر نیاز به کسر سود برگشتی نیست
+        $totalProfit = $netSales - $netPurchase - $totalCreditEarned;
+
+        // کل هزینه‌های جاری: مجموع amount از expenses که type = 'جاری'
+        // توجه: date در expenses به صورت DATE ذخیره می‌شود (میلادی)
+        $totalExpenses = Expense::where('type', 'جاری')
+            ->whereDate('date', '>=', $start->format('Y-m-d'))
+            ->whereDate('date', '<=', $end->format('Y-m-d'))
+            ->sum('amount');
+
+        // کل فاکتورها: مجموع amount از invoices
+        // توجه: date در invoices به صورت DATE ذخیره می‌شود (میلادی)
+        $totalInvoices = Invoice::whereDate('date', '>=', $start->format('Y-m-d'))
+            ->whereDate('date', '<=', $end->format('Y-m-d'))
+            ->sum('amount');
+
+        // خالص سود = سود - هزینه‌های جاری
+        $netProfit = $totalProfit - $totalExpenses;
+
+        // موجودی حساب = کل فروش - هزینه‌های جاری - کل فاکتورها
+        $accountBalance = $netSales - $totalExpenses - $totalInvoices;
+
+        return [
+            'year' => $year,
+            'month' => $month,
+            'month_name' => $this->getMonthName($month),
+            'total_sales' => round($netSales, 2), // فروش خالص (منهای برگشتی‌ها)
+            'total_purchases' => round($netPurchase, 2), // هزینه خرید خالص (منهای برگشتی‌ها)
+            'total_profit' => round($totalProfit, 2),
+            'total_expenses' => round($totalExpenses, 2),
+            'total_invoices' => round($totalInvoices, 2),
+            'net_profit' => round($netProfit, 2),
+            'account_balance' => round($accountBalance, 2),
+        ];
+    }
+
+    /**
+     * نام ماه شمسی
+     */
+    private function getMonthName(int $month): string
+    {
+        $months = [
+            1 => 'فروردین',
+            2 => 'اردیبهشت',
+            3 => 'خرداد',
+            4 => 'تیر',
+            5 => 'مرداد',
+            6 => 'شهریور',
+            7 => 'مهر',
+            8 => 'آبان',
+            9 => 'آذر',
+            10 => 'دی',
+            11 => 'بهمن',
+            12 => 'اسفند',
+        ];
+
+        return $months[$month] ?? '';
+    }
+}
+

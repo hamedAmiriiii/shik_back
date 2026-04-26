@@ -169,6 +169,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::post('/{purchase}/installments/{installment}/pay', [\App\Http\Controllers\InstallmentController::class, 'pay']);
     });
 
+    // Financial Report routes - requires authentication
+    Route::prefix('financial-report')->name('financial-report.')->group(function () {
+        Route::get('/monthly', [\App\Http\Controllers\FinancialReportController::class, 'monthlyReport']);
+    });
+
     // Admin routes
     Route::name('admin.')->prefix('admin')->group(function () {
         
