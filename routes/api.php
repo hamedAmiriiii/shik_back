@@ -79,6 +79,7 @@ Route::prefix('purchased-products')->name('purchased-products.')->group(function
 });
 
 Route::prefix('customers')->name('customers.')->group(function () {
+    Route::post('/register', [\App\Http\Controllers\CustomerController::class, 'registerUserShiksho']);
     Route::get('/', [\App\Http\Controllers\CustomerController::class, 'index']);
     Route::get('/{phone}', [\App\Http\Controllers\CustomerController::class, 'show']);
 });

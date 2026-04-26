@@ -12,6 +12,34 @@ use Illuminate\Support\Facades\DB;
 class CustomerController extends Controller
 {
     /**
+     * ثبت کاربر در جدول user_shiksho
+     */
+    public function registerUserShiksho(Request $request)
+    {
+        $validated = $request->validate([
+            'phone' => 'required|string|digits:11',
+        ]);
+
+        $userShiksho = UserShiksho::firstOrCreate(
+            ['phone' => $validated['phone']],
+            [
+                'credit' => 0,
+                'installment_credit' => 0,
+                'credit_last_updated_at' => now(),
+                'last_warning_sent_at' => null,
+            ]
+        );
+
+        return response([
+            'message' => $userShiksho->wasRecentlyCreated
+                ? 'کاربر با موفقیت در شیک‌شو ثبت شد'
+                : 'کاربر قبلا در شیک‌شو ثبت شده است',
+            'already_exists' => !$userShiksho->wasRecentlyCreated,
+            'data' => $userShiksho
+        ], $userShiksho->wasRecentlyCreated ? 201 : 200);
+    }
+
+    /**
      * لیست  خریداران از فروشگاه (آنهایی که شماره تلفنشان ثبت شده)
      */
     public function index(Request $request)
