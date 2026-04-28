@@ -30,11 +30,28 @@ class CustomerController extends Controller
             ]
         );
 
+        $smsSent = false;
+        $smsError = null;
+        if ($userShiksho->wasRecentlyCreated) {
+            $welcomeMessage = "به باشگاه مشتریان شیک شو خوش امدید";
+            try {
+                SmsTools::sendSms($validated['phone'], $welcomeMessage);
+                $smsSent = true;
+            } catch (\Exception $e) {
+                // عدم موفقیت در ارسال پیامک نباید مانع ثبت کاربر شود
+                $smsSent = false;
+                $smsError = $e->getMessage();
+            }
+        }
+
+
         return response([
             'message' => $userShiksho->wasRecentlyCreated
                 ? 'کاربر با موفقیت در شیک‌شو ثبت شد'
                 : 'کاربر قبلا در شیک‌شو ثبت شده است',
             'already_exists' => !$userShiksho->wasRecentlyCreated,
+            'sms_sent' => $smsSent,
+            'sms_error' => $smsError,
             'data' => $userShiksho
         ], $userShiksho->wasRecentlyCreated ? 201 : 200);
     }
