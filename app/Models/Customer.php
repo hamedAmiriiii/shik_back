@@ -70,5 +70,21 @@ class Customer extends Authenticatable
     {
         return $this->hasOne(Cart::class)->where('status', 'pending');
     }
+
+    /**
+     * آدرس‌های این مشتری
+     */
+    public function addresses()
+    {
+        return $this->hasMany(CustomerAddress::class);
+    }
+
+    /**
+     * آدرس پیش‌فرض این مشتری
+     */
+    public function defaultAddress()
+    {
+        return $this->hasOne(CustomerAddress::class)->where('is_default', true);
+    }
 }
 

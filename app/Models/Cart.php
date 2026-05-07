@@ -17,6 +17,7 @@ class Cart extends Model
 
     protected $fillable = [
         'customer_id',
+        'address_id',
         'status',
         'shipping_name',
         'shipping_last_name',
@@ -41,6 +42,14 @@ class Cart extends Model
     public function customer()
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * آدرس ارسال این سبد
+     */
+    public function address()
+    {
+        return $this->belongsTo(CustomerAddress::class, 'address_id');
     }
 
     /**

@@ -11,6 +11,7 @@ use App\Models\Purchase;
 use App\Models\PurchasedProduct;
 use App\Models\UserShiksho;
 use App\Models\CustomerPhone;
+use App\Models\CustomerAddress;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +27,7 @@ class CartController extends Controller
         
         $cart = Cart::where('customer_id', $customer->id)
             ->where('status', Cart::STATUS_PENDING)
-            ->with(['items.product.images', 'items.product.categories'])
+            ->with(['items.product.images', 'items.product.categories', 'address'])
             ->first();
 
         if (!$cart) {
@@ -130,6 +131,48 @@ class CartController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * انتخاب آدرس برای سبد خرید (بر اساس آدرس ID)
+     */
+    public function setAddress(Request $request)
+    {
+        $request->validate([
+            'address_id' => 'required|exists:customer_addresses,id',
+        ]);
+
+        $customer = $request->user();
+        $addressId = $request->input('address_id');
+
+        // بررسی اینکه این آدرس متعلق به مشتری است
+        $address = CustomerAddress::find($addressId);
+        if (!$address || $address->customer_id !== $customer->id) {
+            return response(['error' => 'آدرس یافت نشد یا شما دسترسی ندارید'], 404);
+        }
+
+        $cart = Cart::where('customer_id', $customer->id)
+            ->where('status', Cart::STATUS_PENDING)
+            ->first();
+
+        if (!$cart) {
+            return response([
+                'error' => 'سبد خرید یافت نشد'
+            ], 404);
+        }
+
+        // تعیین آدرس برای سبد خرید
+        $cart->update(['address_id' => $addressId]);
+
+        $cart->load(['items.product.images', 'items.product.categories', 'address']);
+
+        return response([
+            'message' => 'آدرس برای سبد خرید تعیین شد',
+            'cart' => $cart,
+            'items' => $cart->items,
+            'total' => $cart->total,
+            'items_count' => $cart->items_count
+        ]);
     }
 
     /**
@@ -249,9 +292,9 @@ class CartController extends Controller
         }
 
         // بررسی اینکه اطلاعات ارسال کامل است
-        if (!$cart->shipping_name || !$cart->shipping_address || !$cart->shipping_phone) {
+        if ((!$cart->shipping_name || !$cart->shipping_address || !$cart->shipping_phone) && !$cart->address_id) {
             return response([
-                'error' => 'اطلاعات ارسال کامل نیست. لطفاً ابتدا اطلاعات ارسال را تکمیل کنید.'
+                'error' => 'اطلاعات ارسال کامل نیست. لطفاً ابتدا آدرس را انتخاب کنید یا اطلاعات ارسال را تکمیل کنید.'
             ], 400);
         }
 
@@ -278,9 +321,14 @@ class CartController extends Controller
 
         DB::beginTransaction();
         try {
+            // Load address if set
+            if ($cart->address_id) {
+                $cart->load('address');
+            }
+
             // محاسبه مجموع مبلغ خرید
             $originalTotalAmount = $cart->total;
-            $phone = $cart->shipping_phone;
+            $phone = $cart->address_id ? $cart->address->phone : $cart->shipping_phone;
 
             $totalAmount = $originalTotalAmount;
             $creditUsed = 0;
