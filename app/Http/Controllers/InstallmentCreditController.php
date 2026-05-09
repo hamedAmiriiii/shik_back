@@ -92,7 +92,7 @@ class InstallmentCreditController extends Controller
     }
 
     /**
-     * افزودن یا به‌روزرسانی اعتبار اقساطی کاربر
+     * افزودن یا به‌روزرسانی اعتبار اقساطی و اعتبار عادی کاربر
      */
     public function store(Request $request)
     {
@@ -103,38 +103,45 @@ class InstallmentCreditController extends Controller
 
         $request->validate([
             'phone' => 'required|string|digits:11',
+            'installment_credit' => 'required|numeric|min:0',
             'credit' => 'required|numeric|min:0',
         ]);
 
         $phone = $request->input('phone');
-        $credit = (float) $request->input('credit');
+        $installmentCredit = (float) $request->input('installment_credit');
+        $regularCredit = (float) $request->input('credit');
 
-        // ایجاد یا به‌روزرسانی اعتبار اقساطی
+        // ایجاد یا به‌روزرسانی اعتبار اقساطی و عادی
         $user = UserShiksho::firstOrCreate(
             ['phone' => $phone],
             ['credit' => 0, 'installment_credit' => 0, 'credit_last_updated_at' => now()]
         );
 
-        // مقدار جدید اعتبار اقساطی جایگزین می‌شود
-        $oldCredit = $user->installment_credit;
-        $user->installment_credit = $credit;
+        // مقادیر جدید اعتبارات
+        $oldInstallmentCredit = $user->installment_credit;
+        $oldRegularCredit = $user->credit;
+        $user->installment_credit = $installmentCredit;
+        $user->credit = $regularCredit;
         $user->save();
 
         // ارسال پیامک به کاربر
-        $creditFormatted = number_format($credit, 0);
-        $text = "شیک شو\nاعتبار خرید اقساطی شما تا سقف {$creditFormatted} تومان در شیک شو شارژ شد";
-        SmsTools::sendShopSms($phone, $text, null, $credit, 'installment_credit');
+        $installmentFormatted = number_format($installmentCredit, 0);
+        $creditFormatted = number_format($regularCredit, 0);
+        $text = "شیک شو\nاعتبار خرید اقساطی شما تا {$installmentFormatted} تومان و اعتبار عادی تا {$creditFormatted} تومان شارژ شد";
+        SmsTools::sendShopSms($phone, $text, null, $installmentCredit, 'installment_credit');
 
         return response([
-            'message' => 'اعتبار اقساطی با موفقیت ثبت شد',
+            'message' => 'اعتبار اقساطی و اعتبار عادی با موفقیت ثبت شد',
             'user' => $user,
-            'old_installment_credit' => $oldCredit,
-            'new_installment_credit' => $credit,
+            'old_installment_credit' => $oldInstallmentCredit,
+            'new_installment_credit' => $installmentCredit,
+            'old_regular_credit' => $oldRegularCredit,
+            'new_regular_credit' => $regularCredit,
         ], 201);
     }
 
     /**
-     * به‌روزرسانی اعتبار اقساطی کاربر
+     * به‌روزرسانی اعتبار اقساطی و اعتبار عادی کاربر
      */
     public function update(Request $request, $phone)
     {
@@ -144,7 +151,8 @@ class InstallmentCreditController extends Controller
         }
 
         $request->validate([
-            'credit' => 'required|numeric|min:0',
+            'installment_credit' => 'nullable|numeric|min:0',
+            'credit' => 'nullable|numeric|min:0',
         ]);
 
         $user = UserShiksho::where('phone', $phone)->first();
@@ -155,27 +163,42 @@ class InstallmentCreditController extends Controller
             ], 404);
         }
 
-        $oldCredit = $user->installment_credit;
-        $newCredit = (float) $request->input('credit');
-
-        $user->installment_credit = $newCredit;
+        $oldInstallmentCredit = $user->installment_credit;
+        $oldRegularCredit = $user->credit;
+        
+        // به‌روزرسانی اعتبار اقساطی اگر ارسال شده باشد
+        if ($request->has('installment_credit')) {
+            $user->installment_credit = (float) $request->input('installment_credit');
+        }
+        
+        // به‌روزرسانی اعتبار عادی اگر ارسال شده باشد
+        if ($request->has('credit')) {
+            $user->credit = (float) $request->input('credit');
+        }
+        
         $user->save();
 
+        $newInstallmentCredit = $user->installment_credit;
+        $newRegularCredit = $user->credit;
+
         // ارسال پیامک به کاربر
-        $creditFormatted = number_format($newCredit, 0);
-        $text = "شیک شو\nاعتبار خرید اقساطی شما به {$creditFormatted} تومان به‌روزرسانی شد";
-        SmsTools::sendShopSms($phone, $text, null, $newCredit, 'installment_credit');
+        $installmentFormatted = number_format($newInstallmentCredit, 0);
+        $creditFormatted = number_format($newRegularCredit, 0);
+        $text = "شیک شو\nاعتبار خرید اقساطی شما {$installmentFormatted} تومان و اعتبار عادی {$creditFormatted} تومان ثبت شد";
+        SmsTools::sendShopSms($phone, $text, null, $newInstallmentCredit, 'installment_credit');
 
         return response([
-            'message' => 'اعتبار اقساطی با موفقیت به‌روزرسانی شد',
+            'message' => 'اعتبارات با موفقیت به‌روزرسانی شد',
             'user' => $user,
-            'old_installment_credit' => $oldCredit,
-            'new_installment_credit' => $newCredit,
+            'old_installment_credit' => $oldInstallmentCredit,
+            'new_installment_credit' => $newInstallmentCredit,
+            'old_regular_credit' => $oldRegularCredit,
+            'new_regular_credit' => $newRegularCredit,
         ], 200);
     }
 
     /**
-     * حذف اعتبار اقساطی کاربر (صفر کردن)
+     * حذف اعتبار اقساطی و اعتبار عادی کاربر (صفر کردن)
      */
     public function destroy(Request $request, $phone)
     {
@@ -192,14 +215,17 @@ class InstallmentCreditController extends Controller
             ], 404);
         }
 
-        $oldCredit = $user->installment_credit;
+        $oldInstallmentCredit = $user->installment_credit;
+        $oldRegularCredit = $user->credit;
         $user->installment_credit = 0;
+        $user->credit = 0;
         $user->save();
 
         return response([
-            'message' => 'اعتبار اقساطی با موفقیت حذف شد',
+            'message' => 'تمام اعتبارات با موفقیت حذف شد',
             'user' => $user,
-            'old_installment_credit' => $oldCredit,
+            'old_installment_credit' => $oldInstallmentCredit,
+            'old_regular_credit' => $oldRegularCredit,
         ], 200);
     }
 }

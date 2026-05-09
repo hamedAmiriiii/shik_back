@@ -23,7 +23,7 @@ class SmsTools
     public static function sendSms(string $receivers, string $text)
     {
         $response = Http::get('http://api.shinapayamak.ir/v1/' . self::API_TOKEN . '/sms/send.json', [
-            'gateway' => '90003002',
+            'gateway' => '10003000207',
             'to' => $receivers,
             'text' => $text . " \n لغو11"
         ]);
@@ -51,7 +51,7 @@ class SmsTools
     public static function sendShopSms(string $phone, string $message, ?string $purchaseId = null, ?float $creditAmount = null, string $smsType = 'purchase')
     {
         $response = Http::get('http://api.shinapayamak.ir/v1/' . self::API_TOKEN . '/sms/send.json', [
-            'gateway' => '90003002',
+            'gateway' => '10003000207',
             'to' => $phone,
             'text' => $message . " \n لغو11"
         ]);
