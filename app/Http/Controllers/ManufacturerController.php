@@ -12,35 +12,37 @@ class ManufacturerController extends Controller
      * نمایش لیست تولیدکنندگان
      */
     public function index(Request $request)
-    {
-        $query = Manufacturer::withCount('products')
-            ->addSelect([
-                'total_sold_quantity' => DB::table('products')
-                    ->join('purchased_products', 'products.id', '=', 'purchased_products.product_id')
-                    ->whereColumn('products.manufacturer_id', 'manufacturers.id')
-                    ->select(DB::raw('COALESCE(SUM(purchased_products.quantity), 0)'))
-            ])
-            ->orderBy('name', 'asc');
+{
+    $query = Manufacturer::withCount('products')
+        ->addSelect([
+            'total_sold_quantity' => DB::table('products')
+                ->join('purchased_products', 'products.id', '=', 'purchased_products.product_id')
+                ->whereColumn('products.manufacturer_id', 'manufacturers.id')
+                ->select(DB::raw('COALESCE(SUM(purchased_products.quantity), 0)'))
+        ])
+        ->orderBy('name', 'asc');
 
-        // جستجو بر اساس searchFilterModel
-        $searchDataModel = json_decode($request->input('searchFilterModel'));
-        if ($searchDataModel) {
-            $query->where(function($q) use ($searchDataModel) {
-                if (is_object($searchDataModel)) {
-                    if (isset($searchDataModel->name)) {
-                        $q->where('name', 'like', '%' . $searchDataModel->name . '%');
-                    }
-                } else if (is_string($searchDataModel)) {
-                    $q->where('name', 'like', '%' . $searchDataModel . '%');
+    // جستجو
+    $searchDataModel = json_decode($request->input('searchFilterModel'));
+    if ($searchDataModel) {
+        $query->where(function ($q) use ($searchDataModel) {
+            if (is_object($searchDataModel)) {
+                if (isset($searchDataModel->name)) {
+                    $q->where('name', 'like', '%' . $searchDataModel->name . '%');
                 }
-            });
-        }
+            } elseif (is_string($searchDataModel)) {
+                $q->where('name', 'like', '%' . $searchDataModel . '%');
+            }
+        });
+    }
 
+    // فقط اگر paginate=true بود صفحه‌بندی کن
+    if ($request->boolean('paginate')) {
         $perPage = $request->input('per_page', 20);
+
         $manufacturers = $query->paginate($perPage);
         $manufacturers->withPath(url()->current());
 
-        // تبدیل products_count و total_sold_quantity برای سازگاری
         $manufacturers->getCollection()->transform(function ($manufacturer) {
             $manufacturer->products_count = $manufacturer->products_count ?? 0;
             $manufacturer->total_sold_quantity = (int) ($manufacturer->total_sold_quantity ?? 0);
@@ -49,6 +51,18 @@ class ManufacturerController extends Controller
 
         return response($manufacturers, 200);
     }
+
+    // حالت پیش‌فرض: همه
+    $manufacturers = $query->get();
+
+    $manufacturers->transform(function ($manufacturer) {
+        $manufacturer->products_count = $manufacturer->products_count ?? 0;
+        $manufacturer->total_sold_quantity = (int) ($manufacturer->total_sold_quantity ?? 0);
+        return $manufacturer;
+    });
+
+    return response($manufacturers, 200);
+}
 
     /**
      * افزودن تولیدکننده جدید
