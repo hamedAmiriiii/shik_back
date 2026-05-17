@@ -22,7 +22,7 @@ class AtelierController extends Controller
         $user = auth()->user();
         
         $query = User::whereHas("roles", function($q) {
-            $q->where('id', User::USER_TYPE_KEY["آتلیه دار"]);
+            $q->where('id', User::USER_TYPE_KEY["فروشگاه"]);
         })->with(['atelier', 'roles']);
 
         // فیلتر شهر برای همه کاربران (حتی ادمین‌ها) اعمال می‌شود
@@ -62,7 +62,7 @@ class AtelierController extends Controller
      */
     public function store(Request $request)
     {
-        $request['type'] = 2;
+        $request->merge(['type' => [User::USER_TYPE_KEY['فروشگاه']]]);
         $response = (new AuthController)->register($request);
         
         // If the user was created successfully, update their city_id
@@ -114,9 +114,9 @@ class AtelierController extends Controller
             'gender' => 'required|numeric|digits:1',
             'phone' => 'required|numeric|unique:users,phone,' . $atelier->id . '|digits:11',
             'national_code' => 'required|string|unique:users,national_code,' . $atelier->id . '|digits:10',
-            'atelier_name' => 'required_if:type,' . User::USER_TYPE_KEY["آتلیه دار"] . '|string|max:255',
-            'atelier_code' => 'required_if:type,' . User::USER_TYPE_KEY["آتلیه دار"] . '|string|max:50',
-            'atelier_address' => 'required_if:type,' . User::USER_TYPE_KEY["آتلیه دار"] . '|string|max:255',
+            'atelier_name' => 'required_if:type,' . User::USER_TYPE_KEY["فروشگاه"] . '|string|max:255',
+            'atelier_code' => 'required_if:type,' . User::USER_TYPE_KEY["فروشگاه"] . '|string|max:50',
+            'atelier_address' => 'required_if:type,' . User::USER_TYPE_KEY["فروشگاه"] . '|string|max:255',
         ]);
 
         $atelier->atelier()->update([
@@ -146,7 +146,7 @@ class AtelierController extends Controller
             "status" => "required|numeric|max:3|digits:1"
         ]);
         foreach ($atelier->roles as $role){
-            if ($role->id == User::USER_TYPE_KEY["آتلیه دار"]){
+            if ($role->id == User::USER_TYPE_KEY["فروشگاه"]){
                 $atelier->roles()->syncWithoutDetaching([$role->id => ["status" =>  $request->input("status")]]);
                 $text = "درخواست شما برای ثبت واحد صنفی " . StatusEnum::STATUS[$request->input("status")] . " است.";
                 SmsTools::sendSms($atelier->phone, $text);

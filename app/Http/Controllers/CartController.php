@@ -19,13 +19,37 @@ use Illuminate\Support\Facades\DB;
 class CartController extends Controller
 {
     /**
+     * شناسهٔ فروشگاه برای مشتری لاگین‌شده (سبد و سفارش فقط در همان فروشگاه).
+     */
+    private function customerShopAtelierId($customer): int
+    {
+        if (! $customer->atelier_id) {
+            abort(response()->json([
+                'message' => 'حساب شما به فروشگاه متصل نیست. لطفاً با ارسال کد فروشگاه (atelier_code در query/body یا هدر X-Atelier-Code) دوباره ثبت‌نام یا ورود انجام دهید.',
+            ], 422));
+        }
+
+        return (int) $customer->atelier_id;
+    }
+
+    /**
+     * تنظیم زمینهٔ تنظیمات فروشگاه برای خواندن Setting:: در مسیر مشتری.
+     */
+    private function bindSettingContextForCustomer($customer): void
+    {
+        \App\Models\Setting::setShopContext($this->customerShopAtelierId($customer));
+    }
+
+    /**
      * نمایش سبد خرید فعلی مشتری
      */
     public function show(Request $request)
     {
         $customer = $request->user();
+        $atelierId = $this->customerShopAtelierId($customer);
         
         $cart = Cart::where('customer_id', $customer->id)
+            ->where('atelier_id', $atelierId)
             ->where('status', Cart::STATUS_PENDING)
             ->with(['items.product.images', 'items.product.categories', 'address'])
             ->first();
@@ -53,6 +77,9 @@ class CartController extends Controller
      */
     public function store(Request $request)
     {
+        $customer = $request->user();
+        $atelierId = $this->customerShopAtelierId($customer);
+
         $request->validate([
             'products' => 'required|array|min:1',
             'products.*.product_id' => 'required|exists:products,id',
@@ -61,11 +88,13 @@ class CartController extends Controller
             'products.*.color' => 'nullable|string|max:255', // رنگ انتخاب شده (اختیاری)
         ]);
 
-        $customer = $request->user();
-
         // بررسی موجودی محصولات (بدون کسر موجودی)
         $productIds = array_column($request->input('products'), 'product_id');
-        $products = Product::whereIn('id', $productIds)->get()->keyBy('id');
+        $products = Product::whereIn('id', $productIds)->where('atelier_id', $atelierId)->get()->keyBy('id');
+
+        if ($products->count() !== count(array_unique($productIds))) {
+            return response(['error' => 'یک یا چند محصول در این فروشگاه موجود نیست'], 422);
+        }
 
         foreach ($request->input('products') as $productData) {
             $product = $products->get($productData['product_id']);
@@ -87,10 +116,11 @@ class CartController extends Controller
             $cart = Cart::firstOrCreate(
                 [
                     'customer_id' => $customer->id,
-                    'status' => 'pending'
+                    'atelier_id' => $atelierId,
+                    'status' => Cart::STATUS_PENDING,
                 ],
                 [
-                    'status' => 'pending'
+                    'status' => Cart::STATUS_PENDING,
                 ]
             );
 
@@ -143,6 +173,7 @@ class CartController extends Controller
         ]);
 
         $customer = $request->user();
+        $atelierId = $this->customerShopAtelierId($customer);
         $addressId = $request->input('address_id');
 
         // بررسی اینکه این آدرس متعلق به مشتری است
@@ -152,6 +183,7 @@ class CartController extends Controller
         }
 
         $cart = Cart::where('customer_id', $customer->id)
+            ->where('atelier_id', $atelierId)
             ->where('status', Cart::STATUS_PENDING)
             ->first();
 
@@ -191,8 +223,10 @@ class CartController extends Controller
         ]);
 
         $customer = $request->user();
+        $atelierId = $this->customerShopAtelierId($customer);
 
         $cart = Cart::where('customer_id', $customer->id)
+            ->where('atelier_id', $atelierId)
             ->where('status', Cart::STATUS_PENDING)
             ->first();
 
@@ -202,7 +236,6 @@ class CartController extends Controller
             ], 404);
         }
 
-        // دریافت نام استان و شهر
         $state = State::find($request->input('state_id'));
         $city = City::find($request->input('city_id'));
 
@@ -278,9 +311,12 @@ class CartController extends Controller
         ]);
 
         $customer = $request->user();
+        $atelierId = $this->customerShopAtelierId($customer);
+        $this->bindSettingContextForCustomer($customer);
         $useCredit = $request->input('use_credit', false);
 
         $cart = Cart::where('customer_id', $customer->id)
+            ->where('atelier_id', $atelierId)
             ->where('status', Cart::STATUS_PENDING)
             ->with(['items.product'])
             ->first();
@@ -336,7 +372,9 @@ class CartController extends Controller
 
             // اگر کاربر می‌خواهد از اعتبار استفاده کند
             if ($phone && $useCredit) {
-                $userShiksho = UserShiksho::where('phone', $phone)->first();
+                $userShiksho = UserShiksho::where('phone', $phone)
+                    ->where('atelier_id', $atelierId)
+                    ->first();
                 if ($userShiksho && $userShiksho->credit > 0) {
                     // استفاده از اعتبار (تا حداکثر مبلغ خرید)
                     $creditUsed = min($userShiksho->credit, $originalTotalAmount);
@@ -362,6 +400,7 @@ class CartController extends Controller
                 'total_amount' => $totalAmount,
                 'credit_used' => $creditUsed,
                 'credit_earned' => $creditEarned,
+                'atelier_id' => $atelierId,
             ]);
 
             // ذخیره محصولات خریداری شده
@@ -390,15 +429,17 @@ class CartController extends Controller
                 
                 if ($enableLoyaltyCredit) {
                     // به‌روزرسانی اعتبار
-                    UserShiksho::updateCredit($phone, $creditEarned);
+                    UserShiksho::updateCredit($phone, $creditEarned, $atelierId);
 
                     // ارسال پیامک
                     $creditFormatted = number_format($creditEarned, 0);
-                    $text = "شیک شو\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
+                    $shopName = SmsTools::shopSmsBrand($atelierId);
+                    $text = "{$shopName}\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
                     SmsTools::sendSms($phone, $text);
                 } else {
                     // اگر اعتبار غیرفعال باشد، فقط پیام ساده بفرست
-                    $text = "شیکشو\nبا تشکر از خرید شما";
+                    $shopName = SmsTools::shopSmsBrand($atelierId);
+                    $text = "{$shopName}\nبا تشکر از خرید شما";
                     SmsTools::sendSms($phone, $text);
                 }
 
@@ -435,8 +476,10 @@ class CartController extends Controller
     public function destroy(Request $request)
     {
         $customer = $request->user();
+        $atelierId = $this->customerShopAtelierId($customer);
 
         $cart = Cart::where('customer_id', $customer->id)
+            ->where('atelier_id', $atelierId)
             ->where('status', Cart::STATUS_PENDING)
             ->first();
 
@@ -459,8 +502,10 @@ class CartController extends Controller
     public function myOrders(Request $request)
     {
         $customer = $request->user();
+        $atelierId = $this->customerShopAtelierId($customer);
 
         $query = Cart::where('customer_id', $customer->id)
+            ->where('atelier_id', $atelierId)
             ->where('status', '!=', Cart::STATUS_PENDING)
             ->with(['items.product.images', 'items.product.categories'])
             ->orderBy('id', 'desc');
@@ -495,9 +540,11 @@ class CartController extends Controller
     public function showOrder(Request $request, $cartId)
     {
         $customer = $request->user();
+        $atelierId = $this->customerShopAtelierId($customer);
 
         // پیدا کردن cart
         $cart = Cart::where('id', $cartId)
+            ->where('atelier_id', $atelierId)
             ->where('status', '!=', Cart::STATUS_PENDING)
             ->first();
 

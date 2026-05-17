@@ -13,6 +13,7 @@ class UserShiksho extends Model
 
     protected $fillable = [
         'phone',
+        'atelier_id',
         'credit',
         'installment_credit',
         'credit_last_updated_at',
@@ -57,17 +58,30 @@ class UserShiksho extends Model
     /**
      * افزودن یا به‌روزرسانی اعتبار کاربر
      * اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود
-     * 
-     * @param string $phone
-     * @param float $creditAmount
-     * @return UserShiksho
+     *
+     * @param  int|null  $atelierId  اگر null باشد، فقط ردیف‌های legacy با atelier_id خالی.
      */
-    public static function updateCredit($phone, $creditAmount)
+    public static function updateCredit($phone, $creditAmount, ?int $atelierId = null)
     {
-        $user = self::firstOrCreate(
-            ['phone' => $phone],
-            ['credit' => 0, 'credit_last_updated_at' => now()]
-        );
+        $q = static::query()->where('phone', $phone);
+        if ($atelierId !== null) {
+            $q->where('atelier_id', $atelierId);
+        } else {
+            $q->whereNull('atelier_id');
+        }
+        $user = $q->first();
+
+        if (! $user) {
+            $user = new static([
+                'phone' => $phone,
+                'credit' => 0,
+                'credit_last_updated_at' => now(),
+            ]);
+            if ($atelierId !== null) {
+                $user->atelier_id = $atelierId;
+            }
+            $user->save();
+        }
 
         // اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود
         $user->credit = $creditAmount;

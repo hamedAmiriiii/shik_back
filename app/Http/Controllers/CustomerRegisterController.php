@@ -16,6 +16,8 @@ class CustomerRegisterController extends Controller
      */
     public function sendVerificationCode(Request $request)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+
         $request->validate([
             'phone' => 'required|numeric|digits:11'
         ]);
@@ -23,6 +25,7 @@ class CustomerRegisterController extends Controller
         // بررسی محدودیت ارسال کد
         $countToday = ConfirmationCode::whereDate('created_at', Carbon::today())
             ->where('phone', $request->input('phone'))
+            ->where('atelier_id', $atelierId)
             ->count();
         
         if ($countToday >= 10) {
@@ -32,6 +35,7 @@ class CustomerRegisterController extends Controller
         }
 
         $countThreeMinutesAgo = ConfirmationCode::where('phone', $request->input('phone'))
+            ->where('atelier_id', $atelierId)
             ->whereBetween('created_at', [now()->subMinutes(3), now()])
             ->count();
         
@@ -44,11 +48,13 @@ class CustomerRegisterController extends Controller
         // ایجاد کد تایید
         $confirmationCode = ConfirmationCode::create([
             'phone' => $request->input('phone'),
+            'atelier_id' => $atelierId,
             'code' => mt_rand(10000, 99999)
         ]);
 
         // ارسال SMS
-        $text = "کد تایید ثبت‌نام شما: $confirmationCode->code";
+        $shopName = SmsTools::shopSmsBrand($atelierId);
+        $text = "{$shopName}\nکد تایید ثبت‌نام شما: $confirmationCode->code";
         $smsResult = SmsTools::sendSms($request->input('phone'), $text);
 
         return response([
@@ -62,6 +68,8 @@ class CustomerRegisterController extends Controller
      */
     public function verifyAndRegister(Request $request)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+
         $request->validate([
             'phone' => 'required|numeric|digits:11',
             'code' => 'required|numeric|digits:5',
@@ -76,6 +84,7 @@ class CustomerRegisterController extends Controller
 
         // بررسی کد تایید
         $codeExists = ConfirmationCode::where('phone', $request->input('phone'))
+            ->where('atelier_id', $atelierId)
             ->whereBetween('created_at', [now()->subMinutes(3), now()])
             ->where('code', $request->input('code'))
             ->exists();
@@ -86,8 +95,10 @@ class CustomerRegisterController extends Controller
             ], 400);
         }
 
-        // بررسی اینکه آیا مشتری قبلاً ثبت‌نام کرده است
-        $customer = Customer::where('phone', $request->input('phone'))->first();
+        // بررسی اینکه آیا مشتری قبلاً ثبت‌نام کرده است (مشتری per فروشگاه)
+        $customer = Customer::where('phone', $request->input('phone'))
+            ->where('atelier_id', $atelierId)
+            ->first();
 
         if ($customer) {
             // اگر قبلاً ثبت‌نام کرده، فقط اطلاعات را به‌روزرسانی می‌کنیم
@@ -121,6 +132,7 @@ class CustomerRegisterController extends Controller
             // ایجاد مشتری جدید
             $createData = [
                 'phone' => $request->input('phone'),
+                'atelier_id' => $atelierId,
                 'password' => Hash::make($request->input('password')),
                 'is_verified' => true,
             ];
@@ -162,11 +174,15 @@ class CustomerRegisterController extends Controller
      */
     public function checkPhone(Request $request)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+
         $request->validate([
             'phone' => 'required|numeric|digits:11'
         ]);
 
-        $customer = Customer::where('phone', $request->input('phone'))->first();
+        $customer = Customer::where('phone', $request->input('phone'))
+            ->where('atelier_id', $atelierId)
+            ->first();
 
         if ($customer && $customer->is_verified) {
             return response([
@@ -187,6 +203,8 @@ class CustomerRegisterController extends Controller
      */
     public function verifyAndLogin(Request $request)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+
         $request->validate([
             'phone' => 'required|numeric|digits:11',
             'password' => 'required|string',
@@ -194,6 +212,7 @@ class CustomerRegisterController extends Controller
 
         // بررسی مشتری
         $customer = Customer::where('phone', $request->input('phone'))
+            ->where('atelier_id', $atelierId)
             ->where('is_verified', true)
             ->first();
 

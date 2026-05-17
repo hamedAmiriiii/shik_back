@@ -51,6 +51,10 @@ class OrderController extends Controller
             ->with(['customer', 'items.product.images', 'items.product.categories'])
             ->orderBy('id', 'desc');
 
+        if ($request->user() instanceof User && $request->user()->atelier_id) {
+            $query->where('atelier_id', $request->user()->atelier_id);
+        }
+
         // فیلتر بر اساس status
         if ($request->has('status')) {
             $status = $request->input('status');
@@ -144,6 +148,12 @@ class OrderController extends Controller
             ], 400);
         }
 
+        if ($request->user() instanceof User && $request->user()->atelier_id) {
+            if ((int) $cart->atelier_id !== (int) $request->user()->atelier_id) {
+                return response(['error' => 'سفارش یافت نشد'], 404);
+            }
+        }
+
         $cart->load(['customer', 'items.product.images', 'items.product.categories']);
         
         return response($cart);
@@ -163,6 +173,12 @@ class OrderController extends Controller
         $request->validate([
             'status' => 'required|string|in:' . Cart::STATUS_COMPLETED . ',' . Cart::STATUS_SHIPPED . ',' . Cart::STATUS_CANCELLED
         ]);
+
+        if ($request->user() instanceof User && $request->user()->atelier_id) {
+            if ((int) $cart->atelier_id !== (int) $request->user()->atelier_id) {
+                return response(['error' => 'سفارش یافت نشد'], 404);
+            }
+        }
 
         // بررسی اینکه cart یک سفارش است (نه pending)
         if ($cart->status === Cart::STATUS_PENDING) {
@@ -190,6 +206,9 @@ class OrderController extends Controller
                     $purchase = Purchase::where('phone', $phone)
                         ->where('total_amount', $totalAmount)
                         ->whereDate('created_at', $cart->created_at->toDateString())
+                        ->when($cart->atelier_id, function ($q) use ($cart) {
+                            $q->where('atelier_id', $cart->atelier_id);
+                        })
                         ->orderBy('created_at', 'desc')
                         ->first();
                     
@@ -200,9 +219,12 @@ class OrderController extends Controller
                         
                         if (!empty($productIds)) {
                             $purchasedProduct = PurchasedProduct::whereIn('product_id', $productIds)
-                                ->whereHas('purchase', function($q) use ($phone, $cart) {
+                                ->whereHas('purchase', function ($q) use ($phone, $cart) {
                                     $q->where('phone', $phone)
                                       ->whereDate('created_at', $cart->created_at->toDateString());
+                                    if ($cart->atelier_id) {
+                                        $q->where('atelier_id', $cart->atelier_id);
+                                    }
                                 })
                                 ->first();
                             
@@ -226,7 +248,11 @@ class OrderController extends Controller
 
                         // برگرداندن اعتبار استفاده شده
                         if ($purchase->credit_used > 0) {
-                            $userShiksho = UserShiksho::where('phone', $phone)->first();
+                            $userShikshoQuery = UserShiksho::where('phone', $phone);
+                            if ($cart->atelier_id) {
+                                $userShikshoQuery->where('atelier_id', $cart->atelier_id);
+                            }
+                            $userShiksho = $userShikshoQuery->first();
                             if ($userShiksho) {
                                 $userShiksho->credit += $purchase->credit_used;
                                 $userShiksho->save();
@@ -235,7 +261,11 @@ class OrderController extends Controller
 
                         // کم کردن اعتبار کسب شده
                         if ($purchase->credit_earned > 0) {
-                            $userShiksho = UserShiksho::where('phone', $phone)->first();
+                            $userShikshoQuery = UserShiksho::where('phone', $phone);
+                            if ($cart->atelier_id) {
+                                $userShikshoQuery->where('atelier_id', $cart->atelier_id);
+                            }
+                            $userShiksho = $userShikshoQuery->first();
                             if ($userShiksho && $userShiksho->credit >= $purchase->credit_earned) {
                                 $userShiksho->credit -= $purchase->credit_earned;
                                 $userShiksho->save();
@@ -303,6 +333,7 @@ class OrderController extends Controller
                                 'total_amount' => $originalTotalAmount,
                                 'credit_used' => $creditUsed,
                                 'credit_earned' => $creditEarned,
+                                'atelier_id' => $cart->atelier_id,
                             ]);
 
                             // ذخیره محصولات خریداری شده
@@ -350,7 +381,12 @@ class OrderController extends Controller
             return $adminCheck;
         }
 
-        $count = Cart::where('status', Cart::STATUS_COMPLETED)->count();
+        $user = $request->user();
+        $countQuery = Cart::where('status', Cart::STATUS_COMPLETED);
+        if ($user instanceof User && $user->atelier_id) {
+            $countQuery->where('atelier_id', $user->atelier_id);
+        }
+        $count = $countQuery->count();
 
         return response([
             'count' => $count

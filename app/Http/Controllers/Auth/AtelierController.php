@@ -18,7 +18,7 @@ class AtelierController extends Controller
     public function index()
     {
         $atelier = Atelier::whereHas("user.roles", function (Builder $query) {
-            $query->where('role_id', User::USER_TYPE_KEY["آتلیه دار"])->where("status" , StatusEnum::STATUS_KEYS['تایید شده']);
+            $query->where('role_id', User::USER_TYPE_KEY["فروشگاه"])->where("status" , StatusEnum::STATUS_KEYS['تایید شده']);
         })->get();
         return response($atelier);
     }

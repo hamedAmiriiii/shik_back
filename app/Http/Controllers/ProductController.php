@@ -8,7 +8,7 @@ use App\Tools\ImageTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
-use http\Env\Response;
+use Illuminate\Validation\Rule;
 
 class ProductController extends Controller
 {
@@ -17,7 +17,8 @@ class ProductController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Product::query();
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $query = Product::query()->where('atelier_id', $atelierId);
         
         // جستجو بر اساس searchFilterModel یا search
         $searchDataModel = null;
@@ -86,12 +87,26 @@ class ProductController extends Controller
      */
     public function store(Request $request)
     {
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            abort(response()->json([
+                'message' => 'ثبت محصول فقط با حساب پرسنل متصل به فروشگاه (کاربر با atelier_id) امکان‌پذیر است.',
+            ], 422));
+        }
+
         $fields = $request->validate([
             "name" => "required|string|max:255",
             "purchase_price" => "required|numeric|min:0",
             "sale_price" => "required|numeric|min:0",
             "quantity" => "required|integer|min:0",
-            'barcode' => 'nullable|string|unique:products|max:255',
+            'barcode' => [
+                'nullable',
+                'string',
+                'max:255',
+                Rule::unique('products', 'barcode')->where(function ($query) use ($atelierId) {
+                    return $query->where('atelier_id', $atelierId);
+                }),
+            ],
             'original_sale_price' => 'nullable|numeric|min:0',
             'discount_percent' => 'nullable|numeric|min:0|max:100',
             'manufacturer_id' => 'nullable|exists:manufacturers,id',
@@ -130,9 +145,10 @@ class ProductController extends Controller
         $hasBarcode = !empty($fields['barcode']);
         if (!$hasBarcode) {
             // ایجاد یک بارکد موقت برای ایجاد محصول
-            $fields['barcode'] = $this->generateTemporaryBarcode();
+            $fields['barcode'] = $this->generateTemporaryBarcode($atelierId);
         }
 
+        $fields['atelier_id'] = $atelierId;
         $product = Product::create($fields);
 
         // اگر بارکد ارسال نشده بود، آن را به ID محصول تغییر می‌دهیم
@@ -160,12 +176,12 @@ class ProductController extends Controller
     /**
      * تولید بارکد موقت برای ایجاد محصول
      */
-    private function generateTemporaryBarcode()
+    private function generateTemporaryBarcode(int $atelierId)
     {
         do {
             // استفاده از timestamp و عدد تصادفی برای تولید بارکد موقت
             $barcode = 'TMP' . time() . rand(10000, 99999);
-        } while (Product::where('barcode', $barcode)->exists());
+        } while (Product::where('barcode', $barcode)->where('atelier_id', $atelierId)->exists());
 
         return $barcode;
     }
@@ -175,7 +191,8 @@ class ProductController extends Controller
      */
     public function getAll(Request $request)
     {
-        $query = Product::query();
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $query = Product::query()->where('atelier_id', $atelierId);
         
         // جستجو بر اساس searchFilterModel یا search
         $searchDataModel = null;
@@ -236,8 +253,13 @@ class ProductController extends Controller
     /**
      * نمایش جزئیات یک محصول
      */
-    public function show(Product $product)
+    public function show(Request $request, Product $product)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        if ((int) $product->atelier_id !== $atelierId) {
+            return response(['message' => 'محصول یافت نشد'], 404);
+        }
+
         $product->load(['images', 'categories', 'manufacturer']);
         return response($product);
     }
@@ -251,20 +273,24 @@ class ProductController extends Controller
      */
     public function bestSelling(Request $request)
     {
-        $limit = (int)$request->input('limit', 10); // پیش‌فرض 10 محصول
-        
-        // محاسبه تعداد فروش هر محصول
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $limit = (int) $request->input('limit', 10); // پیش‌فرض 10 محصول
+
+        // محاسبه تعداد فروش هر محصول (فقط خریدهای همین فروشگاه)
         $productIds = DB::table('purchased_products')
-            ->select('product_id', DB::raw('SUM(quantity) as total_sold'))
-            ->groupBy('product_id')
+            ->join('purchases', 'purchased_products.purchase_id', '=', 'purchases.id')
+            ->where('purchases.atelier_id', $atelierId)
+            ->select('purchased_products.product_id', DB::raw('SUM(purchased_products.quantity) as total_sold'))
+            ->groupBy('purchased_products.product_id')
             ->orderBy('total_sold', 'desc')
             ->limit($limit)
             ->pluck('product_id')
             ->toArray();
-        
-        // اگر هیچ فروشی وجود نداشت، تمام محصولات را برمی‌گردانیم
+
+        // اگر هیچ فروشی وجود نداشت، محصولات همین فروشگاه را برمی‌گردانیم
         if (empty($productIds)) {
             $bestSellingProducts = Product::with(['images', 'categories', 'manufacturer'])
+                ->where('atelier_id', $atelierId)
                 ->limit($limit)
                 ->get();
             
@@ -275,14 +301,17 @@ class ProductController extends Controller
         } else {
             // محاسبه total_sold برای هر محصول
             $totalSoldMap = DB::table('purchased_products')
-                ->select('product_id', DB::raw('SUM(quantity) as total_sold'))
-                ->whereIn('product_id', $productIds)
-                ->groupBy('product_id')
+                ->join('purchases', 'purchased_products.purchase_id', '=', 'purchases.id')
+                ->where('purchases.atelier_id', $atelierId)
+                ->select('purchased_products.product_id', DB::raw('SUM(purchased_products.quantity) as total_sold'))
+                ->whereIn('purchased_products.product_id', $productIds)
+                ->groupBy('purchased_products.product_id')
                 ->pluck('total_sold', 'product_id')
                 ->toArray();
-            
+
             // دریافت محصولات بر اساس ترتیب فروش
             $products = Product::whereIn('id', $productIds)
+                ->where('atelier_id', $atelierId)
                 ->with(['images', 'categories', 'manufacturer'])
                 ->get();
             
@@ -328,12 +357,29 @@ class ProductController extends Controller
      */
     public function update(Request $request, Product $product)
     {
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            abort(response()->json([
+                'message' => 'ویرایش محصول فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
+            ], 422));
+        }
+        if ((int) $product->atelier_id !== $atelierId) {
+            return response(['message' => 'محصول یافت نشد'], 404);
+        }
+
         $fields = $request->validate([
             "name" => "required|string|max:255",
             "purchase_price" => "required|numeric|min:0",
             "sale_price" => "required|numeric|min:0",
             "quantity" => "required|integer|min:0",
-            'barcode' => 'required|string|unique:products,barcode,' . $product->id . '|max:255',
+            'barcode' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('products', 'barcode')->ignore($product->id)->where(function ($query) use ($atelierId) {
+                    return $query->where('atelier_id', $atelierId);
+                }),
+            ],
             'original_sale_price' => 'nullable|numeric|min:0',
             'discount_percent' => 'nullable|numeric|min:0|max:100',
             'manufacturer_id' => 'nullable|exists:manufacturers,id',
@@ -402,8 +448,18 @@ class ProductController extends Controller
     /**
      * حذف محصول
      */
-    public function destroy(Product $product)
+    public function destroy(Request $request, Product $product)
     {
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            abort(response()->json([
+                'message' => 'حذف محصول فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
+            ], 422));
+        }
+        if ((int) $product->atelier_id !== $atelierId) {
+            return response(['message' => 'محصول یافت نشد'], 404);
+        }
+
         // حذف عکس‌های محصول
         $this->deleteProductImages($product);
         
@@ -416,6 +472,13 @@ class ProductController extends Controller
      */
     public function applyDiscount(Request $request)
     {
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            abort(response()->json([
+                'message' => 'اعمال تخفیف فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
+            ], 422));
+        }
+
         $request->validate([
             'product_ids' => 'required|array|min:1',
             'product_ids.*' => 'required|exists:products,id',
@@ -425,11 +488,15 @@ class ProductController extends Controller
         $productIds = $request->input('product_ids');
         $discountPercent = $request->input('discount_percent');
 
-        // دریافت همه محصولات
-        $products = Product::whereIn('id', $productIds)->get();
+        // دریافت همه محصولات همین فروشگاه
+        $products = Product::whereIn('id', $productIds)->where('atelier_id', $atelierId)->get();
 
         if ($products->isEmpty()) {
             return response(['error' => 'محصولی یافت نشد'], 404);
+        }
+
+        if ($products->count() !== count(array_unique($productIds))) {
+            return response(['error' => 'برخی شناسه‌ها متعلق به این فروشگاه نیستند'], 422);
         }
 
         $updatedProducts = [];
@@ -518,8 +585,18 @@ class ProductController extends Controller
     /**
      * حذف یک عکس خاص از محصول
      */
-    public function deleteImage(Product $product, $imageId)
+    public function deleteImage(Request $request, Product $product, $imageId)
     {
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            abort(response()->json([
+                'message' => 'حذف تصویر فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
+            ], 422));
+        }
+        if ((int) $product->atelier_id !== $atelierId) {
+            return response(['message' => 'محصول یافت نشد'], 404);
+        }
+
         // پیدا کردن عکس
         $productImage = ProductImage::where('id', $imageId)
             ->where('product_id', $product->id)

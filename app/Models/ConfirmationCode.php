@@ -9,5 +9,5 @@ class ConfirmationCode extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['phone' , 'code' ];
+    protected $fillable = ['phone', 'code', 'atelier_id'];
 }

@@ -10,17 +10,27 @@ class SettingController extends Controller
     /**
      * دریافت همه تنظیمات
      */
-    public function index()
+    public function index(Request $request)
     {
-        $settings = Setting::all()->pluck('value', 'key');
+        $this->bindShopSettingAtelierFromRequest($request);
+        $q = Setting::query();
+        $aid = $this->staffShopAtelierId($request);
+        if ($aid !== null) {
+            $q->where('atelier_id', $aid);
+        } else {
+            $q->whereNull('atelier_id');
+        }
+        $settings = $q->get()->pluck('value', 'key');
+
         return response($settings, 200);
     }
 
     /**
      * دریافت یک setting خاص
      */
-    public function show($key)
+    public function show(Request $request, $key)
     {
+        $this->bindShopSettingAtelierFromRequest($request);
         $value = Setting::get($key);
         return response(['key' => $key, 'value' => $value], 200);
     }
@@ -30,6 +40,7 @@ class SettingController extends Controller
      */
     public function update(Request $request, $key)
     {
+        $this->bindShopSettingAtelierFromRequest($request);
         $request->validate([
             'value' => 'required',
         ]);
@@ -46,8 +57,9 @@ class SettingController extends Controller
     /**
      * دریافت وضعیت فعال بودن اعتبار
      */
-    public function getLoyaltyCreditStatus()
+    public function getLoyaltyCreditStatus(Request $request)
     {
+        $this->bindShopSettingAtelierFromRequest($request);
         $isEnabled = Setting::isEnabled('enable_loyalty_credit', true);
         return response([
             'enable_loyalty_credit' => $isEnabled,
@@ -60,6 +72,7 @@ class SettingController extends Controller
      */
     public function toggleLoyaltyCredit(Request $request)
     {
+        $this->bindShopSettingAtelierFromRequest($request);
         $request->validate([
             'enabled' => 'required|boolean',
         ]);
@@ -77,8 +90,9 @@ class SettingController extends Controller
     /**
      * دریافت تعداد روز انقضای اعتبار
      */
-    public function getCreditExpiryDays()
+    public function getCreditExpiryDays(Request $request)
     {
+        $this->bindShopSettingAtelierFromRequest($request);
         $days = (int) Setting::get('credit_expiry_days', 60);
         return response([
             'key' => 'credit_expiry_days',
@@ -92,6 +106,7 @@ class SettingController extends Controller
      */
     public function setCreditExpiryDays(Request $request)
     {
+        $this->bindShopSettingAtelierFromRequest($request);
         $request->validate([
             'days' => 'required|integer|min:1|max:365',
         ]);
@@ -112,6 +127,7 @@ class SettingController extends Controller
      */
     public function store(Request $request)
     {
+        $this->bindShopSettingAtelierFromRequest($request);
         $request->validate([
             'key' => 'required|string|max:255',
             'value' => 'required',
@@ -129,8 +145,9 @@ class SettingController extends Controller
     /**
      * دریافت نرخ سود ماهانه اقساط
      */
-    public function getInstallmentInterestRate()
+    public function getInstallmentInterestRate(Request $request)
     {
+        $this->bindShopSettingAtelierFromRequest($request);
         $rate = (float) Setting::get('installment_monthly_interest_rate', 0);
         return response([
             'key' => 'installment_monthly_interest_rate',
@@ -145,6 +162,7 @@ class SettingController extends Controller
      */
     public function setInstallmentInterestRate(Request $request)
     {
+        $this->bindShopSettingAtelierFromRequest($request);
         $request->validate([
             'rate' => 'required|numeric|min:0|max:100',
         ]);

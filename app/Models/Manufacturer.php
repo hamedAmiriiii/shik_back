@@ -9,7 +9,7 @@ class Manufacturer extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name'];
+    protected $fillable = ['name', 'atelier_id'];
 
     /**
      * محصولات این تولیدکننده

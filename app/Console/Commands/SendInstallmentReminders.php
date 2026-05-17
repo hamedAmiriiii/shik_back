@@ -53,7 +53,9 @@ class SendInstallmentReminders extends Command
                 
                 $amountFormatted = number_format($installment->amount, 0);
                 
-                $message = "شیکشو\n";
+                $purchase = $installment->purchase;
+                $shopName = SmsTools::shopSmsBrand($purchase && $purchase->atelier_id ? (int) $purchase->atelier_id : null);
+                $message = "{$shopName}\n";
                 $message .= "یادآوری قسط\n";
                 $message .= "مبلغ: {$amountFormatted} تومان\n";
                 $message .= "تاریخ سررسید: {$dueDateJalali}\n";

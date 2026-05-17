@@ -22,11 +22,15 @@ class PurchasedProductController extends Controller
 {
     public function index(Request $request)
 {
+    $atelierId = $this->shopAtelierIdOrAbort($request);
+    \App\Models\Setting::setShopContext($atelierId);
+
     // فقط Purchase هایی که:
     // 1. cart_id ندارند (فروش فیزیکی مستقیم)
     // 2. یا cart_id دارند و Cart status آن‌ها shipped است
     // 3. مجموع مبلغشان بیشتر از 0 است
     $query = Purchase::with(['purchasedProducts.product', 'installments'])
+        ->where('atelier_id', $atelierId)
         ->where('total_amount', '>', 0) // فقط خریدهایی که مجموع مبلغشان بیشتر از 0 است
         ->where(function($q) {
             $q->whereNull('cart_id') // فروش فیزیکی
@@ -117,6 +121,8 @@ class PurchasedProductController extends Controller
 
     public function store(Request $request)
     {
+        $this->bindShopSettingAtelierFromRequest($request);
+
         $request->validate([
             'phone' => 'nullable|string|digits:11',
             'products' => 'required|array|min:1',
@@ -140,7 +146,25 @@ class PurchasedProductController extends Controller
         // خواندن همه محصولات در یک query
         $productIds = array_column($request->input('products'), 'product_id');
         $products = Product::whereIn('id', $productIds)->get()->keyBy('id');
-        
+
+        $staffAtelierId = $this->staffShopAtelierId($request);
+        $distinctAtelierIds = $products->pluck('atelier_id')->unique()->filter(function ($id) {
+            return $id !== null && $id !== '';
+        });
+        if ($staffAtelierId !== null) {
+            foreach ($products as $p) {
+                if ((int) $p->atelier_id !== (int) $staffAtelierId) {
+                    return response(['error' => 'یک یا چند محصول متعلق به فروشگاه شما نیست'], 422);
+                }
+            }
+            $purchaseAtelierId = (int) $staffAtelierId;
+        } else {
+            if ($distinctAtelierIds->count() > 1) {
+                return response(['error' => 'همه محصولات باید متعلق به یک فروشگاه باشند'], 422);
+            }
+            $purchaseAtelierId = $distinctAtelierIds->isEmpty() ? null : (int) $distinctAtelierIds->first();
+        }
+
         // بررسی موجودی محصولات قبل از ثبت خرید
         foreach ($request->input('products') as $productData) {
             $product = $products->get($productData['product_id']);
@@ -208,7 +232,11 @@ class PurchasedProductController extends Controller
 
         // اگر شماره تلفن وجود دارد و کاربر می‌خواهد از اعتبار استفاده کند
         if ($phone && $useCredit) {
-            $userShiksho = UserShiksho::where('phone', $phone)->first();
+            $userShikshoQuery = UserShiksho::where('phone', $phone);
+            if ($purchaseAtelierId !== null) {
+                $userShikshoQuery->where('atelier_id', $purchaseAtelierId);
+            }
+            $userShiksho = $userShikshoQuery->first();
             if ($userShiksho && $userShiksho->credit > 0) {
                 // استفاده از اعتبار (تا حداکثر مبلغ خرید بعد از تخفیف)
                 $creditUsed = min($userShiksho->credit, $totalAmount);
@@ -274,6 +302,7 @@ class PurchasedProductController extends Controller
             'payment_type' => $paymentType,
             'installment_count' => $paymentType === 'installment' ? $installmentCount : null,
             'installment_amount' => $installmentAmount,
+            'atelier_id' => $purchaseAtelierId,
         ]);
 
         // ذخیره محصولات خریداری شده و لینک کردن به سبد خرید
@@ -302,7 +331,11 @@ class PurchasedProductController extends Controller
             
             // کسر اعتبار اقساطی: مبلغ باقیمانده (کل مبلغ منهای قسط اول که پرداخت شده - یک سوم)
             if ($phone) {
-                $userShiksho = UserShiksho::where('phone', $phone)->first();
+                $userShiksho = UserShiksho::where('phone', $phone)
+                    ->when($purchaseAtelierId !== null, function ($q) use ($purchaseAtelierId) {
+                        $q->where('atelier_id', $purchaseAtelierId);
+                    })
+                    ->first();
                 if ($userShiksho) {
                     // مبلغ قسط اول که پرداخت شده است (یک سوم)
                     $firstInstallmentAmount = $this->roundToThreeZeroEnding($finalTotalAmount / 3);
@@ -322,15 +355,17 @@ class PurchasedProductController extends Controller
             
             if ($enableLoyaltyCredit && $creditEarned > 0) {
                 // به‌روزرسانی اعتبار (اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود)
-                UserShiksho::updateCredit($phone, $creditEarned);
+                UserShiksho::updateCredit($phone, $creditEarned, $purchaseAtelierId);
 
                 // ارسال پیامک بعد از ذخیره خرید (فقط اگر اعتبار کسب شده باشد)
                 $creditFormatted = number_format($creditEarned, 0);
-                $text = "شیک شو\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
+                $shopName = SmsTools::shopSmsBrand($purchaseAtelierId);
+                $text = "{$shopName}\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
                 SmsTools::sendShopSms($phone, $text, (string) $purchase->id, $creditEarned, 'credit');
             } else {
                 // اگر اعتبار غیرفعال باشد یا اعتبار کسب نشده باشد (به دلیل تخفیف)، فقط پیام ساده بفرست
-                $text = "شیکشو\nبا تشکر از خرید شما";
+                $shopName = SmsTools::shopSmsBrand($purchaseAtelierId);
+                $text = "{$shopName}\nبا تشکر از خرید شما";
                 SmsTools::sendShopSms($phone, $text, (string) $purchase->id, null, 'purchase');
             }
 
@@ -534,7 +569,11 @@ class PurchasedProductController extends Controller
             $purchase->credit_earned = max(0, $purchase->credit_earned - $creditReturned);
             
             // کم کردن از اعتبار کاربر
-            $userShiksho = UserShiksho::where('phone', $purchase->phone)->first();
+            $userShikshoQuery = UserShiksho::where('phone', $purchase->phone);
+            if ($purchase->atelier_id !== null) {
+                $userShikshoQuery->where('atelier_id', $purchase->atelier_id);
+            }
+            $userShiksho = $userShikshoQuery->first();
             if ($userShiksho && $userShiksho->credit >= $creditReturned) {
                 $userShiksho->credit = max(0, $userShiksho->credit - $creditReturned);
                 $userShiksho->save();
@@ -574,12 +613,17 @@ class PurchasedProductController extends Controller
      */
     public function getCreditByPhone(Request $request)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        \App\Models\Setting::setShopContext($atelierId);
+
         $request->validate([
             'phone' => 'required|string|digits:11',
         ]);
 
         $phone = $request->input('phone');
-        $userShiksho = UserShiksho::where('phone', $phone)->first();
+        $userShiksho = UserShiksho::where('phone', $phone)
+            ->where('atelier_id', $atelierId)
+            ->first();
 
         $credit = $userShiksho ? $userShiksho->credit : 0;
 
@@ -598,12 +642,17 @@ class PurchasedProductController extends Controller
      */
     public function getInstallmentCredit(Request $request)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        \App\Models\Setting::setShopContext($atelierId);
+
         $request->validate([
             'phone' => 'required|string|digits:11',
         ]);
 
         $phone = $request->input('phone');
-        $userShiksho = UserShiksho::where('phone', $phone)->first();
+        $userShiksho = UserShiksho::where('phone', $phone)
+            ->where('atelier_id', $atelierId)
+            ->first();
 
         $installmentCredit = $userShiksho ? (float) $userShiksho->installment_credit : 0;
         
@@ -626,6 +675,9 @@ class PurchasedProductController extends Controller
      */
     public function calculateInstallments(Request $request)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        \App\Models\Setting::setShopContext($atelierId);
+
         $request->validate([
             'total_amount' => 'required|numeric|min:0',
             'installment_count' => 'required|integer|min:2|max:24',
@@ -718,7 +770,9 @@ class PurchasedProductController extends Controller
         $creditShortage = null;
         
         if ($phone) {
-            $userShiksho = UserShiksho::where('phone', $phone)->first();
+            $userShiksho = UserShiksho::where('phone', $phone)
+                ->where('atelier_id', $atelierId)
+                ->first();
             $userInstallmentCredit = $userShiksho ? (float) $userShiksho->installment_credit : 0;
             
             // اعتبار اقساطی باید به اندازه کل مبلغ با سود باشد

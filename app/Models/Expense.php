@@ -10,7 +10,7 @@ class Expense extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['user_name', 'date', 'amount', 'title', 'type'];
+    protected $fillable = ['user_name', 'date', 'amount', 'title', 'type', 'atelier_id'];
 
     protected $casts = [
         'date' => 'date',

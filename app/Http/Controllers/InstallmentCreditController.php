@@ -111,6 +111,8 @@ class InstallmentCreditController extends Controller
         $installmentCredit = (float) $request->input('installment_credit');
         $regularCredit = (float) $request->input('credit');
 
+        $smsAtelierId = $this->staffShopAtelierId($request);
+
         // ایجاد یا به‌روزرسانی اعتبار اقساطی و عادی
         $user = UserShiksho::firstOrCreate(
             ['phone' => $phone],
@@ -127,7 +129,8 @@ class InstallmentCreditController extends Controller
         // ارسال پیامک به کاربر
         $installmentFormatted = number_format($installmentCredit, 0);
         $creditFormatted = number_format($regularCredit, 0);
-        $text = "شیک شو\nاعتبار خرید اقساطی شما تا {$installmentFormatted} تومان و اعتبار عادی تا {$creditFormatted} تومان شارژ شد";
+        $shopName = SmsTools::shopSmsBrand($smsAtelierId);
+        $text = "{$shopName}\nاعتبار خرید اقساطی شما تا {$installmentFormatted} تومان و اعتبار عادی تا {$creditFormatted} تومان شارژ شد";
         SmsTools::sendShopSms($phone, $text, null, $installmentCredit, 'installment_credit');
 
         return response([
@@ -181,10 +184,13 @@ class InstallmentCreditController extends Controller
         $newInstallmentCredit = $user->installment_credit;
         $newRegularCredit = $user->credit;
 
+        $smsAtelierId = $this->staffShopAtelierId($request);
+
         // ارسال پیامک به کاربر
         $installmentFormatted = number_format($newInstallmentCredit, 0);
         $creditFormatted = number_format($newRegularCredit, 0);
-        $text = "شیک شو\nاعتبار خرید اقساطی شما {$installmentFormatted} تومان و اعتبار عادی {$creditFormatted} تومان ثبت شد";
+        $shopName = SmsTools::shopSmsBrand($smsAtelierId);
+        $text = "{$shopName}\nاعتبار خرید اقساطی شما {$installmentFormatted} تومان و اعتبار عادی {$creditFormatted} تومان ثبت شد";
         SmsTools::sendShopSms($phone, $text, null, $newInstallmentCredit, 'installment_credit');
 
         return response([

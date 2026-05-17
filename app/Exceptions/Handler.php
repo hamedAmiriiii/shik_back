@@ -42,6 +42,19 @@ class Handler extends ExceptionHandler
     }
 
     /**
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Symfony\Component\HttpFoundation\Response
+     */
+    public function render($request, Throwable $e)
+    {
+        if ($request instanceof Request && $request->segment(1) === 'api') {
+            $request->headers->set('Accept', 'application/json');
+        }
+
+        return parent::render($request, $e);
+    }
+
+    /**
      * Convert an authentication exception into a response.
      *
      * @param  \Illuminate\Http\Request  $request

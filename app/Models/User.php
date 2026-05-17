@@ -19,7 +19,7 @@ class User extends Authenticatable
      * @var string[]
      */
     protected $fillable = [
-        'name', 'last_name', 'national_code', 'phone', 'atelier_id', 'password', 'gender',
+        'name', 'last_name', 'national_code', 'phone', 'atelier_id', 'shop_staff_role', 'password', 'gender',
         'personality_image', 'birth_certificate', 'national_cart' , 'tech_certificate', 'city_id'
     ];
 
@@ -54,7 +54,7 @@ class User extends Authenticatable
 
     const USER_TYPE = [
         1 => "ادمین",
-        2 => "آتلیه دار",
+        2 => "فروشگاه",
         3 => "فیلم بردار",
         4 => "عکاس",
         5 => "فیلم بردار هوایی",
@@ -62,7 +62,7 @@ class User extends Authenticatable
 
     const USER_TYPE_KEY = [
         "ادمین" => 1,
-        "آتلیه دار" => 2,
+        "فروشگاه" => 2,
         "فیلم بردار" => 3,
         "عکاس" => 4,
         "فیلم بردار هوایی" => 5,

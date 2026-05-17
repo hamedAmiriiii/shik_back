@@ -6,6 +6,7 @@ use App\Models\Category;
 use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class CategoryController extends Controller
 {
@@ -14,7 +15,8 @@ class CategoryController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Category::query();
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $query = Category::query()->where('atelier_id', $atelierId);
 
         // فیلتر بر اساس فعال/غیرفعال
         if ($request->has('is_active')) {
@@ -80,7 +82,9 @@ class CategoryController extends Controller
      */
     public function getAll(Request $request)
     {
-        $categories = Category::orderBy('order')->orderBy('name')->get();
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $categories = Category::where('atelier_id', $atelierId)->orderBy('order')->orderBy('name')->get();
+
         return response($categories);
     }
 
@@ -89,25 +93,56 @@ class CategoryController extends Controller
      */
     public function store(Request $request)
     {
+        $atelierId = $this->staffShopAtelierId($request);
+
+        $slugUnique = Rule::unique('categories', 'slug');
+        if ($atelierId !== null) {
+            $slugUnique = $slugUnique->where('atelier_id', $atelierId);
+        } else {
+            $slugUnique = $slugUnique->whereNull('atelier_id');
+        }
+
         $fields = $request->validate([
             'name' => 'required|string|max:255',
-            'slug' => 'nullable|string|max:255|unique:categories,slug',
+            'slug' => ['nullable', 'string', 'max:255', $slugUnique],
             'description' => 'nullable|string',
             'parent_id' => 'nullable|exists:categories,id',
             'order' => 'nullable|integer|min:0',
             'is_active' => 'nullable|boolean',
         ]);
 
+        if ($atelierId !== null) {
+            $fields['atelier_id'] = $atelierId;
+            if (! empty($fields['parent_id'])) {
+                $parent = Category::where('id', $fields['parent_id'])->where('atelier_id', $atelierId)->first();
+                if (! $parent) {
+                    return response(['error' => 'دستهٔ والد متعلق به این فروشگاه نیست'], 422);
+                }
+            }
+        }
+
         // اگر slug داده نشده، از name ایجاد می‌کنیم
         if (empty($fields['slug'])) {
             $fields['slug'] = Str::slug($fields['name']);
-            
+
             // اطمینان از یکتا بودن slug
             $originalSlug = $fields['slug'];
             $counter = 1;
-            while (Category::where('slug', $fields['slug'])->exists()) {
+            $slugQuery = Category::where('slug', $fields['slug']);
+            if ($atelierId !== null) {
+                $slugQuery->where('atelier_id', $atelierId);
+            } else {
+                $slugQuery->whereNull('atelier_id');
+            }
+            while ($slugQuery->exists()) {
                 $fields['slug'] = $originalSlug . '-' . $counter;
                 $counter++;
+                $slugQuery = Category::where('slug', $fields['slug']);
+                if ($atelierId !== null) {
+                    $slugQuery->where('atelier_id', $atelierId);
+                } else {
+                    $slugQuery->whereNull('atelier_id');
+                }
             }
         }
 
@@ -128,8 +163,13 @@ class CategoryController extends Controller
     /**
      * نمایش جزئیات یک کتگوری
      */
-    public function show(Category $category)
+    public function show(Request $request, Category $category)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        if ((int) $category->atelier_id !== $atelierId) {
+            return response(['message' => 'یافت نشد'], 404);
+        }
+
         $category->load(['parent', 'children', 'products']);
         return response($category);
     }
@@ -139,14 +179,31 @@ class CategoryController extends Controller
      */
     public function update(Request $request, Category $category)
     {
+        $this->assertModelBelongsToStaffAtelier($request, $category);
+
+        $atelierId = $this->staffShopAtelierId($request);
+        $slugUnique = Rule::unique('categories', 'slug')->ignore($category->id);
+        if ($atelierId !== null) {
+            $slugUnique = $slugUnique->where('atelier_id', $atelierId);
+        } else {
+            $slugUnique = $slugUnique->whereNull('atelier_id');
+        }
+
         $fields = $request->validate([
             'name' => 'required|string|max:255',
-            'slug' => 'nullable|string|max:255|unique:categories,slug,' . $category->id,
+            'slug' => ['nullable', 'string', 'max:255', $slugUnique],
             'description' => 'nullable|string',
             'parent_id' => 'nullable|exists:categories,id',
             'order' => 'nullable|integer|min:0',
             'is_active' => 'nullable|boolean',
         ]);
+
+        if ($atelierId !== null && ! empty($fields['parent_id'])) {
+            $parent = Category::where('id', $fields['parent_id'])->where('atelier_id', $atelierId)->first();
+            if (! $parent) {
+                return response(['error' => 'دستهٔ والد متعلق به این فروشگاه نیست'], 422);
+            }
+        }
 
         // جلوگیری از ایجاد حلقه در ساختار درختی (کتگوری نمی‌تواند والد خودش باشد)
         if (isset($fields['parent_id']) && $fields['parent_id'] == $category->id) {
@@ -166,7 +223,14 @@ class CategoryController extends Controller
             // اطمینان از یکتا بودن slug
             $originalSlug = $fields['slug'];
             $counter = 1;
-            while (Category::where('slug', $fields['slug'])->where('id', '!=', $category->id)->exists()) {
+            while (Category::where('slug', $fields['slug'])->where('id', '!=', $category->id)
+                ->when($atelierId !== null, function ($q) use ($atelierId) {
+                    $q->where('atelier_id', $atelierId);
+                })
+                ->when($atelierId === null, function ($q) {
+                    $q->whereNull('atelier_id');
+                })
+                ->exists()) {
                 $fields['slug'] = $originalSlug . '-' . $counter;
                 $counter++;
             }
@@ -181,8 +245,9 @@ class CategoryController extends Controller
     /**
      * حذف کتگوری
      */
-    public function destroy(Category $category)
+    public function destroy(Request $request, Category $category)
     {
+        $this->assertModelBelongsToStaffAtelier($request, $category);
         // اگر کتگوری دارای فرزند است، نمی‌توان حذف کرد (یا باید ابتدا فرزندان را حذف کرد)
         if ($category->children()->count() > 0) {
             return response([
@@ -197,8 +262,13 @@ class CategoryController extends Controller
     /**
      * دریافت فرزندان یک کتگوری
      */
-    public function children(Category $category)
+    public function children(Request $request, Category $category)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        if ((int) $category->atelier_id !== $atelierId) {
+            return response(['message' => 'یافت نشد'], 404);
+        }
+
         $children = $category->children()->with('children')->get();
         return response($children);
     }
@@ -209,11 +279,16 @@ class CategoryController extends Controller
      */
     public function products(Request $request, Category $category)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        if ((int) $category->atelier_id !== $atelierId) {
+            return response(['message' => 'یافت نشد'], 404);
+        }
+
         // دریافت تمام IDهای زیرمجموعه‌ها (شامل خود category)
         $categoryIds = $category->getAllDescendantIds();
-        
+
         // دریافت محصولاتی که به این category یا زیرمجموعه‌هایش تعلق دارند
-        $query = Product::whereHas('categories', function($q) use ($categoryIds) {
+        $query = Product::where('atelier_id', $atelierId)->whereHas('categories', function ($q) use ($categoryIds) {
             $q->whereIn('categories.id', $categoryIds);
         });
         

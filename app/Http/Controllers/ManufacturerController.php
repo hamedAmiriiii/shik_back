@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Manufacturer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class ManufacturerController extends Controller
 {
@@ -12,15 +13,24 @@ class ManufacturerController extends Controller
      * نمایش لیست تولیدکنندگان
      */
     public function index(Request $request)
-{
-    $query = Manufacturer::withCount('products')
-        ->addSelect([
-            'total_sold_quantity' => DB::table('products')
-                ->join('purchased_products', 'products.id', '=', 'purchased_products.product_id')
-                ->whereColumn('products.manufacturer_id', 'manufacturers.id')
-                ->select(DB::raw('COALESCE(SUM(purchased_products.quantity), 0)'))
-        ])
-        ->orderBy('name', 'asc');
+    {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+
+        $query = Manufacturer::query()
+            ->where('atelier_id', $atelierId)
+            ->withCount(['products' => function ($q) use ($atelierId) {
+                $q->where('atelier_id', $atelierId);
+            }])
+            ->addSelect([
+                'total_sold_quantity' => DB::table('products')
+                    ->join('purchased_products', 'products.id', '=', 'purchased_products.product_id')
+                    ->join('purchases', 'purchased_products.purchase_id', '=', 'purchases.id')
+                    ->whereColumn('products.manufacturer_id', 'manufacturers.id')
+                    ->where('products.atelier_id', $atelierId)
+                    ->where('purchases.atelier_id', $atelierId)
+                    ->select(DB::raw('COALESCE(SUM(purchased_products.quantity), 0)')),
+            ])
+            ->orderBy('name', 'asc');
 
     // جستجو
     $searchDataModel = json_decode($request->input('searchFilterModel'));
@@ -69,9 +79,21 @@ class ManufacturerController extends Controller
      */
     public function store(Request $request)
     {
+        $atelierId = $this->staffShopAtelierId($request);
+        $nameUnique = Rule::unique('manufacturers', 'name');
+        if ($atelierId !== null) {
+            $nameUnique = $nameUnique->where('atelier_id', $atelierId);
+        } else {
+            $nameUnique = $nameUnique->whereNull('atelier_id');
+        }
+
         $fields = $request->validate([
-            'name' => 'required|string|max:255|unique:manufacturers,name',
+            'name' => ['required', 'string', 'max:255', $nameUnique],
         ]);
+
+        if ($atelierId !== null) {
+            $fields['atelier_id'] = $atelierId;
+        }
 
         $manufacturer = Manufacturer::create($fields);
         return response($manufacturer, 201);
@@ -80,19 +102,29 @@ class ManufacturerController extends Controller
     /**
      * نمایش جزئیات یک تولیدکننده
      */
-    public function show(Manufacturer $manufacturer)
+    public function show(Request $request, Manufacturer $manufacturer)
     {
-        $manufacturer->loadCount('products');
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        if ((int) $manufacturer->atelier_id !== $atelierId) {
+            return response(['message' => 'یافت نشد'], 404);
+        }
+
+        $manufacturer->loadCount(['products' => function ($q) use ($atelierId) {
+            $q->where('atelier_id', $atelierId);
+        }]);
         $manufacturer->products_count = $manufacturer->products_count ?? 0;
-        
+
         // محاسبه تعداد فروش
         $totalSoldQuantity = DB::table('products')
             ->join('purchased_products', 'products.id', '=', 'purchased_products.product_id')
+            ->join('purchases', 'purchased_products.purchase_id', '=', 'purchases.id')
             ->where('products.manufacturer_id', $manufacturer->id)
+            ->where('products.atelier_id', $atelierId)
+            ->where('purchases.atelier_id', $atelierId)
             ->sum('purchased_products.quantity');
-        
+
         $manufacturer->total_sold_quantity = (int) ($totalSoldQuantity ?? 0);
-        
+
         return response($manufacturer, 200);
     }
 
@@ -101,8 +133,18 @@ class ManufacturerController extends Controller
      */
     public function update(Request $request, Manufacturer $manufacturer)
     {
+        $this->assertModelBelongsToStaffAtelier($request, $manufacturer);
+
+        $atelierId = $this->staffShopAtelierId($request);
+        $nameUnique = Rule::unique('manufacturers', 'name')->ignore($manufacturer->id);
+        if ($atelierId !== null) {
+            $nameUnique = $nameUnique->where('atelier_id', $atelierId);
+        } else {
+            $nameUnique = $nameUnique->whereNull('atelier_id');
+        }
+
         $fields = $request->validate([
-            'name' => 'sometimes|required|string|max:255|unique:manufacturers,name,' . $manufacturer->id,
+            'name' => ['sometimes', 'required', 'string', 'max:255', $nameUnique],
         ]);
 
         $manufacturer->update($fields);
@@ -112,8 +154,9 @@ class ManufacturerController extends Controller
     /**
      * حذف تولیدکننده
      */
-    public function destroy(Manufacturer $manufacturer)
+    public function destroy(Request $request, Manufacturer $manufacturer)
     {
+        $this->assertModelBelongsToStaffAtelier($request, $manufacturer);
         $manufacturer->delete();
         return response(['message' => 'تولیدکننده با موفقیت حذف شد'], 200);
     }
@@ -124,6 +167,8 @@ class ManufacturerController extends Controller
      */
     public function salesReport(Request $request)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+
         // فیلتر تاریخ (اختیاری)
         $dateFilter = $request->input('filter');
         $fromDate = $request->input('from_date');
@@ -131,9 +176,16 @@ class ManufacturerController extends Controller
 
         // Query برای محاسبه فروش هر تولیدکننده
         $query = DB::table('manufacturers')
-            ->leftJoin('products', 'manufacturers.id', '=', 'products.manufacturer_id')
+            ->where('manufacturers.atelier_id', $atelierId)
+            ->leftJoin('products', function ($join) use ($atelierId) {
+                $join->on('manufacturers.id', '=', 'products.manufacturer_id')
+                    ->where('products.atelier_id', '=', $atelierId);
+            })
             ->leftJoin('purchased_products', 'products.id', '=', 'purchased_products.product_id')
-            ->leftJoin('purchases', 'purchased_products.purchase_id', '=', 'purchases.id')
+            ->leftJoin('purchases', function ($join) use ($atelierId) {
+                $join->on('purchased_products.purchase_id', '=', 'purchases.id')
+                    ->where('purchases.atelier_id', '=', $atelierId);
+            })
             ->select(
                 'manufacturers.id',
                 'manufacturers.name',

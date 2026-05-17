@@ -3,6 +3,7 @@
 
 namespace App\Tools;
 
+use App\Models\Atelier;
 use App\Models\LogSms;
 use App\Models\ShopSmsLog;
 use Illuminate\Support\Facades\Auth;
@@ -13,6 +14,24 @@ class SmsTools
 {
 
     public const API_TOKEN = "sa345478720:L2ZSDrZ7lEYzxark92MWhH2mveIUxQ7KABqI";
+
+    /**
+     * نام نمایشی فروشگاه برای ابتدای پیامک (نام رکورد ateliers).
+     */
+    public static function shopSmsBrand(?int $atelierId): string
+    {
+        if ($atelierId === null || $atelierId === 0) {
+            return 'فروشگاه';
+        }
+
+        static $cache = [];
+        if (! array_key_exists($atelierId, $cache)) {
+            $name = trim((string) Atelier::where('id', $atelierId)->value('name'));
+            $cache[$atelierId] = $name !== '' ? $name : 'فروشگاه';
+        }
+
+        return $cache[$atelierId];
+    }
 
     public static function getBalance()
     {

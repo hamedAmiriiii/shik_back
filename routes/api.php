@@ -17,6 +17,7 @@ use App\Http\Controllers\CategoryController;
 */
 
 Route::name('auth.')->prefix('auth')->group(function () {
+    Route::post('register/send-phone-code', [\App\Http\Controllers\Auth\AuthController::class, 'sendRegistrationPhoneCode']);
     Route::post('register', [\App\Http\Controllers\Auth\AuthController::class, 'register']);
     Route::post('login', [\App\Http\Controllers\Auth\AuthController::class, 'login']);
     Route::get('atelier', [\App\Http\Controllers\Auth\AtelierController::class, 'index']);

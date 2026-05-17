@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\ConfirmationCode;
 
 use App\Http\Controllers\Controller;
+use App\Models\Atelier;
 use App\Models\ConfirmationCode;
 use App\Tools\SmsTools;
 use Carbon\Carbon;
@@ -70,7 +71,13 @@ class ConfirmationCodeController extends Controller
             'code' => mt_rand(10000, 99999)
         ]);
 
-        $text = "کد احراز هویت شما : $confirmationCode->code";
+        $atelierId = null;
+        $codeHeader = $request->header('X-Atelier-Code') ?: $request->input('atelier_code');
+        if ($codeHeader) {
+            $atelierId = Atelier::where('code', $codeHeader)->value('id');
+        }
+        $shopName = SmsTools::shopSmsBrand($atelierId ? (int) $atelierId : null);
+        $text = "{$shopName}\nکد احراز هویت شما : $confirmationCode->code";
 
         $balance = SmsTools::sendSms($request->input("phone"), $text);
 

@@ -81,7 +81,8 @@ class ExpireUserCredits extends Command
                 // فرمت کردن مبلغ اعتبار
                 $creditAmount = number_format($user->credit, 0);
                 
-                $message = "شیکشو\nاعتبار شما به مبلغ {$creditAmount} تومان در حال اتمام است (7 روز دیگر)";
+                $shopName = SmsTools::shopSmsBrand($user->atelier_id ? (int) $user->atelier_id : null);
+                $message = "{$shopName}\nاعتبار شما به مبلغ {$creditAmount} تومان در حال اتمام است (7 روز دیگر)";
                 
                 // ارسال پیامک برای فروشگاه (ثبت در shop_sms_logs)
                 SmsTools::sendShopSms($user->phone, $message, null, $user->credit, 'warning');

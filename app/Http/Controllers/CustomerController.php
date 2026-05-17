@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Atelier;
 use App\Models\CustomerPhone;
 use App\Models\Purchase;
 use App\Models\UserShiksho;
@@ -18,7 +19,13 @@ class CustomerController extends Controller
     {
         $validated = $request->validate([
             'phone' => 'required|string|digits:11',
+            'atelier_code' => 'nullable|string|max:50',
         ]);
+
+        $atelierId = null;
+        if (! empty($validated['atelier_code'])) {
+            $atelierId = Atelier::where('code', $validated['atelier_code'])->value('id');
+        }
 
         $userShiksho = UserShiksho::firstOrCreate(
             ['phone' => $validated['phone']],
@@ -32,8 +39,9 @@ class CustomerController extends Controller
 
         $smsSent = false;
         $smsError = null;
+        $shopBrand = SmsTools::shopSmsBrand($atelierId ? (int) $atelierId : null);
         if ($userShiksho->wasRecentlyCreated) {
-            $welcomeMessage = "به باشگاه مشتریان شیک شو خوش امدید";
+            $welcomeMessage = "به باشگاه مشتریان {$shopBrand} خوش آمدید";
             try {
                 SmsTools::sendSms($validated['phone'], $welcomeMessage);
                 $smsSent = true;
@@ -47,8 +55,8 @@ class CustomerController extends Controller
 
         return response([
             'message' => $userShiksho->wasRecentlyCreated
-                ? 'کاربر با موفقیت در شیک‌شو ثبت شد'
-                : 'کاربر قبلا در شیک‌شو ثبت شده است',
+                ? "کاربر با موفقیت در باشگاه مشتریان {$shopBrand} ثبت شد"
+                : "کاربر قبلاً در باشگاه مشتریان {$shopBrand} ثبت شده است",
             'already_exists' => !$userShiksho->wasRecentlyCreated,
             'sms_sent' => $smsSent,
             'sms_error' => $smsError,
@@ -61,6 +69,8 @@ class CustomerController extends Controller
      */
     public function index(Request $request)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+
         // جستجو بر اساس searchFilterModel
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         
@@ -73,6 +83,7 @@ class CustomerController extends Controller
                 DB::raw('SUM(purchases.credit_earned) as total_credit_earned'),
                 DB::raw('MAX(purchases.created_at) as last_purchase_date')
             )
+            ->where('purchases.atelier_id', $atelierId)
             ->whereNotNull('purchases.phone')
             ->where('purchases.phone', '!=', '')
             ->groupBy('purchases.phone');
@@ -92,9 +103,11 @@ class CustomerController extends Controller
         $customers = $query->orderBy('last_purchase_date', 'desc')
             ->paginate($request->input('per_page', 50));
 
-        // اضافه کردن اعتبار فعلی به هر مشتری
+        // اضافه کردن اعتبار فعلی به هر مشتری (همان فروشگاه)
         foreach ($customers->items() as $customer) {
-            $userShiksho = UserShiksho::where('phone', $customer->phone)->first();
+            $userShiksho = UserShiksho::where('phone', $customer->phone)
+                ->where('atelier_id', $atelierId)
+                ->first();
             $customer->current_credit = $userShiksho ? $userShiksho->credit : 0;
         }
 
@@ -106,14 +119,19 @@ class CustomerController extends Controller
      */
     public function show(Request $request, $phone)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+
         // اطلاعات خریدهای مشتری
         $purchases = Purchase::where('phone', $phone)
+            ->where('atelier_id', $atelierId)
             ->with('purchasedProducts.product')
             ->orderBy('id', 'desc')
             ->get();
 
         // اطلاعات اعتبار
-        $userShiksho = UserShiksho::where('phone', $phone)->first();
+        $userShiksho = UserShiksho::where('phone', $phone)
+            ->where('atelier_id', $atelierId)
+            ->first();
 
         // آمار کلی
         $stats = [
@@ -136,11 +154,14 @@ class CustomerController extends Controller
      */
     public function getCustomersForBroadcast(Request $request)
     {
-       // دریافت لیست شماره تلفن‌های یکتای مشتریان از جدول purchases
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+
+       // دریافت لیست شماره تلفن‌های مشتریان همان فروشگاه
        $query = DB::table('user_shiksho')
        ->select(
            'user_shiksho.phone'
        )
+       ->where('user_shiksho.atelier_id', $atelierId)
       ;
 
    $customers = $query->get()->map(function($item) {
@@ -174,6 +195,9 @@ class CustomerController extends Controller
             ], 400);
         }
 
+        $smsAtelierId = $this->staffShopAtelierId($request);
+        $smsPrefix = $smsAtelierId !== null ? SmsTools::shopSmsBrand($smsAtelierId) . "\n" : '';
+
         $successCount = 0;
         $failedCount = 0;
         $results = [];
@@ -181,7 +205,7 @@ class CustomerController extends Controller
         // ارسال SMS به هر شماره
         foreach ($phones as $phone) {
             try {
-                $result = SmsTools::sendSms($phone, $request->input('message'));
+                $result = SmsTools::sendSms($phone, $smsPrefix . $request->input('message'));
                 $successCount++;
                 $results[] = [
                     'phone' => $phone,
