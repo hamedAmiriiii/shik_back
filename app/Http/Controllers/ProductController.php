@@ -47,39 +47,22 @@ class ProductController extends Controller
                 }
             });
         }
-        
-        // دریافت تعداد آیتم در هر صفحه از request (پیش‌فرض 50)
+
+        $sort = $this->resolveProductListSort($request);
+        $this->applyProductListSort($query, $sort);
+
         $perPage = $request->input('per_page', 10);
-        
-        $products = $query->with(['images', 'categories', 'manufacturer'])->orderBy('id', 'desc')->paginate($perPage);
-        
-        // اضافه کردن اطلاعات تخفیف به هر محصول
+
+        $products = $query->with(['images', 'categories', 'manufacturer'])->paginate($perPage);
+
         $products->getCollection()->transform(function ($product) {
-            // اگر original_sale_price null باشد، آن را برابر sale_price قرار بده
-            if ($product->original_sale_price === null) {
-                $product->original_sale_price = $product->sale_price;
-            }
-            
-            // محاسبه درصد تخفیف
-            $discountPercent = 0;
-            $discountAmount = 0;
-            if ($product->original_sale_price > 0 && $product->sale_price < $product->original_sale_price) {
-                $discountAmount = $product->original_sale_price - $product->sale_price;
-                $discountPercent = ($discountAmount / $product->original_sale_price) * 100;
-            }
-            
-            // اضافه کردن فیلدهای محاسبه شده
-            $product->discount_percent = round($discountPercent, 2);
-            $product->discount_amount = $discountAmount;
-            $product->has_discount = $discountPercent > 0;
-            
-            return $product;
+            return $this->appendProductPricingMeta($product);
         });
-        
-        // حفظ مسیر URL برای pagination
+
         $products->withPath(url()->current());
-        
-        return response($products);
+        $products->appends($request->only(['sort', 'order_by', 'search', 'searchFilterModel', 'per_page']));
+
+        return response($products)->header('X-Applied-Sort', $sort !== '' ? $sort : 'id_desc');
     }
 
     /**
@@ -635,6 +618,153 @@ class ProductController extends Controller
             // حذف از دیتابیس
             $image->delete();
         }
+    }
+
+    /**
+     * خواندن sort از query، order_by، یا داخل searchFilterModel.
+     */
+    private function resolveProductListSort(Request $request): string
+    {
+        $sort = $request->input('sort')
+            ?? $request->input('order_by')
+            ?? $request->input('order');
+
+        if (($sort === null || $sort === '') && $request->has('searchFilterModel')) {
+            $model = json_decode($request->input('searchFilterModel'));
+            if (is_object($model) && isset($model->sort)) {
+                $sort = $model->sort;
+            }
+        }
+
+        if (! is_string($sort) || $sort === '') {
+            return '';
+        }
+
+        $sort = strtolower(trim($sort));
+        $sort = str_replace(['-', ' '], '_', $sort);
+
+        $aliases = [
+            'highest_profit_percent' => 'profit_percent_desc',
+            'lowest_profit_percent' => 'profit_percent_asc',
+            'highest_profit' => 'profit_desc',
+            'lowest_profit' => 'profit_asc',
+            'highest_discount_percent' => 'discount_percent_desc',
+            'lowest_discount_percent' => 'discount_percent_asc',
+            'highest_discount' => 'discount_desc',
+            'lowest_discount' => 'discount_asc',
+        ];
+
+        return $aliases[$sort] ?? $sort;
+    }
+
+    /**
+     * مرتب‌سازی لیست محصولات (قبل از paginate) — با orderByRaw و پیشوند products.
+     */
+    private function applyProductListSort($query, string $sort): void
+    {
+        $profitSql = '(products.sale_price - products.purchase_price)';
+        $profitPercentSql = '(CASE WHEN products.purchase_price > 0 '
+            .'THEN ((products.sale_price - products.purchase_price) / products.purchase_price) * 100 ELSE 0 END)';
+        $discountAmountSql = 'GREATEST(0, COALESCE(products.original_sale_price, products.sale_price) - products.sale_price)';
+        $discountPercentSql = '(CASE WHEN COALESCE(products.original_sale_price, products.sale_price) > 0 '
+            .'THEN (GREATEST(0, COALESCE(products.original_sale_price, products.sale_price) - products.sale_price) '
+            .'/ COALESCE(products.original_sale_price, products.sale_price)) * 100 ELSE 0 END)';
+
+        switch ($sort) {
+            case 'quantity_desc':
+            case 'most_quantity':
+            case 'max_quantity':
+                $query->orderByDesc('products.quantity')->orderByDesc('products.id');
+                break;
+            case 'quantity_asc':
+            case 'least_quantity':
+            case 'min_quantity':
+                $query->orderBy('products.quantity')->orderByDesc('products.id');
+                break;
+            case 'profit_desc':
+            case 'max_profit':
+                $query->orderByRaw("{$profitSql} DESC")->orderByDesc('products.id');
+                break;
+            case 'profit_asc':
+            case 'min_profit':
+                $query->orderByRaw("{$profitSql} ASC")->orderByDesc('products.id');
+                break;
+            case 'profit_percent_desc':
+            case 'most_profit_percent':
+            case 'max_profit_percent':
+                $query->orderByRaw("{$profitPercentSql} DESC")->orderByDesc('products.id');
+                break;
+            case 'profit_percent_asc':
+            case 'least_profit_percent':
+            case 'min_profit_percent':
+                $query->orderByRaw("{$profitPercentSql} ASC")->orderByDesc('products.id');
+                break;
+            case 'discount_desc':
+            case 'max_discount':
+                $query->orderByRaw("{$discountAmountSql} DESC")->orderByDesc('products.id');
+                break;
+            case 'discount_asc':
+            case 'min_discount':
+                $query->orderByRaw("{$discountAmountSql} ASC")->orderByDesc('products.id');
+                break;
+            case 'discount_percent_desc':
+            case 'most_discount_percent':
+            case 'max_discount_percent':
+                $query->orderByRaw("{$discountPercentSql} DESC")->orderByDesc('products.id');
+                break;
+            case 'discount_percent_asc':
+            case 'least_discount_percent':
+            case 'min_discount_percent':
+                $query->orderByRaw("{$discountPercentSql} ASC")->orderByDesc('products.id');
+                break;
+            // most_profit / least_profit = مبلغ سود (نه درصد) — عمداً جدا از profit_percent
+            case 'most_profit':
+                $query->orderByRaw("{$profitSql} DESC")->orderByDesc('products.id');
+                break;
+            case 'least_profit':
+                $query->orderByRaw("{$profitSql} ASC")->orderByDesc('products.id');
+                break;
+            case 'most_discount':
+                $query->orderByRaw("{$discountAmountSql} DESC")->orderByDesc('products.id');
+                break;
+            case 'least_discount':
+                $query->orderByRaw("{$discountAmountSql} ASC")->orderByDesc('products.id');
+                break;
+            default:
+                $query->orderByDesc('products.id');
+                break;
+        }
+    }
+
+    /**
+     * فیلدهای محاسباتی سود و تخفیف برای پاسخ API.
+     */
+    private function appendProductPricingMeta(Product $product): Product
+    {
+        if ($product->original_sale_price === null) {
+            $product->original_sale_price = $product->sale_price;
+        }
+
+        $discountPercent = 0;
+        $discountAmount = 0;
+        if ($product->original_sale_price > 0 && $product->sale_price < $product->original_sale_price) {
+            $discountAmount = $product->original_sale_price - $product->sale_price;
+            $discountPercent = ($discountAmount / $product->original_sale_price) * 100;
+        }
+
+        $purchasePrice = (float) $product->purchase_price;
+        $salePrice = (float) $product->sale_price;
+        $unitProfit = $salePrice - $purchasePrice;
+
+        $product->unit_profit = round($unitProfit, 2);
+        $product->profit_percent = $purchasePrice > 0
+            ? round(($unitProfit / $purchasePrice) * 100, 2)
+            : 0.0;
+        $product->discount_percent = round($discountPercent, 2);
+        $product->discount_amount = round((float) $discountAmount, 2);
+        $product->has_discount = $discountPercent > 0;
+
+        return $product;
     }
 
     /**
