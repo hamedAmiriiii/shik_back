@@ -61,12 +61,14 @@ class SendInstallmentReminders extends Command
                 $message .= "تاریخ سررسید: {$dueDateJalali}\n";
                 $message .= "لطفاً قسط خود را پرداخت کنید";
 
+                $purchaseAtelierId = $purchase && $purchase->atelier_id ? (int) $purchase->atelier_id : null;
                 SmsTools::sendShopSms(
                     $installment->purchase->phone,
                     $message,
                     (string) $installment->purchase->id,
                     null,
-                    'installment_reminder'
+                    'installment_reminder',
+                    $purchaseAtelierId
                 );
 
                 $sentCount++;

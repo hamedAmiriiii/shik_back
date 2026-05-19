@@ -13,11 +13,12 @@ class ShopSmsLog extends Model
     protected $table = 'shop_sms_logs';
 
     protected $fillable = [
+        'atelier_id',
         'phone',
         'message',
         'purchase_id',
         'credit_amount',
-        'sms_type'
+        'sms_type',
     ];
 
     protected $casts = [

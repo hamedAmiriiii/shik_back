@@ -65,9 +65,10 @@ class SmsTools
      * @param string|null $purchaseId ID خرید (اختیاری)
      * @param float|null $creditAmount مبلغ اعتبار (اختیاری)
      * @param string $smsType نوع پیامک (پیش‌فرض: purchase)
+     * @param int|null $atelierId شناسه فروشگاه
      * @return array
      */
-    public static function sendShopSms(string $phone, string $message, ?string $purchaseId = null, ?float $creditAmount = null, string $smsType = 'purchase')
+    public static function sendShopSms(string $phone, string $message, ?string $purchaseId = null, ?float $creditAmount = null, string $smsType = 'purchase', ?int $atelierId = null)
     {
         $response = Http::get('http://api.shinapayamak.ir/v1/' . self::API_TOKEN . '/sms/send.json', [
             'gateway' => '10003000207',
@@ -75,13 +76,13 @@ class SmsTools
             'text' => $message . " \n لغو11"
         ]);
 
-        // ثبت در جدول shop_sms_logs
         ShopSmsLog::create([
+            'atelier_id' => $atelierId,
             'phone' => $phone,
             'message' => $message,
             'purchase_id' => $purchaseId,
             'credit_amount' => $creditAmount,
-            'sms_type' => $smsType
+            'sms_type' => $smsType,
         ]);
 
         return $response->json();

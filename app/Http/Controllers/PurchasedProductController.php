@@ -361,12 +361,12 @@ class PurchasedProductController extends Controller
                 $creditFormatted = number_format($creditEarned, 0);
                 $shopName = SmsTools::shopSmsBrand($purchaseAtelierId);
                 $text = "{$shopName}\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
-                SmsTools::sendShopSms($phone, $text, (string) $purchase->id, $creditEarned, 'credit');
+                SmsTools::sendShopSms($phone, $text, (string) $purchase->id, $creditEarned, 'credit', $purchaseAtelierId);
             } else {
                 // اگر اعتبار غیرفعال باشد یا اعتبار کسب نشده باشد (به دلیل تخفیف)، فقط پیام ساده بفرست
                 $shopName = SmsTools::shopSmsBrand($purchaseAtelierId);
                 $text = "{$shopName}\nبا تشکر از خرید شما";
-                SmsTools::sendShopSms($phone, $text, (string) $purchase->id, null, 'purchase');
+                SmsTools::sendShopSms($phone, $text, (string) $purchase->id, null, 'purchase', $purchaseAtelierId);
             }
 
             // ثبت شماره تلفن در جدول customer_phones

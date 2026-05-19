@@ -95,7 +95,7 @@ class InstallmentCreditController extends Controller
         $creditFormatted = number_format($regularCredit, 0);
         $shopName = SmsTools::shopSmsBrand($atelierId);
         $text = "{$shopName}\nاعتبار خرید اقساطی شما تا {$installmentFormatted} تومان و اعتبار عادی تا {$creditFormatted} تومان شارژ شد";
-        SmsTools::sendShopSms($phone, $text, null, $installmentCredit, 'installment_credit');
+        SmsTools::sendShopSms($phone, $text, null, $installmentCredit, 'installment_credit', $atelierId);
 
         return response([
             'message' => 'اعتبار اقساطی و اعتبار عادی با موفقیت ثبت شد',
@@ -148,7 +148,7 @@ class InstallmentCreditController extends Controller
         $creditFormatted = number_format($newRegularCredit, 0);
         $shopName = SmsTools::shopSmsBrand($atelierId);
         $text = "{$shopName}\nاعتبار خرید اقساطی شما {$installmentFormatted} تومان و اعتبار عادی {$creditFormatted} تومان ثبت شد";
-        SmsTools::sendShopSms($phone, $text, null, $newInstallmentCredit, 'installment_credit');
+        SmsTools::sendShopSms($phone, $text, null, $newInstallmentCredit, 'installment_credit', $atelierId);
 
         return response([
             'message' => 'اعتبارات با موفقیت به‌روزرسانی شد',
