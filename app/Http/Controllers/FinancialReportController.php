@@ -23,6 +23,8 @@ class FinancialReportController extends Controller
     public function monthlyReport(Request $request)
     {
         try {
+            $atelierId = $this->shopAtelierIdOrAbort($request);
+
             // دریافت محدوده تاریخ (اختیاری)
             $startDate = $request->input('start_date'); // فرمت: YYYY-MM-DD (شمسی)
             $endDate = $request->input('end_date'); // فرمت: YYYY-MM-DD (شمسی)
@@ -57,10 +59,9 @@ class FinancialReportController extends Controller
 
             // اگر تاریخ شروع مشخص نشده، اولین تاریخی که داده داریم را پیدا می‌کنیم
             if (!$startCarbon) {
-                // پیدا کردن اولین تاریخ از جداول مختلف
-                $firstPurchaseDate = Purchase::min('created_at');
-                $firstExpenseDate = Expense::min('date');
-                $firstInvoiceDate = Invoice::min('date');
+                $firstPurchaseDate = Purchase::forAtelier($atelierId)->min('created_at');
+                $firstExpenseDate = Expense::where('atelier_id', $atelierId)->min('date');
+                $firstInvoiceDate = Invoice::where('atelier_id', $atelierId)->min('date');
                 
                 // تبدیل تاریخ‌های expense و invoice به Carbon (اگر وجود داشته باشند)
                 $dates = [];
@@ -112,7 +113,13 @@ class FinancialReportController extends Controller
         ];
 
         foreach ($months as $month) {
-            $monthData = $this->calculateMonthData($month['start'], $month['end'], $month['year'], $month['month']);
+            $monthData = $this->calculateMonthData(
+                $month['start'],
+                $month['end'],
+                $month['year'],
+                $month['month'],
+                $atelierId
+            );
             
             $monthlyData[] = $monthData;
 
@@ -127,6 +134,7 @@ class FinancialReportController extends Controller
         }
 
             return response([
+                'meta' => ['atelier_id' => $atelierId],
                 'data' => $monthlyData,
                 'totals' => $totals,
             ], 200);
@@ -274,14 +282,14 @@ class FinancialReportController extends Controller
     /**
      * محاسبه داده‌های یک ماه
      */
-    private function calculateMonthData(Carbon $start, Carbon $end, int $year, int $month): array
+    private function calculateMonthData(Carbon $start, Carbon $end, int $year, int $month, int $atelierId): array
     {
         // تبدیل تاریخ‌ها به فرمت مناسب برای کوئری
         $startString = $start->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
         $endString = $end->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
 
-        // دریافت خریدها با روابط مورد نیاز
         $purchases = Purchase::with(['purchasedProducts.product', 'installments'])
+            ->forAtelier($atelierId)
             ->whereBetween('created_at', [$startString, $endString])
             ->get();
 
@@ -311,15 +319,18 @@ class FinancialReportController extends Controller
 
         // محاسبه برگشتی‌ها با اطلاعات محصولات
         $returnedProducts = ReturnedProduct::with('product')
+            ->forAtelier($atelierId)
             ->whereBetween('created_at', [$startString, $endString])
             ->get();
 
-        $totalReturns = 0; // مجموع قیمت فروش برگشتی‌ها
-        $totalReturnsPurchase = 0; // مجموع قیمت خرید برگشتی‌ها
+        $totalReturns = 0;
+        $totalReturnsPurchase = 0;
 
         foreach ($returnedProducts as $returned) {
-            $salePrice = $returned->sale_price;
-            $purchasePrice = $returned->product->purchase_price;
+            $salePrice = (float) $returned->sale_price;
+            $purchasePrice = $returned->product
+                ? (float) $returned->product->purchase_price
+                : 0.0;
 
             $totalReturns += $salePrice;
             $totalReturnsPurchase += $purchasePrice;
@@ -339,14 +350,14 @@ class FinancialReportController extends Controller
 
         // کل هزینه‌های جاری: مجموع amount از expenses که type = 'جاری'
         // توجه: date در expenses به صورت DATE ذخیره می‌شود (میلادی)
-        $totalExpenses = Expense::where('type', 'جاری')
+        $totalExpenses = Expense::where('atelier_id', $atelierId)
+            ->where('type', 'جاری')
             ->whereDate('date', '>=', $start->format('Y-m-d'))
             ->whereDate('date', '<=', $end->format('Y-m-d'))
             ->sum('amount');
 
-        // کل فاکتورها: مجموع amount از invoices
-        // توجه: date در invoices به صورت DATE ذخیره می‌شود (میلادی)
-        $totalInvoices = Invoice::whereDate('date', '>=', $start->format('Y-m-d'))
+        $totalInvoices = Invoice::where('atelier_id', $atelierId)
+            ->whereDate('date', '>=', $start->format('Y-m-d'))
             ->whereDate('date', '<=', $end->format('Y-m-d'))
             ->sum('amount');
 

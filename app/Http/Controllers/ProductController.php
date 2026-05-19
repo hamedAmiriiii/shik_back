@@ -257,82 +257,73 @@ class ProductController extends Controller
     public function bestSelling(Request $request)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
-        $limit = (int) $request->input('limit', 10); // پیش‌فرض 10 محصول
+        $limit = max(1, min((int) $request->input('limit', 10), 100));
 
-        // محاسبه تعداد فروش هر محصول (فقط خریدهای همین فروشگاه)
-        $productIds = DB::table('purchased_products')
-            ->join('purchases', 'purchased_products.purchase_id', '=', 'purchases.id')
-            ->where('purchases.atelier_id', $atelierId)
+        $salesQuery = $this->bestSellingSalesQuery($atelierId);
+
+        $productIds = (clone $salesQuery)
             ->select('purchased_products.product_id', DB::raw('SUM(purchased_products.quantity) as total_sold'))
             ->groupBy('purchased_products.product_id')
-            ->orderBy('total_sold', 'desc')
+            ->orderByDesc('total_sold')
             ->limit($limit)
             ->pluck('product_id')
             ->toArray();
 
-        // اگر هیچ فروشی وجود نداشت، محصولات همین فروشگاه را برمی‌گردانیم
         if (empty($productIds)) {
             $bestSellingProducts = Product::with(['images', 'categories', 'manufacturer'])
                 ->where('atelier_id', $atelierId)
+                ->orderByDesc('id')
                 ->limit($limit)
                 ->get();
-            
-            // اضافه کردن total_sold = 0 به هر محصول
-            $bestSellingProducts->each(function($product) {
+
+            $bestSellingProducts->each(function ($product) {
                 $product->total_sold = 0;
             });
         } else {
-            // محاسبه total_sold برای هر محصول
-            $totalSoldMap = DB::table('purchased_products')
-                ->join('purchases', 'purchased_products.purchase_id', '=', 'purchases.id')
-                ->where('purchases.atelier_id', $atelierId)
+            $totalSoldMap = (clone $salesQuery)
                 ->select('purchased_products.product_id', DB::raw('SUM(purchased_products.quantity) as total_sold'))
                 ->whereIn('purchased_products.product_id', $productIds)
                 ->groupBy('purchased_products.product_id')
                 ->pluck('total_sold', 'product_id')
                 ->toArray();
 
-            // دریافت محصولات بر اساس ترتیب فروش
             $products = Product::whereIn('id', $productIds)
                 ->where('atelier_id', $atelierId)
                 ->with(['images', 'categories', 'manufacturer'])
                 ->get();
-            
-            // مرتب‌سازی بر اساس ترتیب productIds و اضافه کردن total_sold
-            $bestSellingProducts = collect($productIds)->map(function($productId) use ($products, $totalSoldMap) {
+
+            $bestSellingProducts = collect($productIds)->map(function ($productId) use ($products, $totalSoldMap) {
                 $product = $products->firstWhere('id', $productId);
-                if ($product) {
-                    $product->total_sold = $totalSoldMap[$productId] ?? 0;
-                    return $product;
+                if (! $product) {
+                    return null;
                 }
-                return null;
+                $product->total_sold = (int) ($totalSoldMap[$productId] ?? 0);
+
+                return $product;
             })->filter()->values();
         }
 
-        // اضافه کردن اطلاعات تخفیف به هر محصول
         $bestSellingProducts->transform(function ($product) {
-            // اگر original_sale_price null باشد، آن را برابر sale_price قرار بده
-            if ($product->original_sale_price === null) {
-                $product->original_sale_price = $product->sale_price;
-            }
-            
-            // محاسبه درصد تخفیف
-            $discountPercent = 0;
-            $discountAmount = 0;
-            if ($product->original_sale_price > 0 && $product->sale_price < $product->original_sale_price) {
-                $discountAmount = $product->original_sale_price - $product->sale_price;
-                $discountPercent = ($discountAmount / $product->original_sale_price) * 100;
-            }
-            
-            // اضافه کردن فیلدهای محاسبه شده
-            $product->discount_percent = round($discountPercent, 2);
-            $product->discount_amount = $discountAmount;
-            $product->has_discount = $discountPercent > 0;
-            
-            return $product;
+            return $this->appendProductPricingMeta($product);
         });
 
-        return response($bestSellingProducts, 200);
+        return response($bestSellingProducts, 200)
+            ->header('X-Atelier-Id', (string) $atelierId);
+    }
+
+    /**
+     * پایهٔ کوئری فروش برای پرفروش‌ها — فقط محصولات و خریدهای همان فروشگاه.
+     */
+    private function bestSellingSalesQuery(int $atelierId)
+    {
+        return DB::table('purchased_products')
+            ->join('purchases', 'purchased_products.purchase_id', '=', 'purchases.id')
+            ->join('products', 'purchased_products.product_id', '=', 'products.id')
+            ->where('products.atelier_id', $atelierId)
+            ->where(function ($q) use ($atelierId) {
+                $q->where('purchases.atelier_id', $atelierId)
+                    ->orWhereNull('purchases.atelier_id');
+            });
     }
 
     /**
