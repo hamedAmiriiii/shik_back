@@ -47,6 +47,22 @@ class Purchase extends Model
     }
 
     /**
+     * خریدهای متعلق به یک فروشگاه (ستون atelier_id یا استنباط از محصولات خرید).
+     */
+    public function scopeForAtelier($query, int $atelierId)
+    {
+        return $query->where(function ($q) use ($atelierId) {
+            $q->where('atelier_id', $atelierId)
+                ->orWhere(function ($q2) use ($atelierId) {
+                    $q2->whereNull('atelier_id')
+                        ->whereHas('purchasedProducts.product', function ($p) use ($atelierId) {
+                            $p->where('atelier_id', $atelierId);
+                        });
+                });
+        });
+    }
+
+    /**
      * سبد خرید این خرید (اگر سفارش اینترنتی باشد)
      */
     public function cart()

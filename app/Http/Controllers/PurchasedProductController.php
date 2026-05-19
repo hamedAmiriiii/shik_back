@@ -675,21 +675,21 @@ class PurchasedProductController extends Controller
      */
     public function calculateInstallments(Request $request)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->resolveAtelierIdForCalculateInstallments($request);
         \App\Models\Setting::setShopContext($atelierId);
 
-        $request->validate([
+        $validated = $request->validate([
             'total_amount' => 'required|numeric|min:0',
             'installment_count' => 'required|integer|min:2|max:24',
-            'phone' => 'nullable|string|digits:11', // شماره تلفن برای چک اعتبار (اختیاری)
+            'phone' => 'nullable|string|digits:11',
         ]);
 
-        $totalAmount = (float) $request->input('total_amount');
-        $installmentCount = (int) $request->input('installment_count');
-        $phone = $request->input('phone');
+        $totalAmount = (float) $validated['total_amount'];
+        $installmentCount = (int) $validated['installment_count'];
+        $phone = $validated['phone'] ?? null;
 
-        // خواندن نرخ سود ماهانه از ستینگ (پیش‌فرض: 0 یعنی بدون سود)
         $monthlyInterestRate = (float) \App\Models\Setting::get('installment_monthly_interest_rate', 0);
+        $installmentAmount = 0.0;
         
         // یک سوم مبلغ به صورت نقد (قسط اول)
         $firstInstallmentAmount = $this->roundToThreeZeroEnding($totalAmount / 3);
@@ -784,12 +784,13 @@ class PurchasedProductController extends Controller
         }
 
         $response = [
+            'atelier_id' => $atelierId,
             'total_amount' => $this->roundToThreeZeroEnding($totalAmount),
             'installment_count' => $installmentCount,
             'monthly_interest_rate' => $monthlyInterestRate,
             'total_interest' => $this->roundToThreeZeroEnding($totalInterest),
             'final_total_amount' => $finalTotalAmount,
-            'installment_amount' => $installmentAmount,
+            'installment_amount' => $this->roundToThreeZeroEnding($installmentAmount),
             'installment_details' => $installmentDetails,
         ];
 
@@ -805,11 +806,35 @@ class PurchasedProductController extends Controller
             }
         }
 
-        // اگر اعتبار کافی نباشد، خطا برمی‌گردانیم
-        if ($phone && !$hasEnoughCredit) {
-            return response($response, 400);
+        if ($phone && $hasEnoughCredit === false) {
+            return response()->json($response, 400);
         }
 
-        return response($response, 200);
+        return response()->json($response, 200);
+    }
+
+    /**
+     * فروشگاه برای محاسبه اقساط: از کاربر لاگین، یا atelier_id در body (اگر توکن در هدر نرسد).
+     */
+    private function resolveAtelierIdForCalculateInstallments(Request $request): int
+    {
+        $requestedAtelierId = $this->parseRequestedAtelierId($request);
+        $actor = $this->shopRequestActor($request);
+
+        if ($actor instanceof \App\Models\User) {
+            $freshAtelierId = \App\Models\User::where('id', $actor->id)->value('atelier_id');
+            if ($freshAtelierId) {
+                return (int) $freshAtelierId;
+            }
+            if ($requestedAtelierId !== null && \App\Models\Atelier::where('id', $requestedAtelierId)->exists()) {
+                return $requestedAtelierId;
+            }
+        }
+
+        if ($requestedAtelierId !== null && \App\Models\Atelier::where('id', $requestedAtelierId)->exists()) {
+            return $requestedAtelierId;
+        }
+
+        return $this->shopAtelierIdOrAbort($request);
     }
 }

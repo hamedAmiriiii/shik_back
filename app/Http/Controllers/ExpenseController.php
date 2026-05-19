@@ -15,7 +15,8 @@ class ExpenseController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Expense::orderBy('id', 'desc');
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $query = Expense::where('atelier_id', $atelierId)->orderBy('id', 'desc');
 
         // جستجو بر اساس searchFilterModel
         $searchDataModel = json_decode($request->input('searchFilterModel'));
@@ -108,15 +109,21 @@ class ExpenseController extends Controller
      */
     public function store(Request $request)
     {
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            return response()->json([
+                'message' => 'ثبت هزینه فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
+            ], 422);
+        }
+
         $fields = $request->validate([
             'amount' => 'required|numeric|min:0',
             'title' => 'required|string|max:255',
             'type' => 'nullable|in:جاری,سرمایه',
         ]);
 
-        // دریافت نام کاربر از لاگین
-        $user = $request->user();
-        if (!$user) {
+        $user = $this->shopRequestActor($request);
+        if (! $user) {
             return response(['error' => 'کاربر احراز هویت نشده است'], 401);
         }
 
@@ -131,7 +138,8 @@ class ExpenseController extends Controller
             $fields['type'] = 'جاری';
         }
 
-        // ذخیره مستقیم بدون هیچ وابستگی
+        $fields['atelier_id'] = $atelierId;
+
         $expense = Expense::create($fields);
         return response($expense, 201);
     }
@@ -139,8 +147,10 @@ class ExpenseController extends Controller
     /**
      * نمایش جزئیات یک هزینه
      */
-    public function show(Expense $expense)
+    public function show(Request $request, Expense $expense)
     {
+        $this->assertModelBelongsToStaffAtelier($request, $expense);
+
         return response($expense, 200);
     }
 
@@ -149,6 +159,8 @@ class ExpenseController extends Controller
      */
     public function update(Request $request, Expense $expense)
     {
+        $this->assertModelBelongsToStaffAtelier($request, $expense);
+
         $fields = $request->validate([
             'user_name' => 'sometimes|required|string',
             'amount' => 'sometimes|required|numeric|min:0',
@@ -165,8 +177,10 @@ class ExpenseController extends Controller
     /**
      * حذف هزینه
      */
-    public function destroy(Expense $expense)
+    public function destroy(Request $request, Expense $expense)
     {
+        $this->assertModelBelongsToStaffAtelier($request, $expense);
+
         $expense->delete();
         return response(['message' => 'هزینه با موفقیت حذف شد'], 200);
     }
@@ -174,19 +188,18 @@ class ExpenseController extends Controller
     /**
      * آمار کلی هزینه‌ها
      */
-    public function statistics()
+    public function statistics(Request $request)
     {
-        // کل هزینه‌ها (مجموع همه)
-        $totalExpenses = Expense::sum('amount');
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $expenseQuery = Expense::where('atelier_id', $atelierId);
 
-        // کل هزینه‌های جاری
-        $totalCurrentExpenses = Expense::where('type', 'جاری')->sum('amount');
+        $totalExpenses = (clone $expenseQuery)->sum('amount');
 
-        // کل هزینه‌های سرمایه
-        $totalCapitalExpenses = Expense::where('type', 'سرمایه')->sum('amount');
+        $totalCurrentExpenses = (clone $expenseQuery)->where('type', 'جاری')->sum('amount');
 
-        // تفکیک هزینه‌ها بر اساس user_name (جاری و سرمایه)
-        $expensesByUser = Expense::select(
+        $totalCapitalExpenses = (clone $expenseQuery)->where('type', 'سرمایه')->sum('amount');
+
+        $expensesByUser = Expense::where('atelier_id', $atelierId)->select(
             'user_name',
             DB::raw('SUM(CASE WHEN type = "جاری" THEN amount ELSE 0 END) as total_current'),
             DB::raw('SUM(CASE WHEN type = "سرمایه" THEN amount ELSE 0 END) as total_capital'),
@@ -200,7 +213,8 @@ class ExpenseController extends Controller
             'total_expenses' => (float) $totalExpenses,
             'total_current_expenses' => (float) $totalCurrentExpenses,
             'total_capital_expenses' => (float) $totalCapitalExpenses,
-            'expenses_by_user' => $expensesByUser
+            'expenses_by_user' => $expensesByUser,
+            'meta' => ['atelier_id' => $atelierId],
         ], 200);
     }
 }

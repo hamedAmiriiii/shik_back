@@ -66,14 +66,12 @@ class Handler extends ExceptionHandler
         // For API requests or requests expecting JSON, always return JSON response
         if ($request->is('api/*') || $request->expectsJson()) {
             return response()->json([
-                'message' => 'Unauthenticated.'
+                'message' => 'احراز هویت نشد. توکن را در هدر Authorization: Bearer ... یا در body (access_token / token) بفرستید.',
             ], 401);
         }
 
-        // For web requests, also return JSON to avoid route('login') error
-        // Since this is an API-only application
         return response()->json([
-            'message' => 'Unauthenticated.'
+            'message' => 'احراز هویت نشد. توکن را در هدر Authorization: Bearer ... یا در body (access_token / token) بفرستید.',
         ], 401);
     }
 }

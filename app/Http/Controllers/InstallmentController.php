@@ -4,52 +4,22 @@ namespace App\Http\Controllers;
 
 use App\Models\Installment;
 use App\Models\Purchase;
-use App\Models\User;
-use App\Models\Customer;
 use App\Models\UserShiksho;
-use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Morilog\Jalali\Jalalian;
 
 class InstallmentController extends Controller
 {
-    /**
-     * بررسی اینکه کاربر یک ادمین است (نه Customer)
-     */
-    private function checkAdmin(Request $request)
-    {
-        $user = $request->user();
-        
-        // بررسی اینکه کاربر یک Customer نیست
-        if ($user instanceof Customer) {
-            return response([
-                'error' => 'این endpoint فقط برای ادمین است'
-            ], 403);
-        }
-        
-        // بررسی اینکه کاربر یک User (ادمین) است
-        if (!($user instanceof User)) {
-            return response([
-                'error' => 'دسترسی غیرمجاز'
-            ], 403);
-        }
-        
-        return null;
-    }
-
     /**
      * لیست قسط‌های یک خرید
      */
     public function index(Request $request, Purchase $purchase)
     {
-        // بررسی دسترسی ادمین
-        $adminCheck = $this->checkAdmin($request);
-        if ($adminCheck) {
-            return $adminCheck;
-        }
+        $this->requireStaffShopUser($request);
+        $this->assertModelBelongsToStaffAtelier($request, $purchase);
+
         $installments = $purchase->installments()->orderBy('installment_number')->get();
-        
+
         return response([
             'purchase' => $purchase,
             'installments' => $installments,
@@ -63,43 +33,39 @@ class InstallmentController extends Controller
      */
     public function pay(Request $request, Purchase $purchase, Installment $installment)
     {
-        // بررسی دسترسی ادمین
-        $adminCheck = $this->checkAdmin($request);
-        if ($adminCheck) {
-            return $adminCheck;
-        }
+        $this->requireStaffShopUser($request);
+        $this->assertModelBelongsToStaffAtelier($request, $purchase);
 
-        // بررسی اینکه قسط متعلق به این خرید باشد
         if ($installment->purchase_id !== $purchase->id) {
-            return response(['error' => 'این قسط متعلق به این خرید نیست'], 400);
+            return response()->json(['message' => 'این قسط متعلق به این خرید نیست'], 400);
         }
 
-        // بررسی اینکه قسط قبلاً پرداخت نشده باشد
         if ($installment->is_paid) {
-            return response(['error' => 'این قسط قبلاً پرداخت شده است'], 400);
+            return response()->json(['message' => 'این قسط قبلاً پرداخت شده است'], 400);
         }
 
         DB::beginTransaction();
         try {
-            // علامت‌گذاری قسط به عنوان پرداخت شده
             $installment->update([
                 'is_paid' => true,
                 'paid_at' => now(),
                 'notes' => $request->input('notes'),
             ]);
 
-            // افزودن اعتبار اقساطی به کاربر (مبلغ قسط پرداخت شده)
             if ($purchase->phone) {
-                $userShiksho = UserShiksho::where('phone', $purchase->phone)->first();
+                $atelierId = $purchase->atelier_id;
+                $userQuery = UserShiksho::where('phone', $purchase->phone);
+                if ($atelierId) {
+                    $userQuery->where('atelier_id', $atelierId);
+                }
+                $userShiksho = $userQuery->first();
                 if ($userShiksho) {
-                    // افزودن مبلغ قسط به اعتبار اقساطی کاربر
                     $userShiksho->addInstallmentCredit($installment->amount);
                 }
             }
 
             DB::commit();
 
-            // بارگذاری مجدد
             $installment->load('purchase');
 
             return response([
@@ -107,12 +73,12 @@ class InstallmentController extends Controller
                 'installment' => $installment,
                 'purchase' => $purchase->load('installments'),
             ], 200);
-
         } catch (\Exception $e) {
             DB::rollBack();
-            return response([
-                'error' => 'خطا در پرداخت قسط',
-                'message' => $e->getMessage()
+
+            return response()->json([
+                'message' => 'خطا در پرداخت قسط',
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -122,11 +88,8 @@ class InstallmentController extends Controller
      */
     public function getByPhone(Request $request)
     {
-        // بررسی دسترسی ادمین
-        $adminCheck = $this->checkAdmin($request);
-        if ($adminCheck) {
-            return $adminCheck;
-        }
+        $this->requireStaffShopUser($request);
+        $atelierId = $this->shopAtelierIdOrAbort($request);
 
         $request->validate([
             'phone' => 'required|string|digits:11',
@@ -134,9 +97,10 @@ class InstallmentController extends Controller
 
         $phone = $request->input('phone');
 
-        $purchases = Purchase::where('phone', $phone)
+        $purchases = Purchase::forAtelier($atelierId)
+            ->where('phone', $phone)
             ->where('payment_type', 'installment')
-            ->with(['installments' => function($query) {
+            ->with(['installments' => function ($query) {
                 $query->orderBy('installment_number');
             }])
             ->orderBy('created_at', 'desc')
@@ -144,31 +108,33 @@ class InstallmentController extends Controller
 
         return response([
             'phone' => $phone,
+            'atelier_id' => $atelierId,
             'purchases' => $purchases,
         ], 200);
     }
 
     /**
-     * لیست قسط‌های پرداخت نشده (برای ادمین)
+     * لیست قسط‌های پرداخت نشده (همان فروشگاه)
      */
     public function unpaid(Request $request)
     {
-        // بررسی دسترسی ادمین
-        $adminCheck = $this->checkAdmin($request);
-        if ($adminCheck) {
-            return $adminCheck;
-        }
+        $this->requireStaffShopUser($request);
+        $atelierId = $this->shopAtelierIdOrAbort($request);
 
         $query = Installment::where('is_paid', false)
-            ->with('purchase')
+            ->whereHas('purchase', function ($q) use ($atelierId) {
+                $q->forAtelier($atelierId);
+            })
+            ->with(['purchase' => function ($q) {
+                $q->select('id', 'phone', 'total_amount', 'payment_type', 'atelier_id', 'created_at');
+            }])
             ->orderBy('due_date');
 
-        // فیلتر بر اساس تاریخ سررسید
-        if ($request->has('overdue')) {
+        if ($request->boolean('overdue')) {
             $query->where('due_date', '<', now()->toDateString());
         }
 
-        if ($request->has('due_soon')) {
+        if ($request->boolean('due_soon')) {
             $threeDaysLater = now()->addDays(3)->toDateString();
             $query->whereBetween('due_date', [now()->toDateString(), $threeDaysLater]);
         }
@@ -178,4 +144,3 @@ class InstallmentController extends Controller
         return response($installments, 200);
     }
 }
-

@@ -38,5 +38,21 @@ class ReturnedProduct extends Model
     {
         return $this->belongsTo(Product::class);
     }
+
+    /**
+     * برگشتی‌های متعلق به یک فروشگاه.
+     */
+    public function scopeForAtelier($query, int $atelierId)
+    {
+        return $query->where(function ($q) use ($atelierId) {
+            $q->where('atelier_id', $atelierId)
+                ->orWhere(function ($q2) use ($atelierId) {
+                    $q2->whereNull('atelier_id')
+                        ->whereHas('product', function ($p) use ($atelierId) {
+                            $p->where('atelier_id', $atelierId);
+                        });
+                });
+        });
+    }
 }
 

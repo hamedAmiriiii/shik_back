@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Atelier;
 use App\Models\Purchase;
 use App\Models\PurchasedProduct;
 use App\Models\Product;
@@ -115,6 +116,11 @@ class ReportController extends Controller
         $expensesStats = $this->getExpensesStatistics($atelierId);
         $reports['expenses'] = $expensesStats;
 
+        $reports['meta'] = [
+            'atelier_id' => $atelierId,
+            'atelier_code' => Atelier::where('id', $atelierId)->value('code'),
+        ];
+
         return response($reports, 200);
     }
 
@@ -130,7 +136,7 @@ class ReportController extends Controller
         $endString = $endOfDayTehran->format('Y-m-d H:i:s');
 
         $purchases = Purchase::with(['purchasedProducts.product', 'installments'])
-            ->where('atelier_id', $atelierId)
+            ->forAtelier($atelierId)
             ->whereBetween('created_at', [$startString, $endString])
             ->get();
 
@@ -160,7 +166,7 @@ class ReportController extends Controller
 
         // محاسبه برگشتی‌ها با اطلاعات محصولات
         $returnedProducts = ReturnedProduct::with('product')
-            ->where('atelier_id', $atelierId)
+            ->forAtelier($atelierId)
             ->whereBetween('created_at', [$startString, $endString])
             ->get();
 
@@ -192,7 +198,7 @@ class ReportController extends Controller
         $endString = $endDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
 
         $purchases = Purchase::with(['purchasedProducts.product', 'installments'])
-            ->where('atelier_id', $atelierId)
+            ->forAtelier($atelierId)
             ->whereBetween('created_at', [$startString, $endString])
             ->get();
 
@@ -222,7 +228,7 @@ class ReportController extends Controller
 
         // محاسبه برگشتی‌ها با اطلاعات محصولات
         $returnedProducts = ReturnedProduct::with('product')
-            ->where('atelier_id', $atelierId)
+            ->forAtelier($atelierId)
             ->whereBetween('created_at', [$startString, $endString])
             ->get();
 
