@@ -29,6 +29,8 @@ Route::name('geo.')->prefix('geo')->group(function (){
 });
 
 Route::name('resetPassword.')->prefix('reset-password')->group(function () {
+    Route::post('send-code', [\App\Http\Controllers\Auth\AuthController::class, 'sendForgotPasswordCode']);
+    Route::post('confirm', [\App\Http\Controllers\Auth\AuthController::class, 'confirmForgotPassword']);
     Route::post('', [\App\Http\Controllers\Auth\AuthController::class, 'resetPassword']);
 });
 
@@ -114,6 +116,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/{shopSmsLog}', [\App\Http\Controllers\ShopSmsLogController::class, 'show']);
     });
 
+    Route::get('shop-access', [\App\Http\Controllers\ShopAccessController::class, 'show']);
+
     Route::prefix('shop-sms-quota')->name('shop-sms-quota.')->group(function () {
         Route::get('/', [\App\Http\Controllers\ShopSmsQuotaController::class, 'show']);
         Route::post('/estimate', [\App\Http\Controllers\ShopSmsQuotaController::class, 'estimate']);
@@ -190,6 +194,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::resource("atelier", \App\Http\Controllers\Admin\AtelierController::class);
         Route::post("/atelier/confirm/{atelier}", [\App\Http\Controllers\Admin\AtelierController::class, "confirm"]);
 
+        Route::get('shops', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'index']);
+        Route::put('shops/{atelier}', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'update']);
         Route::get('shop-sms-quota', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'index']);
         Route::get('shop-sms-quota/{atelier}', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'show']);
         Route::put('shop-sms-quota/{atelier}', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'update']);

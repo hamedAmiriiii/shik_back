@@ -98,8 +98,22 @@ trait ResolvesShopAtelierId
 
     /**
      * شناسهٔ فروشگاه برای فیلتر لیست‌ها: از کاربر لاگین، یا از کد فروشگاه در درخواست.
+     * پرسنل فروشگاه: اگر دورهٔ دسترسی تمام شده باشد 403 (ادمین سامانه مستثنی است).
      */
     protected function shopAtelierIdOrAbort(Request $request): int
+    {
+        $atelierId = $this->resolveShopAtelierIdOrAbort($request);
+        if (! $this->shopRequestActorIsPlatformAdmin($request)) {
+            $this->assertShopAccessActive($atelierId);
+        }
+
+        return $atelierId;
+    }
+
+    /**
+     * @return int شناسهٔ atelier بدون بررسی تاریخ اعتبار
+     */
+    protected function resolveShopAtelierIdOrAbort(Request $request): int
     {
         $actor = $this->shopRequestActor($request);
         $requestedAtelierId = $this->parseRequestedAtelierId($request);
@@ -154,6 +168,31 @@ trait ResolvesShopAtelierId
         ], 422));
     }
 
+    protected function shopRequestActorIsPlatformAdmin(Request $request): bool
+    {
+        $actor = $this->shopRequestActor($request);
+
+        return $actor instanceof User
+            && $actor->roles()->where('id', User::USER_TYPE_KEY['ادمین'])->exists();
+    }
+
+    protected function assertShopAccessActive(int $atelierId): void
+    {
+        $atelier = Atelier::find($atelierId);
+        if ($atelier && $atelier->isShopAccessActive()) {
+            return;
+        }
+
+        $payload = [
+            'message' => 'دسترسی فروشگاه شما غیرفعال است یا مدت استفاده به پایان رسیده است. با پشتیبانی تماس بگیرید.',
+        ];
+        if ($atelier) {
+            $payload = array_merge($payload, $atelier->accessStatusForApi());
+        }
+
+        abort(response()->json($payload, 403));
+    }
+
     /**
      * شناسهٔ فروشگاه برای پرسنل (User) — فقط وقتی به فروشگاه وصل است.
      */
@@ -163,7 +202,12 @@ trait ResolvesShopAtelierId
         if ($u instanceof User) {
             $freshAtelierId = User::where('id', $u->id)->value('atelier_id');
             if ($freshAtelierId) {
-                return (int) $freshAtelierId;
+                $id = (int) $freshAtelierId;
+                if (! $this->shopRequestActorIsPlatformAdmin($request)) {
+                    $this->assertShopAccessActive($id);
+                }
+
+                return $id;
             }
         }
 

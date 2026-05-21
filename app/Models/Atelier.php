@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Tools\QueryTools;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
@@ -17,8 +18,15 @@ class Atelier extends Model
 
         static::created(function (Atelier $atelier) {
             Setting::ensureDefaultsForAtelier((int) $atelier->id);
+
+            if ($atelier->shop_access_starts_at === null && $atelier->shop_access_ends_at === null) {
+                $atelier->forceFill(static::trialAccessAttributes())->saveQuietly();
+            }
         });
     }
+
+    /** مدت آزمایش رایگان پس از ثبت‌نام */
+    public const TRIAL_MONTHS = 1;
 
 
     protected $fillable = [
@@ -54,6 +62,42 @@ class Atelier extends Model
         }
 
         return true;
+    }
+
+    /**
+     * یک ماه استفاده رایگان از زمان ثبت‌نام.
+     */
+    public static function trialAccessAttributes(?Carbon $startsAt = null): array
+    {
+        $startsAt = $startsAt ?? now();
+
+        return [
+            'shop_access_starts_at' => $startsAt,
+            'shop_access_ends_at' => $startsAt->copy()->addMonths(self::TRIAL_MONTHS),
+            'shop_access_suspended' => false,
+        ];
+    }
+
+    /**
+     * وضعیت دوره دسترسی برای API (پنل فروشگاه / ادمین).
+     */
+    public function accessStatusForApi(): array
+    {
+        $ends = $this->shop_access_ends_at;
+        $daysRemaining = null;
+        if ($ends !== null) {
+            $daysRemaining = $ends->isFuture()
+                ? max(0, (int) now()->diffInDays($ends, false))
+                : 0;
+        }
+
+        return [
+            'shop_access_starts_at' => $this->shop_access_starts_at?->format('Y-m-d H:i:s'),
+            'shop_access_ends_at' => $ends?->format('Y-m-d H:i:s'),
+            'shop_access_suspended' => (bool) $this->shop_access_suspended,
+            'shop_access_active' => $this->isShopAccessActive(),
+            'shop_access_days_remaining' => $daysRemaining,
+        ];
     }
 
     public function staffUsers()

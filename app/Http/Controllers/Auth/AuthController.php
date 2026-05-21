@@ -27,6 +27,14 @@ class AuthController extends Controller
     /** حداقل فاصله بین دو درخواست ارسال کد برای یک شماره (ثانیه) */
     private const SHOP_REGISTRATION_OTP_RESEND_SECONDS = 90;
 
+    private const FORGOT_PASSWORD_OTP_PREFIX = 'forgot_password_otp:';
+
+    private const FORGOT_PASSWORD_OTP_COOLDOWN_PREFIX = 'forgot_password_otp_sent_at:';
+
+    private const FORGOT_PASSWORD_OTP_TTL_MINUTES = 10;
+
+    private const FORGOT_PASSWORD_OTP_RESEND_SECONDS = 90;
+
     /**
      * درخواست کد تأیید پیامکی قبل از ثبت‌نام نقش «فروشگاه».
      */
@@ -179,25 +187,30 @@ class AuthController extends Controller
                 $nationalCode . '/business_license.jpeg'
             );
 
-            $atelier = Atelier::create([
+            $atelier = Atelier::create(array_merge([
                 'name' => $fields['atelier_name'],
                 'code' => $atelierCode,
                 'address' => $address,
                 'business_license' => $businessLicense,
-            ]);
+            ], Atelier::trialAccessAttributes()));
             $user->update([
                 'atelier_id' => $atelier->id,
                 'shop_staff_role' => 'owner',
             ]);
         }
 
-        $user->load('roles');
+        $user->load(['roles', 'atelier']);
         $token = $user->createToken('myapptoken')->plainTextToken;
 
-        return response([
+        $payload = [
             'user' => $user,
             'token' => $token,
-        ], 201);
+        ];
+        if ($user->atelier) {
+            $payload['shop_access'] = $user->atelier->accessStatusForApi();
+        }
+
+        return response($payload, 201);
     }
 
     private function placeholderImageBinary(): string
@@ -269,13 +282,12 @@ class AuthController extends Controller
             ], 401);
         }
 
-        // پرسنل متصل به فروشگاه: فقط اگر دورهٔ دسترسی فروشگاه فعال باشد
+        // وضعیت اعتبار فروشگاه در پاسخ (برای نمایش در فرانت) — ورود مسدود نمی‌شود
+        $shopAccess = null;
         if ($user->atelier_id) {
             $atelier = Atelier::find($user->atelier_id);
-            if (! $atelier || ! $atelier->isShopAccessActive()) {
-                return response([
-                    'message' => 'دسترسی فروشگاه شما غیرفعال است یا مدت استفاده به پایان رسیده است. با پشتیبانی تماس بگیرید.',
-                ], 403);
+            if ($atelier) {
+                $shopAccess = $atelier->accessStatusForApi();
             }
         }
 
@@ -283,10 +295,15 @@ class AuthController extends Controller
 
         $user->load(['roles', 'atelier']);
 
-        return response([
+        $payload = [
             'user' => $user,
             'token' => $token,
-        ], 201);
+        ];
+        if ($shopAccess !== null) {
+            $payload['shop_access'] = $shopAccess;
+        }
+
+        return response($payload, 201);
     }
 
     public function logout(Request $request)
@@ -298,7 +315,119 @@ class AuthController extends Controller
         ];
     }
 
+    /**
+     * فراموشی رمز — مرحله ۱: ارسال کد تأیید به شماره موبایل.
+     */
+    public function sendForgotPasswordCode(Request $request)
+    {
+        $this->mergeForgotPasswordPhoneAliases($request);
+
+        $data = $request->validate([
+            'phone' => 'required|numeric|digits:11',
+        ]);
+        $phone = $data['phone'];
+
+        $user = User::where('phone', $phone)->first();
+        if (! $user) {
+            return response()->json([
+                'message' => 'کاربری با این شماره موبایل یافت نشد.',
+            ], 404);
+        }
+
+        $cooldownKey = self::FORGOT_PASSWORD_OTP_COOLDOWN_PREFIX.$phone;
+        $lastSent = Cache::get($cooldownKey);
+        if ($lastSent !== null && (time() - (int) $lastSent) < self::FORGOT_PASSWORD_OTP_RESEND_SECONDS) {
+            $wait = self::FORGOT_PASSWORD_OTP_RESEND_SECONDS - (time() - (int) $lastSent);
+
+            return response([
+                'message' => 'لطفاً قبل از درخواست مجدد چند لحظه صبر کنید.',
+                'retry_after_seconds' => max(1, $wait),
+            ], 429);
+        }
+
+        $code = (string) mt_rand(10000, 99999);
+        Cache::put(
+            self::FORGOT_PASSWORD_OTP_PREFIX.$phone,
+            $code,
+            now()->addMinutes(self::FORGOT_PASSWORD_OTP_TTL_MINUTES)
+        );
+        Cache::put($cooldownKey, time(), now()->addMinutes(self::FORGOT_PASSWORD_OTP_TTL_MINUTES + 1));
+
+        $text = 'کد بازیابی رمز عبور: '.$code;
+        $smsResult = SmsTools::sendSms($phone, $text);
+
+        return response([
+            'message' => 'کد تأیید به شمارهٔ شما ارسال شد.',
+            'expires_in_minutes' => self::FORGOT_PASSWORD_OTP_TTL_MINUTES,
+            'smsResult' => $smsResult,
+        ], 201);
+    }
+
+    /**
+     * فراموشی رمز — مرحله ۲: تأیید کد و ذخیره رمز جدید.
+     */
+    public function confirmForgotPassword(Request $request)
+    {
+        $this->mergeForgotPasswordPhoneAliases($request);
+        $this->mergeForgotPasswordCodeAliases($request);
+
+        $fields = $request->validate([
+            'phone' => 'required|numeric|digits:11',
+            'verification_code' => 'required|numeric|digits:5',
+            'password' => 'required|string|min:6|max:255|confirmed',
+        ]);
+
+        $phone = $fields['phone'];
+        $expected = Cache::get(self::FORGOT_PASSWORD_OTP_PREFIX.$phone);
+        if ($expected === null || (string) $expected !== (string) $fields['verification_code']) {
+            return response()->json([
+                'message' => $expected === null
+                    ? 'کد تأیید منقضی شده است. دوباره درخواست کد بدهید.'
+                    : 'کد تأیید اشتباه است.',
+            ], 422);
+        }
+
+        $user = User::where('phone', $phone)->first();
+        if (! $user) {
+            return response()->json([
+                'message' => 'کاربری با این شماره موبایل یافت نشد.',
+            ], 404);
+        }
+
+        $user->update([
+            'password' => Hash::make($fields['password']),
+        ]);
+
+        $user->tokens()->delete();
+
+        Cache::forget(self::FORGOT_PASSWORD_OTP_PREFIX.$phone);
+        Cache::forget(self::FORGOT_PASSWORD_OTP_COOLDOWN_PREFIX.$phone);
+
+        return response([
+            'message' => 'رمز عبور با موفقیت تغییر کرد. می‌توانید وارد شوید.',
+        ], 200);
+    }
+
+    /**
+     * POST /api/reset-password — اگر کد OTP و رمز جدید باشد همان confirm؛ وگرنه روش قدیمی کد ملی.
+     */
     public function resetPassword(Request $request)
+    {
+        if ($this->isForgotPasswordSendCodeRequest($request)) {
+            return $this->sendForgotPasswordCode($request);
+        }
+
+        if ($this->isForgotPasswordOtpRequest($request)) {
+            return $this->confirmForgotPassword($request);
+        }
+
+        return $this->resetPasswordByNationalCode($request);
+    }
+
+    /**
+     * بازیابی قدیمی با کد ملی.
+     */
+    protected function resetPasswordByNationalCode(Request $request)
     {
         $fields = $request->validate([
             'username' => 'required|string|digits:11',
@@ -323,5 +452,38 @@ class AuthController extends Controller
             'message' => 'پسوورد ارسال شد',
             'smsResult' => $balance,
         ], 201);
+    }
+
+    protected function isForgotPasswordSendCodeRequest(Request $request): bool
+    {
+        $this->mergeForgotPasswordPhoneAliases($request);
+
+        return $request->filled('phone')
+            && ! $request->filled('verification_code')
+            && ! $request->filled('code')
+            && ! $request->filled('password')
+            && ! $request->filled('nationalCode');
+    }
+
+    protected function isForgotPasswordOtpRequest(Request $request): bool
+    {
+        return $request->filled('verification_code')
+            || $request->filled('code')
+            || $request->filled('password')
+            || $request->filled('password_confirmation');
+    }
+
+    protected function mergeForgotPasswordPhoneAliases(Request $request): void
+    {
+        if (! $request->filled('phone') && $request->filled('username')) {
+            $request->merge(['phone' => $request->input('username')]);
+        }
+    }
+
+    protected function mergeForgotPasswordCodeAliases(Request $request): void
+    {
+        if (! $request->filled('verification_code') && $request->filled('code')) {
+            $request->merge(['verification_code' => $request->input('code')]);
+        }
     }
 }
