@@ -136,6 +136,9 @@ class PurchasedProductController extends Controller
             'discount_amount' => 'nullable|numeric|min:0', // مبلغ تخفیف مستقیم (اختیاری)
             'payment_type' => 'nullable|string|in:cash,installment', // نوع پرداخت: نقدی یا اقساطی
             'installment_count' => 'required_if:payment_type,installment|integer|min:2|max:24', // تعداد اقساط (حداقل 2، حداکثر 24)
+            'card_amount' => 'nullable|numeric|min:0',
+            'cash_amount' => 'nullable|numeric|min:0',
+            'payment_settlement' => 'nullable|string|in:card,cash', // میانبر: کل مبلغ پرداختی امروز روی کارت یا نقد
         ]);
 
         $phone = $request->input('phone');
@@ -293,6 +296,12 @@ class PurchasedProductController extends Controller
             }
         }
 
+        $amountPaidNow = $paymentType === 'installment'
+            ? $this->roundToThreeZeroEnding($finalTotalAmount / 3)
+            : (float) $totalAmount;
+
+        $settlement = $this->resolvePurchaseSettlement($request, $amountPaidNow);
+
         // ایجاد سبد خرید (Purchase)
         $purchase = Purchase::create([
             'phone' => $phone,
@@ -300,6 +309,8 @@ class PurchasedProductController extends Controller
             'credit_used' => $creditUsed,
             'credit_earned' => $creditEarned,
             'payment_type' => $paymentType,
+            'card_amount' => $settlement['card_amount'],
+            'cash_amount' => $settlement['cash_amount'],
             'installment_count' => $paymentType === 'installment' ? $installmentCount : null,
             'installment_amount' => $installmentAmount,
             'atelier_id' => $purchaseAtelierId,
@@ -427,6 +438,40 @@ class PurchasedProductController extends Controller
      * @return float
      */
   
+
+    /**
+     * تسویهٔ پرداخت در لحظهٔ فروش: کارت / نقد دستی (جمع باید برابر مبلغ پرداختی باشد).
+     *
+     * @return array{card_amount: float, cash_amount: float}
+     */
+    private function resolvePurchaseSettlement(Request $request, float $amountPaidNow): array
+    {
+        $card = (float) $request->input('card_amount', 0);
+        $cash = (float) $request->input('cash_amount', 0);
+        $settlement = $request->input('payment_settlement');
+
+        if ($card <= 0 && $cash <= 0 && $settlement === 'card') {
+            $card = $amountPaidNow;
+        } elseif ($card <= 0 && $cash <= 0 && $settlement === 'cash') {
+            $cash = $amountPaidNow;
+        } elseif ($card <= 0 && $cash <= 0) {
+            $cash = $amountPaidNow;
+        }
+
+        if (abs(($card + $cash) - $amountPaidNow) > 0.02) {
+            abort(response()->json([
+                'message' => 'جمع مبلغ کارت و نقد باید برابر مبلغ پرداختی باشد.',
+                'amount_paid' => $amountPaidNow,
+                'card_amount' => $card,
+                'cash_amount' => $cash,
+            ], 422));
+        }
+
+        return [
+            'card_amount' => round($card, 2),
+            'cash_amount' => round($cash, 2),
+        ];
+    }
 
      private function roundToOddWithZeroEnding($number)
      {

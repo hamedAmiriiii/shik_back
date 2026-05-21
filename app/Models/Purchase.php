@@ -17,6 +17,8 @@ class Purchase extends Model
         'credit_used',
         'credit_earned',
         'payment_type',
+        'card_amount',
+        'cash_amount',
         'installment_count',
         'installment_amount',
         'atelier_id',
@@ -26,6 +28,8 @@ class Purchase extends Model
         'total_amount' => 'decimal:2',
         'credit_used' => 'decimal:2',
         'credit_earned' => 'decimal:2',
+        'card_amount' => 'decimal:2',
+        'cash_amount' => 'decimal:2',
         'installment_amount' => 'decimal:2',
     ];
 
