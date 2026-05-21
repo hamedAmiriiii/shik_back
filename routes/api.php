@@ -113,6 +113,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/', [\App\Http\Controllers\ShopSmsLogController::class, 'index']);
         Route::get('/{shopSmsLog}', [\App\Http\Controllers\ShopSmsLogController::class, 'show']);
     });
+
+    Route::prefix('shop-sms-quota')->name('shop-sms-quota.')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ShopSmsQuotaController::class, 'show']);
+        Route::post('/estimate', [\App\Http\Controllers\ShopSmsQuotaController::class, 'estimate']);
+    });
     
     // Manufacturer routes - require authentication (POST/PUT/DELETE)
     Route::post('manufacturers', [\App\Http\Controllers\ManufacturerController::class, 'store']);
@@ -184,6 +189,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
         Route::resource("atelier", \App\Http\Controllers\Admin\AtelierController::class);
         Route::post("/atelier/confirm/{atelier}", [\App\Http\Controllers\Admin\AtelierController::class, "confirm"]);
+
+        Route::get('shop-sms-quota', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'index']);
+        Route::get('shop-sms-quota/{atelier}', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'show']);
+        Route::put('shop-sms-quota/{atelier}', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'update']);
+        Route::post('shop-sms-quota/{atelier}/charge', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'charge']);
 
         Route::resource("cameraman", \App\Http\Controllers\Admin\CameramanController::class);
         Route::post("/cameraman/confirm/{cameraman}", [\App\Http\Controllers\Admin\CameramanController::class, "confirm"]);

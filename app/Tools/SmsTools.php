@@ -6,6 +6,7 @@ namespace App\Tools;
 use App\Models\Atelier;
 use App\Models\LogSms;
 use App\Models\ShopSmsLog;
+use App\Services\ShopSmsQuotaService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Kavenegar;
@@ -70,6 +71,10 @@ class SmsTools
      */
     public static function sendShopSms(string $phone, string $message, ?string $purchaseId = null, ?float $creditAmount = null, string $smsType = 'purchase', ?int $atelierId = null)
     {
+        if ($atelierId !== null && $atelierId > 0) {
+            ShopSmsQuotaService::deductForMessage($atelierId, $message);
+        }
+
         $response = Http::get('http://api.shinapayamak.ir/v1/' . self::API_TOKEN . '/sms/send.json', [
             'gateway' => '10003000207',
             'to' => $phone,

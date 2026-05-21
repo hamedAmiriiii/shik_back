@@ -62,14 +62,19 @@ class SendInstallmentReminders extends Command
                 $message .= "لطفاً قسط خود را پرداخت کنید";
 
                 $purchaseAtelierId = $purchase && $purchase->atelier_id ? (int) $purchase->atelier_id : null;
-                SmsTools::sendShopSms(
-                    $installment->purchase->phone,
-                    $message,
-                    (string) $installment->purchase->id,
-                    null,
-                    'installment_reminder',
-                    $purchaseAtelierId
-                );
+                try {
+                    SmsTools::sendShopSms(
+                        $installment->purchase->phone,
+                        $message,
+                        (string) $installment->purchase->id,
+                        null,
+                        'installment_reminder',
+                        $purchaseAtelierId
+                    );
+                } catch (\App\Exceptions\InsufficientShopSmsQuotaException $e) {
+                    $this->warn("اعتبار پیامک فروشگاه #{$purchaseAtelierId} کافی نیست — خرید #{$installment->purchase->id}");
+                    continue;
+                }
 
                 $sentCount++;
                 $this->info("پیامک برای قسط #{$installment->installment_number} خرید #{$installment->purchase->id} ارسال شد");

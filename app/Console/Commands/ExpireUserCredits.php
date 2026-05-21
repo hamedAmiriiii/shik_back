@@ -86,7 +86,12 @@ class ExpireUserCredits extends Command
                 
                 // ارسال پیامک برای فروشگاه (ثبت در shop_sms_logs)
                 $atelierId = $user->atelier_id ? (int) $user->atelier_id : null;
-                SmsTools::sendShopSms($user->phone, $message, null, $user->credit, 'warning', $atelierId);
+                try {
+                    SmsTools::sendShopSms($user->phone, $message, null, $user->credit, 'warning', $atelierId);
+                } catch (\App\Exceptions\InsufficientShopSmsQuotaException $e) {
+                    $this->warn("اعتبار پیامک فروشگاه #{$atelierId} کافی نیست برای {$user->phone}");
+                    continue;
+                }
                 
                 // به‌روزرسانی last_warning_sent_at
                 $user->last_warning_sent_at = Carbon::now();

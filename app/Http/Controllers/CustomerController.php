@@ -195,23 +195,38 @@ class CustomerController extends Controller
             ], 400);
         }
 
-        $smsAtelierId = $this->staffShopAtelierId($request);
-        $smsPrefix = $smsAtelierId !== null ? SmsTools::shopSmsBrand($smsAtelierId) . "\n" : '';
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $fullMessage = SmsTools::shopSmsBrand($atelierId)."\n".$request->input('message');
+
+        $partsEach = \App\Services\ShopSmsQuotaService::countSmsParts($fullMessage);
+        $totalParts = $partsEach * count($phones);
+        $balance = \App\Services\ShopSmsQuotaService::getBalance($atelierId);
+        if ($balance < $totalParts) {
+            throw new \App\Exceptions\InsufficientShopSmsQuotaException($totalParts, $balance);
+        }
 
         $successCount = 0;
         $failedCount = 0;
         $results = [];
 
-        // ارسال SMS به هر شماره
         foreach ($phones as $phone) {
             try {
-                $result = SmsTools::sendSms($phone, $smsPrefix . $request->input('message'));
+                $result = SmsTools::sendShopSms(
+                    $phone,
+                    $fullMessage,
+                    null,
+                    null,
+                    'broadcast',
+                    $atelierId
+                );
                 $successCount++;
                 $results[] = [
                     'phone' => $phone,
                     'status' => 'success',
                     'result' => $result
                 ];
+            } catch (\App\Exceptions\InsufficientShopSmsQuotaException $e) {
+                throw $e;
             } catch (\Exception $e) {
                 $failedCount++;
                 $results[] = [

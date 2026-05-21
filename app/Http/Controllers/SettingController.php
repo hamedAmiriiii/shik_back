@@ -7,6 +7,9 @@ use Illuminate\Http\Request;
 
 class SettingController extends Controller
 {
+    /** فقط ادمین از API جداگانه می‌تواند شارژ کند */
+    private const ADMIN_ONLY_KEYS = ['shop_sms_quota'];
+
     /**
      * دریافت همه تنظیمات
      */
@@ -40,6 +43,12 @@ class SettingController extends Controller
      */
     public function update(Request $request, $key)
     {
+        if (in_array($key, self::ADMIN_ONLY_KEYS, true)) {
+            return response()->json([
+                'message' => 'اعتبار پیامک فقط توسط ادمین قابل شارژ است.',
+            ], 403);
+        }
+
         $this->bindShopSettingAtelierFromRequest($request);
         $request->validate([
             'value' => 'required',
@@ -132,6 +141,12 @@ class SettingController extends Controller
             'key' => 'required|string|max:255',
             'value' => 'required',
         ]);
+
+        if (in_array($request->input('key'), self::ADMIN_ONLY_KEYS, true)) {
+            return response()->json([
+                'message' => 'اعتبار پیامک فقط توسط ادمین قابل شارژ است.',
+            ], 403);
+        }
 
         Setting::set($request->input('key'), $request->input('value'));
         

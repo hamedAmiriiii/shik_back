@@ -44,6 +44,7 @@ class Setting extends Model
             'enable_loyalty_credit' => '1',
             'credit_expiry_days' => '60',
             'installment_monthly_interest_rate' => '0',
+            'shop_sms_quota' => '0',
         ];
 
         foreach ($defaults as $key => $value) {
