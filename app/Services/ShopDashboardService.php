@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\ReturnedProduct;
+use App\Services\ShopSalesReportService;
 use Carbon\Carbon;
 use Morilog\Jalali\Jalalian;
 
@@ -49,8 +50,8 @@ class ShopDashboardService
         $purchases = Purchase::query()
             ->forAtelier($atelierId)
             ->whereBetween('created_at', [$rangeStart, $rangeEnd])
-            ->with(['installments'])
-            ->get(['id', 'total_amount', 'credit_used', 'payment_type', 'card_amount', 'cash_amount', 'created_at']);
+            ->with(['installments', 'purchasedProducts'])
+            ->get();
 
         foreach ($purchases as $purchase) {
             $key = self::tehranDateKeyFromModel($purchase);
@@ -58,13 +59,26 @@ class ShopDashboardService
                 continue;
             }
 
-            $actualPaid = $purchase->isInstallment()
-                ? (float) $purchase->paid_amount
-                : (float) $purchase->total_amount;
+            $lineSales = $purchase->remainingLineSalesTotal();
+            if ($lineSales <= 0) {
+                continue;
+            }
 
-            $buckets[$key]['gross_sales'] += $actualPaid + (float) $purchase->credit_used;
-            $buckets[$key]['card_amount'] += (float) $purchase->card_amount;
-            $buckets[$key]['cash_amount'] += (float) $purchase->cash_amount;
+            if ($purchase->isInstallment()) {
+                $buckets[$key]['gross_sales'] += (float) $purchase->paid_amount + (float) $purchase->credit_used;
+            } else {
+                $buckets[$key]['gross_sales'] += $lineSales;
+            }
+
+            [$card, $cash] = ShopSalesReportService::settlementForPurchase($purchase, $lineSales);
+            $buckets[$key]['card_amount'] += $card;
+            $buckets[$key]['cash_amount'] += $cash;
+
+            if ($purchase->isInstallment()) {
+                $buckets[$key]['uncollected_installments'] += (float) $purchase->installments
+                    ->where('is_paid', false)
+                    ->sum('amount');
+            }
             $buckets[$key]['purchases_count']++;
         }
 
@@ -85,6 +99,7 @@ class ShopDashboardService
         $periodTotalSales = 0.0;
         foreach ($buckets as $row) {
             $row['total_sales'] = (float) ($row['gross_sales'] - $row['total_returns']);
+            $row['cash_and_card_total'] = (float) ($row['card_amount'] + $row['cash_amount']);
             $periodTotalSales += $row['total_sales'];
             $daily[] = $row;
         }
@@ -96,68 +111,39 @@ class ShopDashboardService
             'from_date_jalali' => Jalalian::fromCarbon($start)->format('Y-m-d'),
             'to_date_jalali' => Jalalian::fromCarbon($end)->format('Y-m-d'),
             'period_total_sales' => (float) $periodTotalSales,
+            'total_uncollected_installments' => ShopSalesReportService::totalUncollectedInstallments($atelierId),
             'daily' => $daily,
         ];
     }
 
     protected static function metricsForSingleDay(int $atelierId, Carbon $dateTehran): array
     {
+        $report = ShopSalesReportService::salesAndProfitForDate($atelierId, $dateTehran);
+
         $start = $dateTehran->copy()->startOfDay()->format('Y-m-d H:i:s');
         $end = $dateTehran->copy()->endOfDay()->format('Y-m-d H:i:s');
-
-        $purchases = Purchase::query()
+        $purchasesCount = Purchase::query()
             ->forAtelier($atelierId)
             ->whereBetween('created_at', [$start, $end])
-            ->with(['purchasedProducts', 'installments'])
-            ->get();
-
-        $totalSales = 0.0;
-        $cardAmount = 0.0;
-        $cashAmount = 0.0;
-        $totalPurchaseCost = 0.0;
-        $totalCreditEarned = 0.0;
-
-        foreach ($purchases as $purchase) {
-            $actualPaid = $purchase->isInstallment()
-                ? (float) $purchase->paid_amount
-                : (float) $purchase->total_amount;
-
-            $totalSales += $actualPaid + (float) $purchase->credit_used;
-            $cardAmount += (float) $purchase->card_amount;
-            $cashAmount += (float) $purchase->cash_amount;
-            $totalCreditEarned += (float) $purchase->credit_earned;
-
-            foreach ($purchase->purchasedProducts as $item) {
-                $totalPurchaseCost += $item->quantity * (float) $item->purchase_price;
-            }
-        }
-
-        $returns = ReturnedProduct::query()
-            ->forAtelier($atelierId)
-            ->whereBetween('created_at', [$start, $end])
-            ->with('product')
-            ->get();
-
-        $totalReturns = 0.0;
-        $returnsPurchaseCost = 0.0;
-        foreach ($returns as $returned) {
-            $totalReturns += (float) $returned->sale_price;
-            $returnsPurchaseCost += $returned->product
-                ? (float) $returned->product->purchase_price
-                : 0.0;
-        }
-
-        $netSales = $totalSales - $totalReturns;
-        $netProfit = $netSales - ($totalPurchaseCost - $returnsPurchaseCost) - $totalCreditEarned;
+            ->count();
 
         return [
-            'total_sales' => (float) $netSales,
-            'gross_sales' => (float) $totalSales,
-            'total_returns' => (float) $totalReturns,
-            'total_profit' => (float) $netProfit,
-            'card_amount' => (float) $cardAmount,
-            'cash_amount' => (float) $cashAmount,
-            'purchases_count' => $purchases->count(),
+            'total_sales' => $report['sales'],
+            'gross_sales' => $report['gross_sales'],
+            'total_returns' => $report['returns'],
+            'total_profit' => $report['profit'],
+            'credit_earned_from_purchases' => $report['credit_earned_from_purchases'],
+            'manual_credit_granted' => $report['manual_credit_granted'],
+            'total_credit_granted' => $report['total_credit_granted'],
+            'card_amount' => $report['card_amount'],
+            'cash_amount' => $report['cash_amount'],
+            'cash_and_card_total' => $report['cash_and_card_total'],
+            'installments_collected' => $report['installments_collected'],
+            'total_collected' => $report['total_collected'],
+            'uncollected_installments' => $report['uncollected_installments'],
+            'credit_used_total' => $report['credit_used_total'],
+            'settlement_total' => $report['settlement_total'],
+            'purchases_count' => $purchasesCount,
         ];
     }
 
@@ -174,6 +160,8 @@ class ShopDashboardService
             'total_returns' => 0.0,
             'card_amount' => 0.0,
             'cash_amount' => 0.0,
+            'cash_and_card_total' => 0.0,
+            'uncollected_installments' => 0.0,
             'purchases_count' => 0,
         ];
     }

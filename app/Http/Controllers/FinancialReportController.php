@@ -2,11 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Purchase;
-use App\Models\PurchasedProduct;
 use App\Models\Expense;
 use App\Models\Invoice;
-use App\Models\ReturnedProduct;
+use App\Models\Purchase;
+use App\Services\ShopSalesReportService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Morilog\Jalali\Jalalian;
@@ -110,6 +109,14 @@ class FinancialReportController extends Controller
             'total_invoices' => 0,
             'total_net_profit' => 0,
             'total_account_balance' => 0,
+            'total_credit_granted' => 0,
+            'card_amount' => 0,
+            'cash_amount' => 0,
+            'cash_and_card_total' => 0,
+            'installments_collected' => 0,
+            'total_collected' => 0,
+            'uncollected_installments' => 0,
+            'credit_used_total' => 0,
         ];
 
         foreach ($months as $month) {
@@ -131,10 +138,21 @@ class FinancialReportController extends Controller
             $totals['total_invoices'] += $monthData['total_invoices'];
             $totals['total_net_profit'] += $monthData['net_profit'];
             $totals['total_account_balance'] += $monthData['account_balance'];
+            $totals['total_credit_granted'] += $monthData['total_credit_granted'];
+            $totals['card_amount'] += $monthData['card_amount'];
+            $totals['cash_amount'] += $monthData['cash_amount'];
+            $totals['cash_and_card_total'] += $monthData['cash_and_card_total'];
+            $totals['installments_collected'] += $monthData['installments_collected'];
+            $totals['total_collected'] += $monthData['total_collected'];
+            $totals['uncollected_installments'] += $monthData['uncollected_installments'];
+            $totals['credit_used_total'] += $monthData['credit_used_total'];
         }
 
             return response([
-                'meta' => ['atelier_id' => $atelierId],
+                'meta' => [
+                    'atelier_id' => $atelierId,
+                    'total_uncollected_installments' => ShopSalesReportService::totalUncollectedInstallments($atelierId),
+                ],
                 'data' => $monthlyData,
                 'totals' => $totals,
             ], 200);
@@ -284,69 +302,11 @@ class FinancialReportController extends Controller
      */
     private function calculateMonthData(Carbon $start, Carbon $end, int $year, int $month, int $atelierId): array
     {
-        // تبدیل تاریخ‌ها به فرمت مناسب برای کوئری
-        $startString = $start->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
-        $endString = $end->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
-
-        $purchases = Purchase::with(['purchasedProducts.product', 'installments'])
-            ->forAtelier($atelierId)
-            ->whereBetween('created_at', [$startString, $endString])
-            ->get();
-
-        $totalSales = 0;
-        $totalPurchase = 0;
-        $totalCreditEarned = 0;
-
-        foreach ($purchases as $purchase) {
-            // محاسبه فروش واقعی
-            // برای خریدهای اقساطی: مجموع قسط‌های پرداخت شده
-            // برای خریدهای نقدی: مبلغ کل خرید
-            // (که شامل تخفیف مستقیم discount_amount هم می‌شود)
-            // total_amount = مجموع sale_price ها - discount_amount - credit_used
-            // پس برای محاسبه فروش واقعی: actual_paid_amount + credit_used
-            // (چون credit_used از سود کسر نمی‌شود، باید به فروش اضافه شود)
-            $actualPaidAmount = $purchase->isInstallment() ? $purchase->paid_amount : $purchase->total_amount;
-            $totalSales += $actualPaidAmount + $purchase->credit_used;
-
-            // محاسبه هزینه خرید محصولات
-            foreach ($purchase->purchasedProducts as $purchasedProduct) {
-                $totalPurchase += $purchasedProduct->quantity * $purchasedProduct->purchase_price;
-            }
-
-            // جمع کردن اعتبار هدیه داده شده (که باید از سود کسر شود)
-            $totalCreditEarned += $purchase->credit_earned;
-        }
-
-        // محاسبه برگشتی‌ها با اطلاعات محصولات
-        $returnedProducts = ReturnedProduct::with('product')
-            ->forAtelier($atelierId)
-            ->whereBetween('created_at', [$startString, $endString])
-            ->get();
-
-        $totalReturns = 0;
-        $totalReturnsPurchase = 0;
-
-        foreach ($returnedProducts as $returned) {
-            $salePrice = (float) $returned->sale_price;
-            $purchasePrice = $returned->product
-                ? (float) $returned->product->purchase_price
-                : 0.0;
-
-            $totalReturns += $salePrice;
-            $totalReturnsPurchase += $purchasePrice;
-        }
-
-        // فروش خالص = فروش - برگشتی‌ها
-        $netSales = $totalSales - $totalReturns;
-
-        // هزینه خرید خالص = هزینه خرید - هزینه خرید کالاهای برگشتی
-        // (فقط کالاهایی که واقعاً فروخته و برگشت نشده‌اند)
-        $netPurchase = $totalPurchase - $totalReturnsPurchase;
-
-        // کل سود = فروش خالص - هزینه خرید خالص - اعتبار هدیه داده شده
-        // چون هزینه خرید کالاهای برگشتی را از totalPurchase کم کرده‌ایم،
-        // دیگر نیاز به کسر سود برگشتی نیست
-        $totalProfit = $netSales - $netPurchase - $totalCreditEarned;
+        $metrics = ShopSalesReportService::salesAndProfitForRange($atelierId, $start, $end);
+        $netSales = $metrics['sales'];
+        $netPurchase = $metrics['net_purchase'];
+        $totalProfit = $metrics['profit'];
+        $totalCreditGranted = $metrics['total_credit_granted'];
 
         // کل هزینه‌های جاری: مجموع amount از expenses که type = 'جاری'
         // توجه: date در expenses به صورت DATE ذخیره می‌شود (میلادی)
@@ -364,20 +324,30 @@ class FinancialReportController extends Controller
         // خالص سود = سود - هزینه‌های جاری
         $netProfit = $totalProfit - $totalExpenses;
 
-        // موجودی حساب = کل فروش - هزینه‌های جاری - کل فاکتورها
-        $accountBalance = $netSales - $totalExpenses - $totalInvoices;
+        // موجودی حساب ≈ فروش خالص منهای هزینه‌ها، فاکتورها و اعتبار مصرف‌شده
+        $accountBalance = $netSales - $totalExpenses - $totalInvoices - $metrics['credit_used_total'];
 
         return [
             'year' => $year,
             'month' => $month,
             'month_name' => $this->getMonthName($month),
-            'total_sales' => round($netSales, 2), // فروش خالص (منهای برگشتی‌ها)
-            'total_purchases' => round($netPurchase, 2), // هزینه خرید خالص (منهای برگشتی‌ها)
+            'total_sales' => round($netSales, 2),
+            'total_purchases' => round($netPurchase, 2),
             'total_profit' => round($totalProfit, 2),
             'total_expenses' => round($totalExpenses, 2),
             'total_invoices' => round($totalInvoices, 2),
             'net_profit' => round($netProfit, 2),
             'account_balance' => round($accountBalance, 2),
+            'credit_earned_from_purchases' => round($metrics['credit_earned_from_purchases'], 2),
+            'manual_credit_granted' => round($metrics['manual_credit_granted'], 2),
+            'total_credit_granted' => round($totalCreditGranted, 2),
+            'card_amount' => round($metrics['card_amount'], 2),
+            'cash_amount' => round($metrics['cash_amount'], 2),
+            'cash_and_card_total' => round($metrics['cash_and_card_total'], 2),
+            'installments_collected' => round($metrics['installments_collected'], 2),
+            'total_collected' => round($metrics['total_collected'], 2),
+            'uncollected_installments' => round($metrics['uncollected_installments'], 2),
+            'credit_used_total' => round($metrics['credit_used_total'], 2),
         ];
     }
 

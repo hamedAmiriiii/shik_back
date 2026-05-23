@@ -3,11 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Atelier;
-use App\Models\Purchase;
-use App\Models\PurchasedProduct;
-use App\Models\Product;
 use App\Models\Expense;
-use App\Models\ReturnedProduct;
+use App\Models\Product;
+use App\Services\ShopSalesReportService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -20,312 +18,127 @@ class ReportController extends Controller
         $atelierId = $this->shopAtelierIdOrAbort($request);
         $reports = [];
 
-        // 1. مجموع فروش و سود روزانه (بر اساس تاریخ در تایم‌زون تهران)
         $todayTehran = Carbon::now()->setTimezone('Asia/Tehran');
-        $todayData = $this->getSalesAndProfitForDate($todayTehran, $atelierId);
-        $reports['today'] = [
-            'total_sales' => $todayData['sales'],
-            'total_profit' => $todayData['profit'],
-            'total_returns' => $todayData['returns']
-        ];
+        $todayData = ShopSalesReportService::salesAndProfitForDate($atelierId, $todayTehran);
+        $reports['today'] = $this->formatPeriodReport($todayData);
 
-        // 2. مجموع فروش و سود روز قبل (بر اساس تاریخ در تایم‌زون تهران)
         $yesterdayTehran = Carbon::now()->setTimezone('Asia/Tehran')->subDay();
-        $yesterdayData = $this->getSalesAndProfitForDate($yesterdayTehran, $atelierId);
-        $reports['yesterday'] = [
-            'total_sales' => $yesterdayData['sales'],
-            'total_profit' => $yesterdayData['profit'],
-            'total_returns' => $yesterdayData['returns']
-        ];
+        $yesterdayData = ShopSalesReportService::salesAndProfitForDate($atelierId, $yesterdayTehran);
+        $reports['yesterday'] = $this->formatPeriodReport($yesterdayData);
 
-        // 3. مجموع فروش و سود هفتگی (هفته شمسی - شنبه تا جمعه)
-        // استفاده از Carbon برای محاسبه دقیق‌تر
         $carbonNow = Carbon::now()->setTimezone('Asia/Tehran');
-        $dayOfWeekCarbon = $carbonNow->dayOfWeek; // 0 = یکشنبه, 1 = دوشنبه, ..., 6 = شنبه
-        
-        // تبدیل به فرمت شمسی: شنبه = 0, یکشنبه = 1, ..., جمعه = 6
-        // در Carbon: یکشنبه=0, دوشنبه=1, ..., شنبه=6
-        // در شمسی: شنبه=0, یکشنبه=1, ..., جمعه=6
-        // پس: dayOfWeekCarbon == 6 (شنبه) => 0, else => dayOfWeekCarbon + 1
+        $dayOfWeekCarbon = $carbonNow->dayOfWeek;
         $dayOfWeekJalali = $dayOfWeekCarbon == 6 ? 0 : $dayOfWeekCarbon + 1;
-        
+
         $nowJalali = Jalalian::fromCarbon($carbonNow);
         $startOfWeekJalali = (clone $nowJalali)->subDays($dayOfWeekJalali);
         $endOfWeekJalali = (clone $startOfWeekJalali)->addDays(6);
         $startOfWeek = $startOfWeekJalali->toCarbon()->startOfDay();
         $endOfWeek = $endOfWeekJalali->toCarbon()->endOfDay();
-        $weekData = $this->getSalesAndProfit($startOfWeek, $endOfWeek, $atelierId);
-        $reports['week'] = [
-            'total_sales' => $weekData['sales'],
-            'total_profit' => $weekData['profit'],
-            'total_returns' => $weekData['returns']
-        ];
+        $weekData = ShopSalesReportService::salesAndProfitForRange($atelierId, $startOfWeek, $endOfWeek);
+        $reports['week'] = $this->formatPeriodReport($weekData);
 
-        // 4. مجموع فروش و سود ماه (ماه شمسی)
         $now = Jalalian::now();
         $year = $now->getYear();
         $month = $now->getMonth();
-        $startOfMonthJalali = new Jalalian($year, $month, 1);
-        $startOfMonth = $startOfMonthJalali->toCarbon()->startOfDay();
-        // محاسبه آخرین روز ماه شمسی: اضافه کردن یک ماه و کسر یک روز
-        $endOfMonthJalali = (new Jalalian($year, $month, 1))->addMonths(1)->subDays(1);
-        $endOfMonth = $endOfMonthJalali->toCarbon()->endOfDay();
-        $monthData = $this->getSalesAndProfit($startOfMonth, $endOfMonth, $atelierId);
-        $reports['month'] = [
-            'total_sales' => $monthData['sales'],
-            'total_profit' => $monthData['profit'],
-            'total_returns' => $monthData['returns']
-        ];
+        $startOfMonth = (new Jalalian($year, $month, 1))->toCarbon()->startOfDay();
+        $endOfMonth = (new Jalalian($year, $month, 1))->addMonths(1)->subDays(1)->toCarbon()->endOfDay();
+        $monthData = ShopSalesReportService::salesAndProfitForRange($atelierId, $startOfMonth, $endOfMonth);
+        $reports['month'] = $this->formatPeriodReport($monthData);
 
-        // 5. مجموع فروش و سود ماه قبل (ماه شمسی قبل)
         $lastMonthJalali = Jalalian::now()->subMonths(1);
         $lastYear = $lastMonthJalali->getYear();
         $lastMonth = $lastMonthJalali->getMonth();
-        $startOfLastMonthJalali = new Jalalian($lastYear, $lastMonth, 1);
-        $startOfLastMonth = $startOfLastMonthJalali->toCarbon()->startOfDay();
-        // محاسبه آخرین روز ماه شمسی قبل: اضافه کردن یک ماه و کسر یک روز
-        $endOfLastMonthJalali = (new Jalalian($lastYear, $lastMonth, 1))->addMonths(1)->subDays(1);
-        $endOfLastMonth = $endOfLastMonthJalali->toCarbon()->endOfDay();
-        $lastMonthData = $this->getSalesAndProfit($startOfLastMonth, $endOfLastMonth, $atelierId);
-        $reports['last_month'] = [
-            'total_sales' => $lastMonthData['sales'],
-            'total_profit' => $lastMonthData['profit'],
-            'total_returns' => $lastMonthData['returns']
-        ];
+        $startOfLastMonth = (new Jalalian($lastYear, $lastMonth, 1))->toCarbon()->startOfDay();
+        $endOfLastMonth = (new Jalalian($lastYear, $lastMonth, 1))->addMonths(1)->subDays(1)->toCarbon()->endOfDay();
+        $lastMonthData = ShopSalesReportService::salesAndProfitForRange($atelierId, $startOfLastMonth, $endOfLastMonth);
+        $reports['last_month'] = $this->formatPeriodReport($lastMonthData);
 
-        // 6. مجموع فروش و سود سالانه (سال شمسی)
         $yearNow = Jalalian::now()->getYear();
         $startOfYear = (new Jalalian($yearNow, 1, 1))->toCarbon()->startOfDay();
-        // آخرین روز سال شمسی (29 اسفند)
         $endOfYear = (new Jalalian($yearNow, 12, 29))->toCarbon()->endOfDay();
-        $yearData = $this->getSalesAndProfit($startOfYear, $endOfYear, $atelierId);
-        $reports['year'] = [
-            'total_sales' => $yearData['sales'],
-            'total_profit' => $yearData['profit'],
-            'total_returns' => $yearData['returns']
-        ];
+        $yearData = ShopSalesReportService::salesAndProfitForRange($atelierId, $startOfYear, $endOfYear);
+        $reports['year'] = $this->formatPeriodReport($yearData);
 
-        // 7. مجموع قیمت خرید و فروش کل کالاها (با توجه به موجودی)
         $productsInventory = $this->getProductsInventoryValue($atelierId);
         $reports['products_inventory'] = [
             'total_purchase_value' => $productsInventory['total_purchase_value'],
-            'total_sale_value' => $productsInventory['total_sale_value']
+            'total_sale_value' => $productsInventory['total_sale_value'],
         ];
 
-        // 8. آمار هزینه‌ها
-        $expensesStats = $this->getExpensesStatistics($atelierId);
-        $reports['expenses'] = $expensesStats;
+        $reports['expenses'] = $this->getExpensesStatistics($atelierId);
 
         $reports['meta'] = [
             'atelier_id' => $atelierId,
             'atelier_code' => Atelier::where('id', $atelierId)->value('code'),
+            'total_uncollected_installments' => ShopSalesReportService::totalUncollectedInstallments($atelierId),
         ];
 
         return response($reports, 200);
     }
 
     /**
-     * محاسبه فروش و سود برای یک تاریخ خاص (در تایم‌زون تهران)
-     * پارامتر $dateTehran باید یک Carbon instance با تایم‌زون Asia/Tehran باشد
+     * @param  array<string, float>  $data
+     * @return array<string, float>
      */
-    private function getSalesAndProfitForDate(Carbon $dateTehran, int $atelierId)
+    private function formatPeriodReport(array $data): array
     {
-        $startOfDayTehran = $dateTehran->copy()->setTimezone('Asia/Tehran')->startOfDay();
-        $endOfDayTehran = $dateTehran->copy()->setTimezone('Asia/Tehran')->endOfDay();
-        $startString = $startOfDayTehran->format('Y-m-d H:i:s');
-        $endString = $endOfDayTehran->format('Y-m-d H:i:s');
-
-        $purchases = Purchase::with(['purchasedProducts.product', 'installments'])
-            ->forAtelier($atelierId)
-            ->whereBetween('created_at', [$startString, $endString])
-            ->get();
-
-        $totalSales = 0;
-        $totalPurchase = 0;
-        $totalCreditEarned = 0;
-
-        foreach ($purchases as $purchase) {
-            // محاسبه فروش واقعی
-            // برای خریدهای اقساطی: مجموع قسط‌های پرداخت شده
-            // برای خریدهای نقدی: مبلغ کل خرید
-            // (که شامل تخفیف مستقیم discount_amount هم می‌شود)
-            // total_amount = مجموع sale_price ها - discount_amount - credit_used
-            // پس برای محاسبه فروش واقعی: actual_paid_amount + credit_used
-            // (چون credit_used از سود کسر نمی‌شود، باید به فروش اضافه شود)
-            $actualPaidAmount = $purchase->isInstallment() ? $purchase->paid_amount : $purchase->total_amount;
-            $totalSales += $actualPaidAmount + $purchase->credit_used;
-
-            // محاسبه هزینه خرید محصولات
-            foreach ($purchase->purchasedProducts as $purchasedProduct) {
-                $totalPurchase += $purchasedProduct->quantity * $purchasedProduct->purchase_price;
-            }
-
-            // جمع کردن اعتبار هدیه داده شده (که باید از سود کسر شود)
-            $totalCreditEarned += $purchase->credit_earned;
-        }
-
-        // محاسبه برگشتی‌ها با اطلاعات محصولات
-        $returnedProducts = ReturnedProduct::with('product')
-            ->forAtelier($atelierId)
-            ->whereBetween('created_at', [$startString, $endString])
-            ->get();
-
-        [$totalReturns, $totalReturnsPurchase] = $this->sumReturnedProducts($returnedProducts);
-
-        // فروش خالص = فروش - برگشتی‌ها
-        $netSales = $totalSales - $totalReturns;
-
-        // هزینه خرید خالص = هزینه خرید - هزینه خرید کالاهای برگشتی
-        // (فقط کالاهایی که واقعاً فروخته و برگشت نشده‌اند)
-        $netPurchase = $totalPurchase - $totalReturnsPurchase;
-
-        // سود = فروش خالص - هزینه خرید خالص - اعتبار هدیه داده شده
-        // چون هزینه خرید کالاهای برگشتی را از totalPurchase کم کرده‌ایم،
-        // دیگر نیاز به کسر سود برگشتی نیست
-        $totalProfit = $netSales - $netPurchase - $totalCreditEarned;
-
         return [
-            'sales' => (float) $netSales, // فروش خالص (منهای برگشتی‌ها)
-            'profit' => (float) $totalProfit,
-            'returns' => (float) $totalReturns,
-            'gross_sales' => (float) $totalSales // فروش خام (قبل از کسر برگشتی‌ها)
+            'total_sales' => $data['sales'],
+            'total_profit' => $data['profit'],
+            'total_returns' => $data['returns'],
+            'gross_sales' => $data['gross_sales'],
+            'credit_earned_from_purchases' => $data['credit_earned_from_purchases'],
+            'manual_credit_granted' => $data['manual_credit_granted'],
+            'total_credit_granted' => $data['total_credit_granted'],
+            'card_amount' => $data['card_amount'],
+            'cash_amount' => $data['cash_amount'],
+            'cash_and_card_total' => $data['cash_and_card_total'],
+            'installments_collected' => $data['installments_collected'],
+            'total_collected' => $data['total_collected'],
+            'uncollected_installments' => $data['uncollected_installments'],
+            'credit_used_total' => $data['credit_used_total'],
+            'settlement_total' => $data['settlement_total'],
         ];
     }
 
-    private function getSalesAndProfit($startDate, $endDate, int $atelierId)
-    {
-        $startString = $startDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
-        $endString = $endDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
-
-        $purchases = Purchase::with(['purchasedProducts.product', 'installments'])
-            ->forAtelier($atelierId)
-            ->whereBetween('created_at', [$startString, $endString])
-            ->get();
-
-        $totalSales = 0;
-        $totalPurchase = 0;
-        $totalCreditEarned = 0;
-
-        foreach ($purchases as $purchase) {
-            // محاسبه فروش واقعی
-            // برای خریدهای اقساطی: مجموع قسط‌های پرداخت شده
-            // برای خریدهای نقدی: مبلغ کل خرید
-            // (که شامل تخفیف مستقیم discount_amount هم می‌شود)
-            // total_amount = مجموع sale_price ها - discount_amount - credit_used
-            // پس برای محاسبه فروش واقعی: actual_paid_amount + credit_used
-            // (چون credit_used از سود کسر نمی‌شود، باید به فروش اضافه شود)
-            $actualPaidAmount = $purchase->isInstallment() ? $purchase->paid_amount : $purchase->total_amount;
-            $totalSales += $actualPaidAmount + $purchase->credit_used;
-
-            // محاسبه هزینه خرید محصولات
-            foreach ($purchase->purchasedProducts as $purchasedProduct) {
-                $totalPurchase += $purchasedProduct->quantity * $purchasedProduct->purchase_price;
-            }
-
-            // جمع کردن اعتبار هدیه داده شده (که باید از سود کسر شود)
-            $totalCreditEarned += $purchase->credit_earned;
-        }
-
-        // محاسبه برگشتی‌ها با اطلاعات محصولات
-        $returnedProducts = ReturnedProduct::with('product')
-            ->forAtelier($atelierId)
-            ->whereBetween('created_at', [$startString, $endString])
-            ->get();
-
-        [$totalReturns, $totalReturnsPurchase] = $this->sumReturnedProducts($returnedProducts);
-
-        // فروش خالص = فروش - برگشتی‌ها
-        $netSales = $totalSales - $totalReturns;
-
-        // هزینه خرید خالص = هزینه خرید - هزینه خرید کالاهای برگشتی
-        // (فقط کالاهایی که واقعاً فروخته و برگشت نشده‌اند)
-        $netPurchase = $totalPurchase - $totalReturnsPurchase;
-
-        // سود = فروش خالص - هزینه خرید خالص - اعتبار هدیه داده شده
-        // چون هزینه خرید کالاهای برگشتی را از totalPurchase کم کرده‌ایم،
-        // دیگر نیاز به کسر سود برگشتی نیست
-        $totalProfit = $netSales - $netPurchase - $totalCreditEarned;
-
-        return [
-            'sales' => (float) $netSales, // فروش خالص (منهای برگشتی‌ها)
-            'profit' => (float) $totalProfit,
-            'returns' => (float) $totalReturns,
-            'gross_sales' => (float) $totalSales // فروش خام (قبل از کسر برگشتی‌ها)
-        ];
-    }
-
-    /**
-     * @param  \Illuminate\Support\Collection<int, \App\Models\ReturnedProduct>  $returnedProducts
-     * @return array{0: float, 1: float}
-     */
-    private function sumReturnedProducts($returnedProducts): array
-    {
-        $totalReturns = 0.0;
-        $totalReturnsPurchase = 0.0;
-
-        foreach ($returnedProducts as $returned) {
-            $salePrice = (float) $returned->sale_price;
-            $purchasePrice = $returned->product
-                ? (float) $returned->product->purchase_price
-                : 0.0;
-
-            $totalReturns += $salePrice;
-            $totalReturnsPurchase += $purchasePrice;
-        }
-
-        return [$totalReturns, $totalReturnsPurchase];
-    }
-
-    /**
-     * محاسبه مجموع قیمت خرید و فروش کل کالاها با توجه به موجودی
-     */
     private function getProductsInventoryValue(int $atelierId)
     {
         $products = Product::where('atelier_id', $atelierId)
             ->select(
-            DB::raw('SUM(purchase_price * quantity) as total_purchase_value'),
-            DB::raw('SUM(sale_price * quantity) as total_sale_value')
-        )->first();
+                DB::raw('SUM(purchase_price * quantity) as total_purchase_value'),
+                DB::raw('SUM(sale_price * quantity) as total_sale_value')
+            )->first();
 
         return [
             'total_purchase_value' => (float) ($products->total_purchase_value ?? 0),
-            'total_sale_value' => (float) ($products->total_sale_value ?? 0)
+            'total_sale_value' => (float) ($products->total_sale_value ?? 0),
         ];
     }
 
-    /**
-     * محاسبه آمار هزینه‌ها
-     */
     private function getExpensesStatistics(int $atelierId)
     {
         $expenseQuery = Expense::where('atelier_id', $atelierId);
 
-        // کل هزینه‌ها (مجموع همه)
         $totalExpenses = (clone $expenseQuery)->sum('amount');
-
-        // کل هزینه‌های جاری
         $totalCurrentExpenses = (clone $expenseQuery)->where('type', 'جاری')->sum('amount');
-
-        // کل هزینه‌های سرمایه
         $totalCapitalExpenses = (clone $expenseQuery)->where('type', 'سرمایه')->sum('amount');
 
-        // تفکیک هزینه‌ها بر اساس user_name (جاری و سرمایه)
         $expensesByUser = Expense::where('atelier_id', $atelierId)->select(
             'user_name',
             DB::raw('SUM(CASE WHEN type = "جاری" THEN amount ELSE 0 END) as total_current'),
             DB::raw('SUM(CASE WHEN type = "سرمایه" THEN amount ELSE 0 END) as total_capital'),
             DB::raw('SUM(amount) as total')
         )
-        ->groupBy('user_name')
-        ->orderBy('user_name')
-        ->get();
+            ->groupBy('user_name')
+            ->orderBy('user_name')
+            ->get();
 
         return [
             'total_expenses' => (float) $totalExpenses,
             'total_current_expenses' => (float) $totalCurrentExpenses,
             'total_capital_expenses' => (float) $totalCapitalExpenses,
-            'expenses_by_user' => $expensesByUser
+            'expenses_by_user' => $expensesByUser,
         ];
     }
 }
-

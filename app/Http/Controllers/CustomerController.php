@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Atelier;
 use App\Models\CustomerPhone;
 use App\Models\Purchase;
 use App\Models\UserShiksho;
@@ -19,16 +18,12 @@ class CustomerController extends Controller
     {
         $validated = $request->validate([
             'phone' => 'required|string|digits:11',
-            'atelier_code' => 'nullable|string|max:50',
         ]);
 
-        $atelierId = null;
-        if (! empty($validated['atelier_code'])) {
-            $atelierId = Atelier::where('code', $validated['atelier_code'])->value('id');
-        }
+        $atelierId = $this->shopAtelierIdOrAbort($request);
 
         $userShiksho = UserShiksho::firstOrCreate(
-            ['phone' => $validated['phone']],
+            ['phone' => $validated['phone'], 'atelier_id' => $atelierId],
             [
                 'credit' => 0,
                 'installment_credit' => 0,
@@ -39,14 +34,23 @@ class CustomerController extends Controller
 
         $smsSent = false;
         $smsError = null;
-        $shopBrand = SmsTools::shopSmsBrand($atelierId ? (int) $atelierId : null);
+        $shopBrand = SmsTools::shopSmsBrand($atelierId);
         if ($userShiksho->wasRecentlyCreated) {
             $welcomeMessage = "به باشگاه مشتریان {$shopBrand} خوش آمدید";
             try {
-                SmsTools::sendSms($validated['phone'], $welcomeMessage);
+                SmsTools::sendShopSms(
+                    $validated['phone'],
+                    $welcomeMessage,
+                    null,
+                    null,
+                    'customer_register',
+                    $atelierId
+                );
                 $smsSent = true;
+            } catch (\App\Exceptions\InsufficientShopSmsQuotaException $e) {
+                $smsSent = false;
+                $smsError = $e->getMessage();
             } catch (\Exception $e) {
-                // عدم موفقیت در ارسال پیامک نباید مانع ثبت کاربر شود
                 $smsSent = false;
                 $smsError = $e->getMessage();
             }

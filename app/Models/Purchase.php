@@ -139,5 +139,79 @@ class Purchase extends Model
         }
         return $this->total_amount;
     }
+
+    /**
+     * جمع فروش خطوط باقی‌مانده روی فاکتور.
+     */
+    public function remainingLineSalesTotal(): float
+    {
+        if (! $this->relationLoaded('purchasedProducts')) {
+            $this->load('purchasedProducts');
+        }
+
+        return round((float) $this->purchasedProducts->sum(function ($pp) {
+            return (float) $pp->sale_price * (int) $pp->quantity;
+        }), 2);
+    }
+
+    /**
+     * جمع بهای تمام‌شده خطوط باقی‌مانده.
+     */
+    public function remainingLinePurchaseCost(): float
+    {
+        if (! $this->relationLoaded('purchasedProducts')) {
+            $this->load('purchasedProducts');
+        }
+
+        return round((float) $this->purchasedProducts->sum(function ($pp) {
+            return (float) $pp->purchase_price * (int) $pp->quantity;
+        }), 2);
+    }
+
+    /**
+     * همگام‌سازی مبالغ فاکتور با اقلام باقی‌مانده (بعد از برگشت).
+     */
+    public function syncAmountsFromRemainingLines(): void
+    {
+        $lineTotal = $this->remainingLineSalesTotal();
+
+        if ($lineTotal <= 0) {
+            $this->total_amount = 0;
+            $this->card_amount = 0;
+            $this->cash_amount = 0;
+            $this->credit_used = 0;
+            $this->credit_earned = 0;
+
+            return;
+        }
+
+        if ($this->isInstallment()) {
+            $this->total_amount = $lineTotal;
+
+            return;
+        }
+
+        $creditUsed = min((float) $this->credit_used, $lineTotal);
+        $this->credit_used = $creditUsed;
+        $payable = round($lineTotal - $creditUsed, 2);
+        $this->total_amount = $payable;
+
+        $card = (float) $this->card_amount;
+        $cash = (float) $this->cash_amount;
+        $settlement = $card + $cash;
+
+        if ($settlement > 0 && abs($settlement - $payable) > 0.02) {
+            $ratio = $payable / $settlement;
+            $this->card_amount = round($card * $ratio, 2);
+            $this->cash_amount = round($cash * $ratio, 2);
+            $fix = round($payable - ((float) $this->card_amount + (float) $this->cash_amount), 2);
+            if (abs($fix) >= 0.01) {
+                $this->cash_amount = round((float) $this->cash_amount + $fix, 2);
+            }
+        } elseif ($settlement <= 0 && $payable > 0) {
+            $this->cash_amount = $payable;
+            $this->card_amount = 0;
+        }
+    }
 }
 

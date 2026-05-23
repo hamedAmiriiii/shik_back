@@ -129,8 +129,9 @@ return [
     */
 
     'custom' => [
-        'attribute-name' => [
-            'rule-name' => 'custom-message',
+        'barcode' => [
+            'unique' => 'این بارکد قبلاً برای کالای دیگری در همین فروشگاه ثبت شده است.',
+            'required' => 'وارد کردن بارکد الزامی است.',
         ],
     ],
 
@@ -179,7 +180,11 @@ return [
         "time" => "زمان",
         "available" => "موجود",
         "notavailable" => "موجود نیست",
-        "size" => "اندازه"
+        "size" => "اندازه",
+        "barcode" => "بارکد",
+        "purchase_price" => "قیمت خرید",
+        "sale_price" => "قیمت فروش",
+        "quantity" => "موجودی",
     ],
 
 ];

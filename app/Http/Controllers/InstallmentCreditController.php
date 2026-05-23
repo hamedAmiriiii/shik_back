@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\UserCreditGrant;
 use App\Models\UserShiksho;
+use App\Services\UserCreditGrantService;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 
@@ -89,7 +91,23 @@ class InstallmentCreditController extends Controller
         $oldRegularCredit = $user->credit;
         $user->installment_credit = $installmentCredit;
         $user->credit = $regularCredit;
+        $user->credit_last_updated_at = now();
         $user->save();
+
+        UserCreditGrantService::recordManualChange(
+            $atelierId,
+            $phone,
+            UserCreditGrant::TYPE_REGULAR,
+            (float) $oldRegularCredit,
+            $regularCredit
+        );
+        UserCreditGrantService::recordManualChange(
+            $atelierId,
+            $phone,
+            UserCreditGrant::TYPE_INSTALLMENT,
+            (float) $oldInstallmentCredit,
+            $installmentCredit
+        );
 
         $installmentFormatted = number_format($installmentCredit, 0);
         $creditFormatted = number_format($regularCredit, 0);
@@ -138,10 +156,27 @@ class InstallmentCreditController extends Controller
         $oldRegularCredit = $user->credit;
 
         if ($request->has('installment_credit')) {
-            $user->installment_credit = (float) $request->input('installment_credit');
+            $newInstallment = (float) $request->input('installment_credit');
+            UserCreditGrantService::recordManualChange(
+                $atelierId,
+                $phone,
+                UserCreditGrant::TYPE_INSTALLMENT,
+                (float) $oldInstallmentCredit,
+                $newInstallment
+            );
+            $user->installment_credit = $newInstallment;
         }
         if ($request->has('credit')) {
-            $user->credit = (float) $request->input('credit');
+            $newRegular = (float) $request->input('credit');
+            UserCreditGrantService::recordManualChange(
+                $atelierId,
+                $phone,
+                UserCreditGrant::TYPE_REGULAR,
+                (float) $oldRegularCredit,
+                $newRegular
+            );
+            $user->credit = $newRegular;
+            $user->credit_last_updated_at = now();
         }
         $user->save();
 
@@ -188,8 +223,23 @@ class InstallmentCreditController extends Controller
 
         $oldInstallmentCredit = $user->installment_credit;
         $oldRegularCredit = $user->credit;
+        UserCreditGrantService::recordManualChange(
+            $atelierId,
+            $phone,
+            UserCreditGrant::TYPE_REGULAR,
+            (float) $oldRegularCredit,
+            0.0
+        );
+        UserCreditGrantService::recordManualChange(
+            $atelierId,
+            $phone,
+            UserCreditGrant::TYPE_INSTALLMENT,
+            (float) $oldInstallmentCredit,
+            0.0
+        );
         $user->installment_credit = 0;
         $user->credit = 0;
+        $user->credit_last_updated_at = now();
         $user->save();
 
         return response([

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Product;
 use App\Models\ProductImage;
 use App\Tools\ImageTools;
+use App\Tools\PriceTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
@@ -81,24 +82,10 @@ class ProductController extends Controller
             $request->merge(['barcode' => trim((string) $request->input('barcode'))]);
         }
 
-        $fields = $request->validate([
-            "name" => "required|string|max:255",
-            "purchase_price" => "required|numeric|min:0",
-            "sale_price" => "required|numeric|min:0",
-            "quantity" => "required|integer|min:0",
-            'barcode' => ['nullable', 'string', 'min:1', 'max:255', $this->uniqueBarcodeRule($atelierId)],
-            'original_sale_price' => 'nullable|numeric|min:0',
-            'discount_percent' => 'nullable|numeric|min:0|max:100',
-            'manufacturer_id' => 'nullable|exists:manufacturers,id',
-            'images' => 'nullable|array',
-            'images.*' => 'nullable|string',
-            'category_ids' => 'nullable|array',
-            'category_ids.*' => 'exists:categories,id',
-            'sizes' => 'nullable|array', // لیست سایزها
-            'sizes.*' => 'string',
-            'colors' => 'nullable|array', // لیست رنگ‌ها
-            'colors.*' => 'string',
-        ]);
+        $fields = $request->validate(
+            $this->productValidationRules($atelierId),
+            $this->productValidationMessages()
+        );
 
         // محاسبه قیمت با تخفیف در صورت وجود
         if (isset($fields['discount_percent']) && $fields['discount_percent'] > 0) {
@@ -108,15 +95,15 @@ class ProductController extends Controller
             // محاسبه تخفیف
             $discountAmount = ($basePrice * $fields['discount_percent']) / 100;
             $priceAfterDiscount = max(0, $basePrice - $discountAmount);
-            
-            // رند کردن به عدد فرد که دهگان و صدگانش 0 باشد
-            $fields['sale_price'] = $this->roundToOddWithZeroEnding($priceAfterDiscount);
-            $fields['original_sale_price'] = $basePrice;
+            $fields['sale_price'] = PriceTools::roundSalePrice((float) $priceAfterDiscount);
+            $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $basePrice);
             unset($fields['discount_percent']); // حذف از fields چون در دیتابیس نیست
         } else {
-            // اگر original_sale_price ارسال نشده باشد، آن را برابر sale_price قرار بده
+            $fields['sale_price'] = PriceTools::roundSalePrice((float) $fields['sale_price']);
             if (!isset($fields['original_sale_price'])) {
                 $fields['original_sale_price'] = $fields['sale_price'];
+            } else {
+                $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price']);
             }
         }
 
@@ -165,6 +152,44 @@ class ProductController extends Controller
         } while (Product::where('barcode', $barcode)->where('atelier_id', $atelierId)->exists());
 
         return $barcode;
+    }
+
+    private function productValidationRules(int $atelierId, ?int $ignoreProductId = null): array
+    {
+        $barcodeRules = $ignoreProductId === null
+            ? ['nullable', 'string', 'min:1', 'max:255', $this->uniqueBarcodeRule($atelierId)]
+            : ['required', 'string', 'min:1', 'max:255', $this->uniqueBarcodeRule($atelierId, $ignoreProductId)];
+
+        return [
+            'name' => 'required|string|max:255',
+            'purchase_price' => 'required|numeric|min:0',
+            'sale_price' => 'required|numeric|min:0',
+            'quantity' => 'required|integer|min:0',
+            'barcode' => $barcodeRules,
+            'original_sale_price' => 'nullable|numeric|min:0',
+            'discount_percent' => 'nullable|numeric|min:0|max:100',
+            'manufacturer_id' => 'nullable|exists:manufacturers,id',
+            'images' => 'nullable|array',
+            'images.*' => 'nullable|string',
+            'category_ids' => 'nullable|array',
+            'category_ids.*' => 'exists:categories,id',
+            'sizes' => 'nullable|array',
+            'sizes.*' => 'string',
+            'colors' => 'nullable|array',
+            'colors.*' => 'string',
+        ];
+    }
+
+    private function productValidationMessages(): array
+    {
+        return [
+            'barcode.unique' => 'این بارکد قبلاً برای کالای دیگری در همین فروشگاه ثبت شده است.',
+            'barcode.required' => 'وارد کردن بارکد الزامی است.',
+            'name.required' => 'نام کالا الزامی است.',
+            'purchase_price.required' => 'قیمت خرید الزامی است.',
+            'sale_price.required' => 'قیمت فروش الزامی است.',
+            'quantity.required' => 'موجودی الزامی است.',
+        ];
     }
 
     /**
@@ -359,24 +384,10 @@ class ProductController extends Controller
             $request->merge(['barcode' => trim((string) $request->input('barcode'))]);
         }
 
-        $fields = $request->validate([
-            "name" => "required|string|max:255",
-            "purchase_price" => "required|numeric|min:0",
-            "sale_price" => "required|numeric|min:0",
-            "quantity" => "required|integer|min:0",
-            'barcode' => ['required', 'string', 'min:1', 'max:255', $this->uniqueBarcodeRule($atelierId, $product->id)],
-            'original_sale_price' => 'nullable|numeric|min:0',
-            'discount_percent' => 'nullable|numeric|min:0|max:100',
-            'manufacturer_id' => 'nullable|exists:manufacturers,id',
-            'images' => 'nullable|array',
-            'images.*' => 'nullable|string',
-            'category_ids' => 'nullable|array',
-            'category_ids.*' => 'exists:categories,id',
-            'sizes' => 'nullable|array', // لیست سایزها
-            'sizes.*' => 'string',
-            'colors' => 'nullable|array', // لیست رنگ‌ها
-            'colors.*' => 'string',
-        ]);
+        $fields = $request->validate(
+            $this->productValidationRules($atelierId, $product->id),
+            $this->productValidationMessages()
+        );
 
         // محاسبه قیمت با تخفیف در صورت وجود
         if (isset($fields['discount_percent'])) {
@@ -387,22 +398,20 @@ class ProductController extends Controller
                 // محاسبه تخفیف
                 $discountAmount = ($basePrice * $fields['discount_percent']) / 100;
                 $priceAfterDiscount = max(0, $basePrice - $discountAmount);
-                
-                // رند کردن به عدد فرد که دهگان و صدگانش 0 باشد
-                $fields['sale_price'] = $this->roundToOddWithZeroEnding($priceAfterDiscount);
-                $fields['original_sale_price'] = $basePrice;
-            } 
+                $fields['sale_price'] = PriceTools::roundSalePrice((float) $priceAfterDiscount);
+                $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $basePrice);
+            }
             unset($fields['discount_percent']); // حذف از fields چون در دیتابیس نیست
         } else {
-            // اگر original_sale_price ارسال نشده باشد، از original_sale_price موجود استفاده کن
+            $fields['sale_price'] = PriceTools::roundSalePrice((float) $fields['sale_price']);
             if (!isset($fields['original_sale_price'])) {
-                // اگر محصول original_sale_price دارد، آن را حفظ کن
                 if ($product->original_sale_price !== null) {
-                    $fields['original_sale_price'] = $product->original_sale_price;
+                    $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $product->original_sale_price);
                 } else {
-                    // اگر ندارد، برابر sale_price قرار بده
                     $fields['original_sale_price'] = $fields['sale_price'];
                 }
+            } else {
+                $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price']);
             }
         }
 
@@ -495,10 +504,8 @@ class ProductController extends Controller
             // محاسبه تخفیف بر اساس original_sale_price
             $discountAmount = ($baseSalePrice * $discountPercent) / 100;
             $priceAfterDiscount = max(0, $baseSalePrice - $discountAmount);
-            
-            // رند کردن به عدد فرد که دهگان و صدگانش 0 باشد
-            $newSalePrice = $this->roundToOddWithZeroEnding($priceAfterDiscount);
-            
+            $newSalePrice = PriceTools::roundSalePrice((float) $priceAfterDiscount);
+
             // به‌روزرسانی sale_price (قیمت با تخفیف)
             $product->sale_price = $newSalePrice;
             $product->save();
@@ -767,34 +774,4 @@ class ProductController extends Controller
         return $product;
     }
 
-    /**
-     * رند کردن به عدد فرد که دهگان و صدگانش 0 باشد
-     * (همان متد در PurchasedProductController)
-     */
-    private function roundToOddWithZeroEnding($number)
-    {
-        if ($number <= 0) {
-            return 0;
-        }
-    
-        $baseThousand = floor($number / 1000);
-    
-        // اگر زوج بود، یکی کم کن تا فرد شود
-        if ($baseThousand % 2 === 0) {
-            $lowerOdd = $baseThousand - 1;
-        } else {
-            $lowerOdd = $baseThousand;
-        }
-    
-        // فرد بعدی
-        $upperOdd = $lowerOdd + 2;
-    
-        $lowerValue = $lowerOdd * 1000;
-        $upperValue = $upperOdd * 1000;
-    
-        // انتخاب نزدیک‌ترین
-        return (abs($number - $lowerValue) <= abs($number - $upperValue))
-            ? $lowerValue
-            : $upperValue;
-    }
 }

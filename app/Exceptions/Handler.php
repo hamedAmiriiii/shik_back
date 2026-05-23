@@ -5,6 +5,7 @@ namespace App\Exceptions;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class Handler extends ExceptionHandler
@@ -73,5 +74,26 @@ class Handler extends ExceptionHandler
         return response()->json([
             'message' => 'احراز هویت نشد. توکن را در هدر Authorization: Bearer ... یا در body (access_token / token) بفرستید.',
         ], 401);
+    }
+
+    /**
+     * پاسخ JSON اعتبارسنجی با پیام فارسی (اولین خطا در message).
+     */
+    protected function invalidJson($request, ValidationException $exception)
+    {
+        $errors = $exception->errors();
+        $message = 'داده‌های ارسالی معتبر نیست.';
+
+        foreach ($errors as $fieldErrors) {
+            if (!empty($fieldErrors[0])) {
+                $message = $fieldErrors[0];
+                break;
+            }
+        }
+
+        return response()->json([
+            'message' => $message,
+            'errors' => $errors,
+        ], $exception->status);
     }
 }

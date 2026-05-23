@@ -11,6 +11,7 @@ use App\Models\CustomerPhone;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
+use App\Tools\PriceTools;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
@@ -199,18 +200,13 @@ class PurchasedProductController extends Controller
             $quantity = $productData['quantity'];
             
             if (isset($productData['sale_price']) && $productData['sale_price'] !== null) {
-                // اگر sale_price مستقیم داده شده
-                $salePrice = $productData['sale_price'];
+                $salePrice = PriceTools::roundSalePrice((float) $productData['sale_price']);
             } elseif (isset($productData['discount_percent']) && $productData['discount_percent'] > 0) {
-                // اگر discount_percent داده شده
                 $discountAmount = ($baseSalePrice * $productData['discount_percent']) / 100;
                 $priceAfterDiscount = max(0, $baseSalePrice - $discountAmount);
-                
-                // رند کردن به عدد فرد که سه رقم آخرش 0 باشد
-                $salePrice = $this->roundToOddWithZeroEnding($priceAfterDiscount);
+                $salePrice = PriceTools::roundSalePrice((float) $priceAfterDiscount);
             } else {
-                // بدون تخفیف
-                $salePrice = $baseSalePrice;
+                $salePrice = PriceTools::roundSalePrice((float) $baseSalePrice);
             }
             
             $originalTotalAmount += $quantity * $salePrice;
@@ -435,15 +431,6 @@ class PurchasedProductController extends Controller
     }
 
     /**
-     * رند کردن به عدد فرد که دهگان و صدگانش 0 باشد
-     * مثال: 130.5 -> 101, 1300 -> 1301, 1450 -> 1501
-     * 
-     * @param float $number
-     * @return float
-     */
-  
-
-    /**
      * تسویهٔ پرداخت در لحظهٔ فروش: کارت / نقد دستی (جمع باید برابر مبلغ پرداختی باشد).
      *
      * @return array{card_amount: float, cash_amount: float}
@@ -477,48 +464,9 @@ class PurchasedProductController extends Controller
         ];
     }
 
-     private function roundToOddWithZeroEnding($number)
-     {
-         if ($number <= 0) {
-             return 0;
-         }
-     
-         $baseThousand = floor($number / 1000);
-     
-         // اگر زوج بود، یکی کم کن تا فرد شود
-         if ($baseThousand % 2 === 0) {
-             $lowerOdd = $baseThousand - 1;
-         } else {
-             $lowerOdd = $baseThousand;
-         }
-     
-         // فرد بعدی
-         $upperOdd = $lowerOdd + 2;
-     
-         $lowerValue = $lowerOdd * 1000;
-         $upperValue = $upperOdd * 1000;
-     
-        // انتخاب نزدیک‌ترین
-        return (abs($number - $lowerValue) <= abs($number - $upperValue))
-            ? $lowerValue
-            : $upperValue;
-    }
-
-    /**
-     * رند کردن به عددی که سه رقم آخرش 0 باشد (یکان، دهگان، صدگان)
-     * مثال: 1234567 -> 1234000, 123456 -> 123000, 123789 -> 124000
-     * 
-     * @param float $number
-     * @return float
-     */
     private function roundToThreeZeroEnding($number)
     {
-        if ($number <= 0) {
-            return 0;
-        }
-
-        // رند کردن به نزدیک‌ترین عدد که سه رقم آخرش 0 باشد
-        return round($number / 1000) * 1000;
+        return PriceTools::roundSalePrice((float) $number);
     }
      
 
@@ -612,9 +560,26 @@ class PurchasedProductController extends Controller
         $product = $purchasedProduct->product;
         $product->increment('quantity', $purchasedProduct->quantity);
 
-        // کم کردن مبلغ از total_amount خرید
-        $returnAmount = $purchasedProduct->sale_price * $purchasedProduct->quantity;
-        $purchase->total_amount = max(0, $purchase->total_amount - $returnAmount);
+        $purchase->load('purchasedProducts');
+        $returnAmount = (float) ($purchasedProduct->sale_price * $purchasedProduct->quantity);
+        $lineTotalBeforeReturn = (float) $purchase->purchasedProducts->sum(function ($pp) {
+            return (float) $pp->sale_price * (int) $pp->quantity;
+        });
+        $ratio = $lineTotalBeforeReturn > 0 ? min(1, $returnAmount / $lineTotalBeforeReturn) : 1;
+
+        $creditUsedRefund = round((float) $purchase->credit_used * $ratio, 2);
+
+        if ($creditUsedRefund > 0 && $purchase->phone) {
+            $userShikshoQuery = UserShiksho::where('phone', $purchase->phone);
+            if ($purchase->atelier_id !== null) {
+                $userShikshoQuery->where('atelier_id', $purchase->atelier_id);
+            }
+            $userShiksho = $userShikshoQuery->first();
+            if ($userShiksho) {
+                $userShiksho->credit = (float) $userShiksho->credit + $creditUsedRefund;
+                $userShiksho->save();
+            }
+        }
 
         // برگشت اعتبار کسب شده متناسب با مبلغ برگشتی
         $creditReturned = 0;
@@ -637,9 +602,14 @@ class PurchasedProductController extends Controller
             }
         }
 
+        // حذف محصول از لیست خرید
+        $purchasedProduct->delete();
+
+        $purchase->load('purchasedProducts');
+        $purchase->syncAmountsFromRemainingLines();
         $purchase->save();
 
-        // ذخیره اطلاعات برای پاسخ قبل از حذف
+        // ذخیره اطلاعات برای پاسخ
         $returnedInfo = [
             'product_id' => $purchasedProduct->product_id,
             'product_name' => $product->name,
@@ -649,10 +619,6 @@ class PurchasedProductController extends Controller
             'credit_returned' => $creditReturned,
         ];
 
-        // حذف محصول از لیست خرید
-        $purchasedProduct->delete();
-
-        // بارگذاری مجدد خرید با محصولات باقیمانده
         $purchase->load('purchasedProducts.product');
 
         return response([
