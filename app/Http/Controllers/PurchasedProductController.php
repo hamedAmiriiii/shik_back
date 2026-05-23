@@ -15,6 +15,7 @@ use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Morilog\Jalali\Jalalian;
 
 
@@ -126,7 +127,10 @@ class PurchasedProductController extends Controller
         $request->validate([
             'phone' => 'nullable|string|digits:11',
             'products' => 'required|array|min:1',
-            'products.*.product_id' => 'required|exists:products,id',
+            'products.*.product_id' => [
+                'required',
+                Rule::exists('products', 'id')->whereNull('deleted_at'),
+            ],
             'products.*.quantity' => 'required|integer|min:1',
             'products.*.sale_price' => 'nullable|numeric|min:0', // قیمت فروش با تخفیف (اختیاری)
             'products.*.discount_percent' => 'nullable|numeric|min:0|max:100', // درصد تخفیف (اختیاری)

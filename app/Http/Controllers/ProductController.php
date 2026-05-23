@@ -77,19 +77,16 @@ class ProductController extends Controller
             ], 422));
         }
 
+        if ($request->has('barcode')) {
+            $request->merge(['barcode' => trim((string) $request->input('barcode'))]);
+        }
+
         $fields = $request->validate([
             "name" => "required|string|max:255",
             "purchase_price" => "required|numeric|min:0",
             "sale_price" => "required|numeric|min:0",
             "quantity" => "required|integer|min:0",
-            'barcode' => [
-                'nullable',
-                'string',
-                'max:255',
-                Rule::unique('products', 'barcode')->where(function ($query) use ($atelierId) {
-                    return $query->where('atelier_id', $atelierId);
-                }),
-            ],
+            'barcode' => ['nullable', 'string', 'min:1', 'max:255', $this->uniqueBarcodeRule($atelierId)],
             'original_sale_price' => 'nullable|numeric|min:0',
             'discount_percent' => 'nullable|numeric|min:0|max:100',
             'manufacturer_id' => 'nullable|exists:manufacturers,id',
@@ -123,19 +120,20 @@ class ProductController extends Controller
             }
         }
 
-        // اگر بارکد ارسال نشده باشد، ابتدا یک بارکد موقت ایجاد می‌کنیم
-        // سپس بعد از ایجاد محصول، آن را به ID تغییر می‌دهیم
-        $hasBarcode = !empty($fields['barcode']);
-        if (!$hasBarcode) {
-            // ایجاد یک بارکد موقت برای ایجاد محصول
+        $sellerBarcode = isset($fields['barcode']) && $fields['barcode'] !== ''
+            ? (string) $fields['barcode']
+            : null;
+
+        if ($sellerBarcode !== null) {
+            $fields['barcode'] = $sellerBarcode;
+        } else {
             $fields['barcode'] = $this->generateTemporaryBarcode($atelierId);
         }
 
         $fields['atelier_id'] = $atelierId;
         $product = Product::create($fields);
 
-        // اگر بارکد ارسال نشده بود، آن را به ID محصول تغییر می‌دهیم
-        if (!$hasBarcode) {
+        if ($sellerBarcode === null) {
             $product->barcode = (string) $product->id;
             $product->save();
         }
@@ -167,6 +165,22 @@ class ProductController extends Controller
         } while (Product::where('barcode', $barcode)->where('atelier_id', $atelierId)->exists());
 
         return $barcode;
+    }
+
+    /**
+     * قانون یکتایی بارکد در همان فروشگاه (محصول‌های حذف‌شده از لیست شمرده نمی‌شوند).
+     */
+    private function uniqueBarcodeRule(int $atelierId, ?int $ignoreProductId = null): \Illuminate\Validation\Rules\Unique
+    {
+        $rule = Rule::unique('products', 'barcode')->where(function ($query) use ($atelierId) {
+            return $query->where('atelier_id', $atelierId)->whereNull('deleted_at');
+        });
+
+        if ($ignoreProductId !== null) {
+            $rule->ignore($ignoreProductId);
+        }
+
+        return $rule;
     }
 
     /**
@@ -341,19 +355,16 @@ class ProductController extends Controller
             return response(['message' => 'محصول یافت نشد'], 404);
         }
 
+        if ($request->has('barcode')) {
+            $request->merge(['barcode' => trim((string) $request->input('barcode'))]);
+        }
+
         $fields = $request->validate([
             "name" => "required|string|max:255",
             "purchase_price" => "required|numeric|min:0",
             "sale_price" => "required|numeric|min:0",
             "quantity" => "required|integer|min:0",
-            'barcode' => [
-                'required',
-                'string',
-                'max:255',
-                Rule::unique('products', 'barcode')->ignore($product->id)->where(function ($query) use ($atelierId) {
-                    return $query->where('atelier_id', $atelierId);
-                }),
-            ],
+            'barcode' => ['required', 'string', 'min:1', 'max:255', $this->uniqueBarcodeRule($atelierId, $product->id)],
             'original_sale_price' => 'nullable|numeric|min:0',
             'discount_percent' => 'nullable|numeric|min:0|max:100',
             'manufacturer_id' => 'nullable|exists:manufacturers,id',
@@ -420,7 +431,7 @@ class ProductController extends Controller
     }
 
     /**
-     * حذف محصول
+     * حذف از لیست (soft delete) — رکورد و سابقه خرید در دیتابیس می‌ماند.
      */
     public function destroy(Request $request, Product $product)
     {
@@ -434,11 +445,9 @@ class ProductController extends Controller
             return response(['message' => 'محصول یافت نشد'], 404);
         }
 
-        // حذف عکس‌های محصول
-        $this->deleteProductImages($product);
-        
         $product->delete();
-        return response(['message' => 'محصول با موفقیت حذف شد']);
+
+        return response(['message' => 'محصول از لیست حذف شد. سابقه فروش حفظ شده است.']);
     }
 
     /**

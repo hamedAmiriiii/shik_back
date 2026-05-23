@@ -15,6 +15,7 @@ use App\Models\CustomerAddress;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class CartController extends Controller
 {
@@ -82,7 +83,10 @@ class CartController extends Controller
 
         $request->validate([
             'products' => 'required|array|min:1',
-            'products.*.product_id' => 'required|exists:products,id',
+            'products.*.product_id' => [
+                'required',
+                Rule::exists('products', 'id')->whereNull('deleted_at'),
+            ],
             'products.*.quantity' => 'required|integer|min:1',
             'products.*.size' => 'nullable|string|max:255', // سایز انتخاب شده (اختیاری)
             'products.*.color' => 'nullable|string|max:255', // رنگ انتخاب شده (اختیاری)
