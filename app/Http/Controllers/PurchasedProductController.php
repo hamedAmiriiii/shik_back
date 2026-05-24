@@ -567,7 +567,7 @@ class PurchasedProductController extends Controller
         });
         $ratio = $lineTotalBeforeReturn > 0 ? min(1, $returnAmount / $lineTotalBeforeReturn) : 1;
 
-        $creditUsedRefund = round((float) $purchase->credit_used * $ratio, 2);
+        $creditUsedRefund = \App\Tools\PriceTools::roundToThousand((float) $purchase->credit_used * $ratio);
 
         if ($creditUsedRefund > 0 && $purchase->phone) {
             $userShikshoQuery = UserShiksho::where('phone', $purchase->phone);

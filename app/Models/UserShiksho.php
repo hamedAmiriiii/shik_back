@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Tools\PriceTools;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -49,10 +50,7 @@ class UserShiksho extends Model
             $credit = $purchaseAmount * 0.02;
         }
 
-        // رند کردن به نزدیک‌ترین عدد با سه رقم آخر 0
-        $credit = round($credit / 1000) * 1000;
-
-        return $credit;
+        return PriceTools::roundToThousand((float) $credit);
     }
 
     /**
@@ -83,8 +81,8 @@ class UserShiksho extends Model
             $user->save();
         }
 
-        // اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود
-        $user->credit = $creditAmount;
+        // اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود (رند به هزار)
+        $user->credit = PriceTools::roundToThousand((float) $creditAmount);
         $user->credit_last_updated_at = now();
         $user->last_warning_sent_at = null; // ریست کردن هشدار برای اعتبار جدید
         $user->save();
@@ -134,7 +132,7 @@ class UserShiksho extends Model
      */
     public function addInstallmentCredit($amount)
     {
-        $this->installment_credit += $amount;
+        $this->installment_credit = PriceTools::roundToThousand((float) $this->installment_credit + (float) $amount);
         $this->save();
     }
 }

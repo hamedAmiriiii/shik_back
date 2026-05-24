@@ -9,6 +9,14 @@ class PriceTools
      */
     public static function roundSalePrice(float $amount): float
     {
+        return self::roundToThousand($amount);
+    }
+
+    /**
+     * گرد کردن مبلغ اعتبار به نزدیک‌ترین هزار تومان.
+     */
+    public static function roundToThousand(float $amount): float
+    {
         if ($amount <= 0) {
             return 0.0;
         }

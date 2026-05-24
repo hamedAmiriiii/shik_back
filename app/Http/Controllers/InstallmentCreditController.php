@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\UserCreditGrant;
 use App\Models\UserShiksho;
 use App\Services\UserCreditGrantService;
+use App\Tools\PriceTools;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 
@@ -79,8 +80,8 @@ class InstallmentCreditController extends Controller
         ]);
 
         $phone = $request->input('phone');
-        $installmentCredit = (float) $request->input('installment_credit');
-        $regularCredit = (float) $request->input('credit');
+        $installmentCredit = PriceTools::roundToThousand((float) $request->input('installment_credit'));
+        $regularCredit = PriceTools::roundToThousand((float) $request->input('credit'));
 
         $user = UserShiksho::firstOrCreate(
             ['phone' => $phone, 'atelier_id' => $atelierId],
@@ -156,7 +157,7 @@ class InstallmentCreditController extends Controller
         $oldRegularCredit = $user->credit;
 
         if ($request->has('installment_credit')) {
-            $newInstallment = (float) $request->input('installment_credit');
+            $newInstallment = PriceTools::roundToThousand((float) $request->input('installment_credit'));
             UserCreditGrantService::recordManualChange(
                 $atelierId,
                 $phone,
@@ -167,7 +168,7 @@ class InstallmentCreditController extends Controller
             $user->installment_credit = $newInstallment;
         }
         if ($request->has('credit')) {
-            $newRegular = (float) $request->input('credit');
+            $newRegular = PriceTools::roundToThousand((float) $request->input('credit'));
             UserCreditGrantService::recordManualChange(
                 $atelierId,
                 $phone,
