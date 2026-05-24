@@ -36,7 +36,7 @@ class DashboardController extends Controller
         $atelierId = $this->shopAtelierIdOrAbort($request);
 
         $days = (int) $request->input('days', 10);
-        $request->validate(['days' => 'sometimes|integer|min:1|max:31']);
+        $request->validate(['days' => 'sometimes|integer|min:1|max:62']);
         if ($request->has('days')) {
             $days = (int) $request->input('days');
         }

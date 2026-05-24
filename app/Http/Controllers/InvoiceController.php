@@ -11,12 +11,20 @@ class InvoiceController extends Controller
 {
     /**
      * نمایش لیست فاکتورها (همان فروشگاه)
+     * GET /api/invoices?per_page=20&page=1
      */
     public function index(Request $request)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
-        $query = Invoice::where('atelier_id', $atelierId)->orderBy('id', 'desc');
 
+        $query = Invoice::query()
+            ->where(function ($q) use ($atelierId) {
+                $q->where('atelier_id', $atelierId)
+                    ->orWhereNull('atelier_id');
+            })
+            ->orderBy('id', 'desc');
+
+        // جستجو بر اساس searchFilterModel
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         if ($searchDataModel) {
             $query->where(function ($q) use ($searchDataModel) {
@@ -38,6 +46,7 @@ class InvoiceController extends Controller
             });
         }
 
+        // فیلتر تاریخ
         if ($request->has('filter')) {
             if ($request->filter === 'today') {
                 $query->whereDate('date', Carbon::today());
@@ -78,13 +87,14 @@ class InvoiceController extends Controller
             }
         }
 
+        // جمع کل مبالغ فاکتورهای فیلترشده (قبل از paginate)
         $totalAmount = (clone $query)->sum('amount');
 
-        $perPage = $request->input('per_page', 20);
+        $perPage = max(1, min(100, (int) $request->input('per_page', 20)));
+        $page = max(1, (int) $request->input('page', 1));
 
-        $invoices = $query->paginate($perPage);
-
-        $invoices->withPath(url()->current());
+        $invoices = $query->paginate($perPage, ['*'], 'page', $page);
+        $invoices->appends($request->except('page'));
 
         $invoicesArray = $invoices->toArray();
         $invoicesArray['total_amount'] = (float) $totalAmount;
@@ -116,7 +126,6 @@ class InvoiceController extends Controller
         }
 
         $fields['user_name'] = trim($user->name.' '.$user->last_name);
-
         $fields['date'] = Carbon::now()->format('Y-m-d');
         $fields['atelier_id'] = $atelierId;
 

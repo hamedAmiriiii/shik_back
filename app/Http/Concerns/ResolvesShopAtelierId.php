@@ -251,7 +251,10 @@ trait ResolvesShopAtelierId
         if ($aid === null || ! $model) {
             return;
         }
-        if (! isset($model->atelier_id) || (int) $model->atelier_id !== $aid) {
+        if (! isset($model->atelier_id) || $model->atelier_id === null) {
+            return;
+        }
+        if ((int) $model->atelier_id !== $aid) {
             abort(response()->json(['message' => 'یافت نشد'], 404));
         }
     }

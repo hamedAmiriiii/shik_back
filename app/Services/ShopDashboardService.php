@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Installment;
 use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\ReturnedProduct;
@@ -33,7 +34,7 @@ class ShopDashboardService
      */
     public static function salesByDay(int $atelierId, int $days = 10): array
     {
-        $days = max(1, min($days, 31));
+        $days = max(1, min($days, 62));
         $end = Carbon::now('Asia/Tehran')->endOfDay();
         $start = Carbon::now('Asia/Tehran')->startOfDay()->subDays($days - 1);
 
@@ -95,11 +96,29 @@ class ShopDashboardService
             $buckets[$key]['total_returns'] += (float) $returned->sale_price;
         }
 
+        $paidInstallments = Installment::query()
+            ->where('is_paid', true)
+            ->whereNotNull('paid_at')
+            ->whereBetween('paid_at', [$rangeStart, $rangeEnd])
+            ->whereHas('purchase', fn ($q) => $q->forAtelier($atelierId))
+            ->get(['amount', 'paid_at']);
+
+        foreach ($paidInstallments as $installment) {
+            $key = Carbon::parse($installment->getRawOriginal('paid_at'))
+                ->setTimezone('Asia/Tehran')
+                ->format('Y-m-d');
+            if (! isset($buckets[$key])) {
+                continue;
+            }
+            $buckets[$key]['installments_collected'] += (float) $installment->amount;
+        }
+
         $daily = [];
         $periodTotalSales = 0.0;
         foreach ($buckets as $row) {
             $row['total_sales'] = (float) ($row['gross_sales'] - $row['total_returns']);
             $row['cash_and_card_total'] = (float) ($row['card_amount'] + $row['cash_amount']);
+            $row['total_collected'] = (float) ($row['cash_and_card_total'] + $row['installments_collected']);
             $periodTotalSales += $row['total_sales'];
             $daily[] = $row;
         }
@@ -161,6 +180,8 @@ class ShopDashboardService
             'card_amount' => 0.0,
             'cash_amount' => 0.0,
             'cash_and_card_total' => 0.0,
+            'installments_collected' => 0.0,
+            'total_collected' => 0.0,
             'uncollected_installments' => 0.0,
             'purchases_count' => 0,
         ];
