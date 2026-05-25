@@ -18,6 +18,8 @@ class CreateDailyShopReconciliationsTable extends Migration
             $table->decimal('cash_amount', 15, 2)->default(0);
             $table->decimal('installments_collected', 15, 2)->default(0);
             $table->decimal('total_collected', 15, 2)->default(0);
+            $table->decimal('credit_used_total', 15, 2)->default(0);
+            $table->decimal('settlement_total', 15, 2)->default(0);
 
             $table->decimal('deposit_account_1', 15, 2)->default(0);
             $table->decimal('deposit_account_2', 15, 2)->default(0);

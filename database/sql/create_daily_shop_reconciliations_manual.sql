@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS `daily_shop_reconciliations` (
   `cash_amount` DECIMAL(15, 2) NOT NULL DEFAULT 0,
   `installments_collected` DECIMAL(15, 2) NOT NULL DEFAULT 0,
   `total_collected` DECIMAL(15, 2) NOT NULL DEFAULT 0,
+  `credit_used_total` DECIMAL(15, 2) NOT NULL DEFAULT 0,
+  `settlement_total` DECIMAL(15, 2) NOT NULL DEFAULT 0,
   `deposit_account_1` DECIMAL(15, 2) NOT NULL DEFAULT 0,
   `deposit_account_2` DECIMAL(15, 2) NOT NULL DEFAULT 0,
   `deposit_cash` DECIMAL(15, 2) NOT NULL DEFAULT 0,

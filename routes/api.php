@@ -120,6 +120,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
     Route::get('dashboard/summary', [\App\Http\Controllers\DashboardController::class, 'summary']);
     Route::get('dashboard/sales-by-day', [\App\Http\Controllers\DashboardController::class, 'salesByDay']);
+    Route::get('dashboard/daily-sales', [\App\Http\Controllers\DashboardController::class, 'dailySales']);
+
+    Route::get('returned-products/grid', [\App\Http\Controllers\ReturnedProductController::class, 'grid']);
+    Route::get('purchase-item-returns/grid', [\App\Http\Controllers\PurchaseItemReturnController::class, 'grid']);
 
     Route::get('daily-reconciliations', [\App\Http\Controllers\DailyShopReconciliationController::class, 'index']);
     Route::post('daily-reconciliations', [\App\Http\Controllers\DailyShopReconciliationController::class, 'store']);

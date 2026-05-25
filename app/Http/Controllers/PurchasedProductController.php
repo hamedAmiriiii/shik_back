@@ -549,81 +549,43 @@ class PurchasedProductController extends Controller
      * @param PurchasedProduct $purchasedProduct
      * @return \Illuminate\Http\Response
      */
-    public function returnItem(Purchase $purchase, PurchasedProduct $purchasedProduct)
+    public function returnItem(Request $request, Purchase $purchase, PurchasedProduct $purchasedProduct)
     {
-        // بررسی اینکه محصول متعلق به این خرید باشد
-        if ($purchasedProduct->purchase_id !== $purchase->id) {
-            return response(['error' => 'این محصول متعلق به این خرید نیست'], 400);
-        }
+        $request->validate([
+            'quantity' => 'sometimes|integer|min:1',
+            'notes' => 'nullable|string|max:2000',
+        ]);
 
-        // افزایش موجودی محصول
-        $product = $purchasedProduct->product;
-        $product->increment('quantity', $purchasedProduct->quantity);
+        $returnQty = $request->has('quantity')
+            ? (int) $request->input('quantity')
+            : (int) $purchasedProduct->quantity;
 
-        $purchase->load('purchasedProducts');
-        $returnAmount = (float) ($purchasedProduct->sale_price * $purchasedProduct->quantity);
-        $lineTotalBeforeReturn = (float) $purchase->purchasedProducts->sum(function ($pp) {
-            return (float) $pp->sale_price * (int) $pp->quantity;
-        });
-        $ratio = $lineTotalBeforeReturn > 0 ? min(1, $returnAmount / $lineTotalBeforeReturn) : 1;
-
-        $creditUsedRefund = \App\Tools\PriceTools::roundToThousand((float) $purchase->credit_used * $ratio);
-
-        if ($creditUsedRefund > 0 && $purchase->phone) {
-            $userShikshoQuery = UserShiksho::where('phone', $purchase->phone);
-            if ($purchase->atelier_id !== null) {
-                $userShikshoQuery->where('atelier_id', $purchase->atelier_id);
-            }
-            $userShiksho = $userShikshoQuery->first();
-            if ($userShiksho) {
-                $userShiksho->credit = (float) $userShiksho->credit + $creditUsedRefund;
-                $userShiksho->save();
+        $userName = null;
+        $staffAtelierId = $this->staffShopAtelierId($request);
+        if ($staffAtelierId !== null) {
+            $user = $this->requireStaffShopUser($request);
+            $userName = trim($user->name.' '.$user->last_name);
+            if ($purchase->atelier_id !== null && (int) $purchase->atelier_id !== (int) $staffAtelierId) {
+                return response(['error' => 'این فاکتور متعلق به فروشگاه شما نیست'], 403);
             }
         }
 
-        // برگشت اعتبار کسب شده متناسب با مبلغ برگشتی
-        $creditReturned = 0;
-        if ($purchase->credit_earned > 0 && $purchase->phone) {
-            // محاسبه اعتبار برگشتی بر اساس نسبت مبلغ برگشتی
-            $creditReturned = UserShiksho::calculateCredit($returnAmount);
-            
-            // کم کردن از credit_earned خرید
-            $purchase->credit_earned = max(0, $purchase->credit_earned - $creditReturned);
-            
-            // کم کردن از اعتبار کاربر
-            $userShikshoQuery = UserShiksho::where('phone', $purchase->phone);
-            if ($purchase->atelier_id !== null) {
-                $userShikshoQuery->where('atelier_id', $purchase->atelier_id);
-            }
-            $userShiksho = $userShikshoQuery->first();
-            if ($userShiksho && $userShiksho->credit >= $creditReturned) {
-                $userShiksho->credit = max(0, $userShiksho->credit - $creditReturned);
-                $userShiksho->save();
-            }
+        try {
+            $result = \App\Services\PurchaseItemReturnService::processReturn(
+                $purchase,
+                $purchasedProduct,
+                $returnQty,
+                $userName,
+                $request->input('notes')
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response(['error' => $e->getMessage()], 400);
         }
-
-        // حذف محصول از لیست خرید
-        $purchasedProduct->delete();
-
-        $purchase->load('purchasedProducts');
-        $purchase->syncAmountsFromRemainingLines();
-        $purchase->save();
-
-        // ذخیره اطلاعات برای پاسخ
-        $returnedInfo = [
-            'product_id' => $purchasedProduct->product_id,
-            'product_name' => $product->name,
-            'quantity' => $purchasedProduct->quantity,
-            'sale_price' => $purchasedProduct->sale_price,
-            'return_amount' => $returnAmount,
-            'credit_returned' => $creditReturned,
-        ];
-
-        $purchase->load('purchasedProducts.product');
 
         return response([
             'message' => 'محصول با موفقیت برگشت داده شد',
-            'returned_item' => $returnedInfo,
+            'returned_item' => $result['returned_item'],
+            'row' => $result['row'],
             'purchase' => $purchase,
         ], 200);
     }

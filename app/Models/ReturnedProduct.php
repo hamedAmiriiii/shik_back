@@ -10,10 +10,18 @@ class ReturnedProduct extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['product_id', 'sale_price'];
+    protected $fillable = [
+        'product_id',
+        'atelier_id',
+        'sale_price',
+        'purchase_price',
+        'user_name',
+        'notes',
+    ];
 
     protected $casts = [
         'sale_price' => 'decimal:2',
+        'purchase_price' => 'decimal:2',
     ];
 
     public function getCreatedAtAttribute($value): string
