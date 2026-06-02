@@ -228,8 +228,9 @@ class PurchasedProductController extends Controller
             $discountAmount = 0;
         }
         
-        // کسر مبلغ تخفیف از قیمت کل
-        $totalAmount = max(0, $originalTotalAmount - $discountAmount);
+        // مبلغ کل فاکتور (قبل از تخفیف فاکتور و اعتبار)
+        $grossTotal = $originalTotalAmount;
+        $amountAfterDiscount = max(0, $grossTotal - $discountAmount);
         $creditUsed = 0;
         $userShiksho = null;
 
@@ -241,13 +242,12 @@ class PurchasedProductController extends Controller
             }
             $userShiksho = $userShikshoQuery->first();
             if ($userShiksho && $userShiksho->credit > 0) {
-                // استفاده از اعتبار (تا حداکثر مبلغ خرید بعد از تخفیف)
-                $creditUsed = min($userShiksho->credit, $totalAmount);
+                $creditUsed = min($userShiksho->credit, $amountAfterDiscount);
                 $userShiksho->useCredit($creditUsed);
-                // مبلغ نهایی بعد از کسر اعتبار
-                $totalAmount = $totalAmount - $creditUsed;
             }
         }
+
+        $payableAmount = max(0, $amountAfterDiscount - $creditUsed);
 
         $creditEarned = 0;
         
@@ -261,17 +261,17 @@ class PurchasedProductController extends Controller
 
         // محاسبه مبلغ هر قسط در صورت اقساطی بودن (با در نظر گیری سود ماهانه)
         $installmentAmount = null;
-        $finalTotalAmount = $totalAmount; // مبلغ نهایی (با سود در صورت اقساطی)
+        $finalTotalAmount = $grossTotal;
         
         if ($paymentType === 'installment' && $installmentCount) {
             // خواندن نرخ سود ماهانه از ستینگ (پیش‌فرض: 0 یعنی بدون سود)
             $monthlyInterestRate = (float) \App\Models\Setting::get('installment_monthly_interest_rate', 0);
             
             // یک سوم مبلغ به صورت نقد (قسط اول)
-            $firstInstallmentAmount = $this->roundToThreeZeroEnding($totalAmount / 3);
+            $firstInstallmentAmount = $this->roundToThreeZeroEnding($payableAmount / 3);
             
             // بقیه مبلغ (دو سوم)
-            $remainingAmount = $totalAmount - $firstInstallmentAmount;
+            $remainingAmount = $payableAmount - $firstInstallmentAmount;
             
             // تعداد ماه‌های باقیمانده (بعد از قسط اول)
             $remainingMonths = $installmentCount - 1;
@@ -290,7 +290,7 @@ class PurchasedProductController extends Controller
                 $installmentAmount = $this->roundToThreeZeroEnding($remainingAmountWithInterest / $remainingMonths);
             } else {
                 // بدون سود
-                $finalTotalAmount = $totalAmount;
+                $finalTotalAmount = $this->roundToThreeZeroEnding($payableAmount);
                 // مبلغ هر قسط باقیمانده
                 $installmentAmount = $this->roundToThreeZeroEnding($remainingAmount / $remainingMonths);
             }
@@ -298,14 +298,15 @@ class PurchasedProductController extends Controller
 
         $amountPaidNow = $paymentType === 'installment'
             ? $this->roundToThreeZeroEnding($finalTotalAmount / 3)
-            : (float) $totalAmount;
+            : (float) $payableAmount;
 
         $settlement = $this->resolvePurchaseSettlement($request, $amountPaidNow);
 
         // ایجاد سبد خرید (Purchase)
         $purchase = Purchase::create([
             'phone' => $phone,
-            'total_amount' => $finalTotalAmount, // مبلغ کل با سود (در صورت اقساطی)
+            'total_amount' => $paymentType === 'installment' ? $finalTotalAmount : $grossTotal,
+            'discount_amount' => round((float) $discountAmount, 2),
             'credit_used' => $creditUsed,
             'credit_earned' => $creditEarned,
             'payment_type' => $paymentType,

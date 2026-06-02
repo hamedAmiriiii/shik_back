@@ -370,7 +370,6 @@ class CartController extends Controller
             $originalTotalAmount = $cart->total;
             $phone = $cart->address_id ? $cart->address->phone : $cart->shipping_phone;
 
-            $totalAmount = $originalTotalAmount;
             $creditUsed = 0;
             $userShiksho = null;
 
@@ -380,11 +379,8 @@ class CartController extends Controller
                     ->where('atelier_id', $atelierId)
                     ->first();
                 if ($userShiksho && $userShiksho->credit > 0) {
-                    // استفاده از اعتبار (تا حداکثر مبلغ خرید)
                     $creditUsed = min($userShiksho->credit, $originalTotalAmount);
                     $userShiksho->useCredit($creditUsed);
-                    // مبلغ نهایی بعد از کسر اعتبار
-                    $totalAmount = $originalTotalAmount - $creditUsed;
                 }
             }
 
@@ -401,7 +397,7 @@ class CartController extends Controller
             $purchase = Purchase::create([
                 'cart_id' => $cart->id, // لینک به Cart
                 'phone' => $phone,
-                'total_amount' => $totalAmount,
+                'total_amount' => $originalTotalAmount,
                 'credit_used' => $creditUsed,
                 'credit_earned' => $creditEarned,
                 'atelier_id' => $atelierId,

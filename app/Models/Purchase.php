@@ -14,6 +14,7 @@ class Purchase extends Model
         'cart_id',
         'phone',
         'total_amount',
+        'discount_amount',
         'credit_used',
         'credit_earned',
         'payment_type',
@@ -26,6 +27,7 @@ class Purchase extends Model
 
     protected $casts = [
         'total_amount' => 'decimal:2',
+        'discount_amount' => 'decimal:2',
         'credit_used' => 'decimal:2',
         'credit_earned' => 'decimal:2',
         'card_amount' => 'decimal:2',
@@ -137,7 +139,10 @@ class Purchase extends Model
         if ($this->isInstallment()) {
             return $this->paid_amount;
         }
-        return $this->total_amount;
+        return max(0, round(
+            (float) $this->total_amount - (float) $this->discount_amount - (float) $this->credit_used,
+            2
+        ));
     }
 
     /**
@@ -191,10 +196,12 @@ class Purchase extends Model
             return;
         }
 
-        $creditUsed = min((float) $this->credit_used, $lineTotal);
+        $discount = (float) $this->discount_amount;
+        $afterDiscount = max(0, round($lineTotal - $discount, 2));
+        $creditUsed = min((float) $this->credit_used, $afterDiscount);
         $this->credit_used = $creditUsed;
-        $payable = round($lineTotal - $creditUsed, 2);
-        $this->total_amount = $payable;
+        $payable = round($afterDiscount - $creditUsed, 2);
+        $this->total_amount = $lineTotal;
 
         $card = (float) $this->card_amount;
         $cash = (float) $this->cash_amount;

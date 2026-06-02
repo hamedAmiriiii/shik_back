@@ -163,9 +163,12 @@ class CustomerRegisterController extends Controller
         // بارگذاری روابط
         $customer->load(['state', 'city']);
 
+        $token = $customer->createToken('customer-token')->plainTextToken;
+
         return response([
             'message' => 'ثبت‌نام با موفقیت انجام شد',
-            'customer' => $customer
+            'customer' => $customer,
+            'token' => $token,
         ], 201);
     }
 

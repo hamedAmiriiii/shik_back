@@ -6,6 +6,7 @@ use App\Models\Installment;
 use App\Models\Purchase;
 use App\Models\ReturnedProduct;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Schema;
 
 class ShopSalesReportService
 {
@@ -34,6 +35,7 @@ class ShopSalesReportService
         $cashAmount = 0.0;
         $creditUsedTotal = 0.0;
         $uncollectedFromPeriodSales = 0.0;
+        $discountGiven = 0.0;
 
         foreach ($purchases as $purchase) {
             $lineSales = $purchase->remainingLineSalesTotal();
@@ -41,12 +43,15 @@ class ShopSalesReportService
                 continue;
             }
 
+            $discountGiven += self::discountGivenForPurchase($purchase);
+
             $lineCost = $purchase->remainingLinePurchaseCost();
 
             if ($purchase->isInstallment()) {
                 $totalSales += (float) $purchase->paid_amount + (float) $purchase->credit_used;
             } else {
-                $totalSales += $lineSales;
+                // همان مبلغ فاکتور (total_amount) — هم‌خوان با card+cash در جدول purchases
+                $totalSales += (float) $purchase->total_amount;
             }
 
             $totalPurchase += $lineCost;
@@ -105,6 +110,50 @@ class ShopSalesReportService
             'uncollected_installments' => (float) $uncollectedFromPeriodSales,
             'credit_used_total' => (float) round($creditUsedTotal, 2),
             'settlement_total' => (float) $settlementTotal,
+            'discount_given' => (float) round($discountGiven, 2),
+        ];
+    }
+
+    /**
+     * تخفیف داده‌شده روی یک فاکتور (مبلغ ثبت‌شده یا اختلاف جمع خطوط با مبلغ نهایی فاکتور).
+     */
+    public static function discountGivenForPurchase(Purchase $purchase): float
+    {
+        if (Schema::hasColumn('purchases', 'discount_amount')
+            && (float) $purchase->discount_amount > 0) {
+            return (float) $purchase->discount_amount;
+        }
+
+        $lineTotal = $purchase->remainingLineSalesTotal();
+        if ($lineTotal <= 0) {
+            return 0.0;
+        }
+
+        if ($purchase->isInstallment()) {
+            return 0.0;
+        }
+
+        // جمع خطوط − مبلغ فاکتور = تخفیف (اعتبار مصرف‌شده جداگانه ثبت می‌شود)
+        return max(0, round($lineTotal - (float) $purchase->total_amount, 2));
+    }
+
+    /**
+     * خلاصهٔ حساب‌های روز برای تطبیق (فروش، نقد، کارت، اقساط، جمع وصول، تخفیف).
+     *
+     * @param  array<string, float>  $metrics
+     * @return array<string, float>
+     */
+    public static function accountsBreakdown(array $metrics): array
+    {
+        return [
+            'total_sales' => (float) ($metrics['sales'] ?? 0),
+            'cash_amount' => (float) ($metrics['cash_amount'] ?? 0),
+            'card_amount' => (float) ($metrics['card_amount'] ?? 0),
+            'installments_collected' => (float) ($metrics['installments_collected'] ?? 0),
+            'total_collected' => (float) ($metrics['total_collected'] ?? 0),
+            'discount_given' => (float) ($metrics['discount_given'] ?? 0),
+            'credit_used_total' => (float) ($metrics['credit_used_total'] ?? 0),
+            'settlement_total' => (float) ($metrics['settlement_total'] ?? 0),
         ];
     }
 
@@ -122,7 +171,10 @@ class ShopSalesReportService
             return [$card, $cash];
         }
 
-        $payable = max(0, round($lineSales - (float) $purchase->credit_used, 2));
+        $payable = max(0, round(
+            $lineSales - (float) $purchase->discount_amount - (float) $purchase->credit_used,
+            2
+        ));
         $settlement = $card + $cash;
 
         if ($settlement > $payable + 0.02 && $settlement > 0) {

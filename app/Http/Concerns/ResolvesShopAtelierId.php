@@ -97,6 +97,65 @@ trait ResolvesShopAtelierId
     }
 
     /**
+     * کد فروشگاه از مسیر api/{shop}/... یا query/body/هدر.
+     */
+    protected function parseRequestedAtelierCode(Request $request): ?string
+    {
+        $shop = $request->route('shop');
+        if (is_string($shop) && trim($shop) !== '') {
+            return trim($shop);
+        }
+
+        $code = $request->header('X-Atelier-Code')
+            ?: $request->query('atelier_code')
+            ?: $request->input('atelier_code');
+
+        if (! is_string($code) || trim($code) === '') {
+            return null;
+        }
+
+        return trim($code);
+    }
+
+    protected function atelierIdFromCodeOrNull(string $code): ?int
+    {
+        $id = Atelier::where('code', $code)->value('id');
+
+        return $id ? (int) $id : null;
+    }
+
+    protected function abortUnknownShopCode(Request $request, string $code): void
+    {
+        $message = $request->route('shop')
+            ? 'فروشگاه یافت نشد.'
+            : 'کد فروشگاه (atelier_code) نامعتبر است.';
+
+        abort(response()->json(['message' => $message], 404));
+    }
+
+    /**
+     * اگر مشتری لاگین است و مسیر فروشگاه مشخص است، باید همان فروشگاه باشد.
+     */
+    protected function assertCustomerMatchesRouteShop(Request $request, Customer $customer): void
+    {
+        $code = $this->parseRequestedAtelierCode($request);
+        if ($code === null) {
+            return;
+        }
+
+        $routeAtelierId = $this->atelierIdFromCodeOrNull($code);
+        if ($routeAtelierId === null) {
+            return;
+        }
+
+        if ((int) $customer->atelier_id !== $routeAtelierId) {
+            abort(response()->json([
+                'message' => 'این حساب برای فروشگاه دیگری ثبت شده است. لطفاً در همان آدرس فروشگاه وارد شوید.',
+            ], 403));
+        }
+    }
+
+    /**
      * شناسهٔ فروشگاه برای فیلتر لیست‌ها: از کاربر لاگین، یا از کد فروشگاه در درخواست.
      * پرسنل فروشگاه: اگر دورهٔ دسترسی تمام شده باشد 403 (ادمین سامانه مستثنی است).
      */
@@ -128,14 +187,13 @@ trait ResolvesShopAtelierId
                 return $requestedAtelierId;
             }
 
-            $code = $request->header('X-Atelier-Code')
-                ?: $request->query('atelier_code')
-                ?: $request->input('atelier_code');
+            $code = $this->parseRequestedAtelierCode($request);
             if ($code) {
-                $id = Atelier::where('code', $code)->value('id');
+                $id = $this->atelierIdFromCodeOrNull($code);
                 if ($id) {
-                    return (int) $id;
+                    return $id;
                 }
+                $this->abortUnknownShopCode($request, $code);
             }
 
             abort(response()->json([
@@ -143,6 +201,8 @@ trait ResolvesShopAtelierId
             ], 422));
         }
         if ($actor instanceof Customer && $actor->atelier_id) {
+            $this->assertCustomerMatchesRouteShop($request, $actor);
+
             return (int) $actor->atelier_id;
         }
 
@@ -153,14 +213,13 @@ trait ResolvesShopAtelierId
             ], 401));
         }
 
-        $code = $request->header('X-Atelier-Code')
-            ?: $request->query('atelier_code')
-            ?: $request->input('atelier_code');
+        $code = $this->parseRequestedAtelierCode($request);
         if ($code) {
-            $id = Atelier::where('code', $code)->value('id');
+            $id = $this->atelierIdFromCodeOrNull($code);
             if ($id) {
-                return (int) $id;
+                return $id;
             }
+            $this->abortUnknownShopCode($request, $code);
         }
 
         abort(response()->json([

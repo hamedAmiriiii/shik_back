@@ -112,6 +112,8 @@ class DailyShopReconciliationService
             ->whereBetween('created_at', [$rangeStart, $rangeEnd])
             ->count();
 
+        $accounts = ShopSalesReportService::accountsBreakdown($metrics);
+
         $row = [
             'date' => $dateKey,
             'date_jalali' => Jalalian::fromCarbon($dayCarbon)->format('Y-m-d'),
@@ -124,8 +126,10 @@ class DailyShopReconciliationService
             'cash_and_card_total' => (float) $metrics['cash_and_card_total'],
             'installments_collected' => (float) $metrics['installments_collected'],
             'total_collected' => (float) $metrics['total_collected'],
+            'discount_given' => (float) $metrics['discount_given'],
             'credit_used_total' => (float) $metrics['credit_used_total'],
             'settlement_total' => (float) $metrics['settlement_total'],
+            'accounts' => $accounts,
             'uncollected_installments' => (float) $metrics['uncollected_installments'],
             'purchases_count' => $purchasesCount,
             'deposit_account_1' => 0.0,
@@ -275,6 +279,7 @@ class DailyShopReconciliationService
                 'total_collected' => $totalCollected,
                 'credit_used_total' => $metrics['credit_used_total'],
                 'settlement_total' => $metrics['settlement_total'],
+                'discount_given' => $metrics['discount_given'],
                 'deposit_account_1' => $depositAccount1,
                 'deposit_account_2' => $depositAccount2,
                 'deposit_cash' => $depositCash,

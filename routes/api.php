@@ -289,3 +289,6 @@ Route::middleware('auth:sanctum')->prefix('orders')->name('orders.')->group(func
     Route::get('/{cart}', [\App\Http\Controllers\OrderController::class, 'show']);
     Route::put('/{cart}/status', [\App\Http\Controllers\OrderController::class, 'updateStatus']);
 });
+
+// ویترین آنلاین — api/{shop}/... (باید بعد از مسیرهای ثابت باشد)
+require __DIR__.'/shop-storefront.php';

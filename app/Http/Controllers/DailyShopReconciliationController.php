@@ -74,9 +74,11 @@ class DailyShopReconciliationController extends Controller
                 'cash_amount' => (float) $metrics['cash_amount'],
                 'installments_collected' => (float) $metrics['installments_collected'],
                 'total_collected' => (float) $metrics['total_collected'],
+                'discount_given' => (float) $metrics['discount_given'],
                 'credit_used_total' => (float) $metrics['credit_used_total'],
                 'settlement_total' => (float) $metrics['settlement_total'],
             ],
+            'accounts' => \App\Services\ShopSalesReportService::accountsBreakdown($metrics),
             'reconciliation' => $recon,
         ], 200);
     }

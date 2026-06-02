@@ -69,5 +69,6 @@ class Kernel extends HttpKernel
         'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
         'city.access' => \App\Http\Middleware\CheckCityAccess::class,
+        'shop.from.route' => \App\Http\Middleware\BindShopFromRoute::class,
     ];
 }
