@@ -505,8 +505,11 @@ class CartController extends Controller
         $atelierId = $this->customerShopAtelierId($customer);
 
         $query = Cart::where('customer_id', $customer->id)
-            ->where('atelier_id', $atelierId)
             ->where('status', '!=', Cart::STATUS_PENDING)
+            ->where(function ($q) use ($atelierId) {
+                $q->where('atelier_id', $atelierId)
+                    ->orWhereNull('atelier_id');
+            })
             ->with(['items.product.images', 'items.product.categories'])
             ->orderBy('id', 'desc');
 
@@ -542,24 +545,22 @@ class CartController extends Controller
         $customer = $request->user();
         $atelierId = $this->customerShopAtelierId($customer);
 
-        // پیدا کردن cart
+        // پیدا کردن سفارش برای همین مشتری (برای جلوگیری از خطا در داده‌های قدیمی،
+        // سفارش‌های بدون atelier_id هم فقط برای مالک قابل مشاهده هستند)
         $cart = Cart::where('id', $cartId)
-            ->where('atelier_id', $atelierId)
+            ->where('customer_id', $customer->id)
             ->where('status', '!=', Cart::STATUS_PENDING)
+            ->where(function ($q) use ($atelierId) {
+                $q->where('atelier_id', $atelierId)
+                    ->orWhereNull('atelier_id');
+            })
             ->first();
 
-        // بررسی اینکه cart وجود دارد
+        // بررسی اینکه سفارش وجود دارد
         if (!$cart) {
             return response([
                 'error' => 'سفارش یافت نشد'
             ], 404);
-        }
-
-        // بررسی اینکه cart متعلق به این مشتری است
-        if ($cart->customer_id !== $customer->id) {
-            return response([
-                'error' => 'شما دسترسی به این سفارش ندارید'
-            ], 403);
         }
 
         $cart->load(['items.product.images', 'items.product.categories']);
