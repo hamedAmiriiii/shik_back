@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use App\Models\DailyShopReconciliation;
-use App\Models\Invoice;
+use App\Models\DailyShopReconciliationDeposit;
 use App\Models\Purchase;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
@@ -16,9 +16,9 @@ class DailyShopReconciliationService
     public const EDITABLE_DAYS_BACK = 3;
 
     private const DEPOSIT_SLOTS = [
-        'deposit_account_1' => ['invoice_column' => 'invoice_account_1_id', 'label' => 'حساب ۱'],
-        'deposit_account_2' => ['invoice_column' => 'invoice_account_2_id', 'label' => 'حساب ۲'],
-        'deposit_cash' => ['invoice_column' => 'invoice_cash_id', 'label' => 'نقدی'],
+        'deposit_account_1' => ['deposit_record_column' => 'deposit_record_account_1_id', 'label' => 'حساب ۱'],
+        'deposit_account_2' => ['deposit_record_column' => 'deposit_record_account_2_id', 'label' => 'حساب ۲'],
+        'deposit_cash' => ['deposit_record_column' => 'deposit_record_cash_id', 'label' => 'نقدی'],
     ];
 
     /**
@@ -143,7 +143,7 @@ class DailyShopReconciliationService
             'notes' => null,
             'user_name' => null,
             'reconciliation_id' => null,
-            'invoice_ids' => null,
+            'deposit_ids' => null,
         ];
 
         $recon = $reconciliations->get($dateKey);
@@ -157,10 +157,10 @@ class DailyShopReconciliationService
             $row['notes'] = $recon->notes;
             $row['user_name'] = $recon->user_name;
             $row['reconciliation_id'] = $recon->id;
-            $row['invoice_ids'] = [
-                'account_1' => $recon->invoice_account_1_id,
-                'account_2' => $recon->invoice_account_2_id,
-                'cash' => $recon->invoice_cash_id,
+            $row['deposit_ids'] = [
+                'account_1' => $recon->deposit_record_account_1_id,
+                'account_2' => $recon->deposit_record_account_2_id,
+                'cash' => $recon->deposit_record_cash_id,
             ];
             $cumulative += (float) $recon->daily_discrepancy;
             $row['cumulative_discrepancy'] = round($cumulative, 2);
@@ -214,7 +214,7 @@ class DailyShopReconciliationService
     }
 
     /**
-     * ثبت یا ویرایش تطبیق یک روز — همراه با سه سند Invoice.
+     * ثبت یا ویرایش تطبیق یک روز — همراه با سه رکورد واریز.
      *
      * @param  array{deposit_account_1: float|int|string, deposit_account_2: float|int|string, deposit_cash: float|int|string, notes?: ?string}  $deposits
      */
@@ -228,6 +228,12 @@ class DailyShopReconciliationService
         if (! Schema::hasTable('daily_shop_reconciliations')) {
             throw new \RuntimeException(
                 'جدول daily_shop_reconciliations وجود ندارد. migration یا فایل SQL را اجرا کنید.'
+            );
+        }
+
+        if (! Schema::hasTable('daily_shop_reconciliation_deposits')) {
+            throw new \RuntimeException(
+                'جدول daily_shop_reconciliation_deposits وجود ندارد. migration یا فایل SQL را اجرا کنید.'
             );
         }
 
@@ -302,13 +308,13 @@ class DailyShopReconciliationService
             ];
 
             foreach (self::DEPOSIT_SLOTS as $depositKey => $slot) {
-                $invoiceColumn = $slot['invoice_column'];
+                $depositRecordColumn = $slot['deposit_record_column'];
                 $amount = $amounts[$depositKey];
-                $invoiceId = $recon->{$invoiceColumn};
+                $depositRecordId = $recon->{$depositRecordColumn};
 
                 if ($amount > 0) {
-                    $recon->{$invoiceColumn} = self::syncInvoice(
-                        $invoiceId,
+                    $recon->{$depositRecordColumn} = self::syncDeposit(
+                        $depositRecordId,
                         $atelierId,
                         $dateGregorian,
                         $amount,
@@ -317,10 +323,10 @@ class DailyShopReconciliationService
                         $notes
                     );
                 } else {
-                    if ($invoiceId) {
-                        Invoice::where('id', $invoiceId)->delete();
+                    if ($depositRecordId) {
+                        DailyShopReconciliationDeposit::where('id', $depositRecordId)->delete();
                     }
-                    $recon->{$invoiceColumn} = null;
+                    $recon->{$depositRecordColumn} = null;
                 }
             }
 
@@ -339,8 +345,8 @@ class DailyShopReconciliationService
         return $date->gte($min) && $date->lte($today);
     }
 
-    protected static function syncInvoice(
-        ?int $invoiceId,
+    protected static function syncDeposit(
+        ?int $depositRecordId,
         int $atelierId,
         string $dateGregorian,
         float $amount,
@@ -357,17 +363,17 @@ class DailyShopReconciliationService
             'atelier_id' => $atelierId,
         ];
 
-        if ($invoiceId) {
-            $invoice = Invoice::find($invoiceId);
-            if ($invoice) {
-                $invoice->update($fields);
+        if ($depositRecordId) {
+            $deposit = DailyShopReconciliationDeposit::find($depositRecordId);
+            if ($deposit) {
+                $deposit->update($fields);
 
-                return (int) $invoice->id;
+                return (int) $deposit->id;
             }
         }
 
-        $invoice = Invoice::create($fields);
+        $deposit = DailyShopReconciliationDeposit::create($fields);
 
-        return (int) $invoice->id;
+        return (int) $deposit->id;
     }
 }

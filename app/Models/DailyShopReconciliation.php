@@ -26,9 +26,9 @@ class DailyShopReconciliation extends Model
         'daily_discrepancy',
         'notes',
         'user_name',
-        'invoice_account_1_id',
-        'invoice_account_2_id',
-        'invoice_cash_id',
+        'deposit_record_account_1_id',
+        'deposit_record_account_2_id',
+        'deposit_record_cash_id',
     ];
 
     protected $casts = [
@@ -58,18 +58,18 @@ class DailyShopReconciliation extends Model
         return $this->belongsTo(Atelier::class);
     }
 
-    public function invoiceAccount1(): BelongsTo
+    public function depositRecordAccount1(): BelongsTo
     {
-        return $this->belongsTo(Invoice::class, 'invoice_account_1_id');
+        return $this->belongsTo(DailyShopReconciliationDeposit::class, 'deposit_record_account_1_id');
     }
 
-    public function invoiceAccount2(): BelongsTo
+    public function depositRecordAccount2(): BelongsTo
     {
-        return $this->belongsTo(Invoice::class, 'invoice_account_2_id');
+        return $this->belongsTo(DailyShopReconciliationDeposit::class, 'deposit_record_account_2_id');
     }
 
-    public function invoiceCash(): BelongsTo
+    public function depositRecordCash(): BelongsTo
     {
-        return $this->belongsTo(Invoice::class, 'invoice_cash_id');
+        return $this->belongsTo(DailyShopReconciliationDeposit::class, 'deposit_record_cash_id');
     }
 }
