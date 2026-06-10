@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\ShopLoyaltyCreditTierService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -53,6 +54,8 @@ class Setting extends Model
                 ['value' => $value]
             );
         }
+
+        ShopLoyaltyCreditTierService::ensureDefaultsForAtelier($atelierId);
     }
 
     /**

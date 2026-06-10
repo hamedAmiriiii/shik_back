@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\ShopLoyaltyCreditTierService;
 use App\Tools\PriceTools;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -32,25 +33,12 @@ class UserShiksho extends Model
      * محاسبه اعتبار بر اساس مبلغ خرید
      * اعتبار رند می‌شود به طوری که سه رقم آخر 0 باشد
      * 
-     * @param float $purchaseAmount
-     * @return float
+     * @param  float  $purchaseAmount
+     * @param  int|null  $atelierId  فروشگاه — بازه‌های اعتبار از تنظیمات همان فروشگاه
      */
-    public static function calculateCredit($purchaseAmount)
+    public static function calculateCredit($purchaseAmount, ?int $atelierId = null): float
     {
-        $credit = 0;
-        
-        if ($purchaseAmount <= 1000000) {
-            // تا 1 میلیون: 5 درصد
-            $credit = $purchaseAmount * 0.01;
-        } elseif ($purchaseAmount <= 2000000) {
-            // تا 2 میلیون: 4 درصد
-            $credit = $purchaseAmount * 0.01;
-        } else {
-            // بالاتر از 2 میلیون: 3 درصد
-            $credit = $purchaseAmount * 0.02;
-        }
-
-        return PriceTools::roundToThousand((float) $credit);
+        return ShopLoyaltyCreditTierService::calculateCredit((float) $purchaseAmount, $atelierId);
     }
 
     /**

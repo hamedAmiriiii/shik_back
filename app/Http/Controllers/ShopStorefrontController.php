@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Atelier;
 use App\Models\Setting;
+use App\Services\ShopLoyaltyCreditTierService;
 use Illuminate\Http\Request;
 
 class ShopStorefrontController extends Controller
@@ -28,6 +29,7 @@ class ShopStorefrontController extends Controller
             'access' => $atelier->accessStatusForApi(),
             'settings' => [
                 'enable_loyalty_credit' => Setting::isEnabled('enable_loyalty_credit', true),
+                'loyalty_credit_tiers' => ShopLoyaltyCreditTierService::tiersForApi($atelierId),
             ],
         ]);
     }

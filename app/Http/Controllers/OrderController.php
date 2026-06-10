@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\User;
 use App\Models\Purchase;
 use App\Models\PurchasedProduct;
+use App\Models\Setting;
 use App\Models\UserShiksho;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -321,9 +322,10 @@ class OrderController extends Controller
                             $creditUsed = 0;
                             $creditEarned = 0;
                             
-                            $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
+                            Setting::setShopContext($cart->atelier_id);
+                            $enableLoyaltyCredit = Setting::isEnabled('enable_loyalty_credit', true);
                             if ($phone && $enableLoyaltyCredit) {
-                                $creditEarned = \App\Models\UserShiksho::calculateCredit($originalTotalAmount);
+                                $creditEarned = UserShiksho::calculateCredit($originalTotalAmount, $cart->atelier_id);
                             }
                             
                             // ایجاد Purchase

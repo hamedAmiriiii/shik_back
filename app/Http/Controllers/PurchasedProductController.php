@@ -256,7 +256,7 @@ class PurchasedProductController extends Controller
         $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
         if ($phone && $enableLoyaltyCredit && $discountAmount == 0) {
             // محاسبه اعتبار کسب شده (بر اساس مبلغ اصلی خرید، قبل از کسر اعتبار استفاده شده)
-            $creditEarned = UserShiksho::calculateCredit($originalTotalAmount);
+            $creditEarned = UserShiksho::calculateCredit($originalTotalAmount, $purchaseAtelierId);
         }
 
         // محاسبه مبلغ هر قسط در صورت اقساطی بودن (با در نظر گیری سود ماهانه)

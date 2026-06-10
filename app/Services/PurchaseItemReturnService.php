@@ -66,7 +66,10 @@ class PurchaseItemReturnService
 
         $creditEarnedReversed = 0.0;
         if ($purchase->credit_earned > 0 && $purchase->phone) {
-            $creditEarnedReversed = (float) UserShiksho::calculateCredit($returnAmount);
+            $creditEarnedReversed = (float) UserShiksho::calculateCredit(
+                $returnAmount,
+                $purchase->atelier_id !== null ? (int) $purchase->atelier_id : null
+            );
             $purchase->credit_earned = max(0, (float) $purchase->credit_earned - $creditEarnedReversed);
 
             $userShiksho = self::findUserShiksho($purchase);

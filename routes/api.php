@@ -161,6 +161,9 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::post('/', [\App\Http\Controllers\SettingController::class, 'store']);
         Route::get('/loyalty-credit', [\App\Http\Controllers\SettingController::class, 'getLoyaltyCreditStatus']);
         Route::post('/loyalty-credit/toggle', [\App\Http\Controllers\SettingController::class, 'toggleLoyaltyCredit']);
+        Route::get('/loyalty-credit-tiers', [\App\Http\Controllers\SettingController::class, 'getLoyaltyCreditTiers']);
+        Route::post('/loyalty-credit-tiers', [\App\Http\Controllers\SettingController::class, 'setLoyaltyCreditTiers']);
+        Route::put('/loyalty-credit-tiers', [\App\Http\Controllers\SettingController::class, 'setLoyaltyCreditTiers']);
         Route::get('/credit-expiry-days', [\App\Http\Controllers\SettingController::class, 'getCreditExpiryDays']);
         Route::post('/credit-expiry-days', [\App\Http\Controllers\SettingController::class, 'setCreditExpiryDays']);
         Route::put('/credit-expiry-days', [\App\Http\Controllers\SettingController::class, 'setCreditExpiryDays']);

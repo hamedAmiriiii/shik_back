@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Setting;
+use App\Services\ShopLoyaltyCreditTierService;
 use Illuminate\Http\Request;
+use InvalidArgumentException;
 
 class SettingController extends Controller
 {
@@ -155,6 +157,54 @@ class SettingController extends Controller
             'key' => $request->input('key'),
             'value' => $request->input('value')
         ], 201);
+    }
+
+    /**
+     * بازه‌های درصد اعتبار وفاداری فروشگاه (حداکثر ۵ بازه).
+     */
+    public function getLoyaltyCreditTiers(Request $request)
+    {
+        $this->bindShopSettingAtelierFromRequest($request);
+        $atelierId = $this->staffShopAtelierId($request);
+
+        return response([
+            'max_tiers' => \App\Models\ShopLoyaltyCreditTier::MAX_TIERS_PER_SHOP,
+            'tiers' => ShopLoyaltyCreditTierService::tiersForApi($atelierId),
+        ], 200);
+    }
+
+    /**
+     * ثبت بازه‌های درصد اعتبار وفاداری فروشگاه.
+     *
+     * tiers: [{ max_amount: 1000000, percent: 3 }, { max_amount: 2000000, percent: 4 }, { max_amount: null, percent: 5 }]
+     */
+    public function setLoyaltyCreditTiers(Request $request)
+    {
+        $this->bindShopSettingAtelierFromRequest($request);
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            return response()->json([
+                'message' => 'تنظیم بازه‌های اعتبار فقط برای حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
+            ], 422);
+        }
+
+        $fields = $request->validate([
+            'tiers' => 'required|array|min:1|max:'.\App\Models\ShopLoyaltyCreditTier::MAX_TIERS_PER_SHOP,
+            'tiers.*.max_amount' => 'nullable|numeric|min:1',
+            'tiers.*.percent' => 'required|numeric|min:0|max:100',
+        ]);
+
+        try {
+            ShopLoyaltyCreditTierService::syncTiers($atelierId, $fields['tiers']);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'message' => 'بازه‌های اعتبار با موفقیت ثبت شد.',
+            'max_tiers' => \App\Models\ShopLoyaltyCreditTier::MAX_TIERS_PER_SHOP,
+            'tiers' => ShopLoyaltyCreditTierService::tiersForApi($atelierId),
+        ], 200);
     }
 
     /**
