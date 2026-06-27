@@ -35,6 +35,10 @@ class SettingController extends Controller
      */
     public function show(Request $request, $key)
     {
+        if ($key === 'loyalty-credit-tiers') {
+            return $this->getLoyaltyCreditTiers($request);
+        }
+
         $this->bindShopSettingAtelierFromRequest($request);
         $value = Setting::get($key);
         return response(['key' => $key, 'value' => $value], 200);
@@ -45,6 +49,10 @@ class SettingController extends Controller
      */
     public function update(Request $request, $key)
     {
+        if ($key === 'loyalty-credit-tiers') {
+            return $this->setLoyaltyCreditTiers($request);
+        }
+
         if (in_array($key, self::ADMIN_ONLY_KEYS, true)) {
             return response()->json([
                 'message' => 'اعتبار پیامک فقط توسط ادمین قابل شارژ است.',
@@ -188,14 +196,17 @@ class SettingController extends Controller
             ], 422);
         }
 
-        $fields = $request->validate([
+        $request->validate([
             'tiers' => 'required|array|min:1|max:'.\App\Models\ShopLoyaltyCreditTier::MAX_TIERS_PER_SHOP,
             'tiers.*.max_amount' => 'nullable|numeric|min:1',
-            'tiers.*.percent' => 'required|numeric|min:0|max:100',
+            'tiers.*.percent' => 'nullable|numeric|min:0|max:100',
+            'tiers.*.value' => 'nullable|numeric|min:0|max:100',
         ]);
 
+        $tiers = $this->normalizeLoyaltyCreditTiersInput($request->input('tiers', []));
+
         try {
-            ShopLoyaltyCreditTierService::syncTiers($atelierId, $fields['tiers']);
+            ShopLoyaltyCreditTierService::syncTiers($atelierId, $tiers);
         } catch (InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -242,6 +253,29 @@ class SettingController extends Controller
             'rate' => $rate,
             'rate_percent' => $rate . '%'
         ], 200);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $tiers
+     * @return array<int, array{max_amount: mixed, percent: float|int|string}>
+     */
+    protected function normalizeLoyaltyCreditTiersInput(array $tiers): array
+    {
+        $normalized = [];
+
+        foreach ($tiers as $index => $tier) {
+            $percent = $tier['percent'] ?? $tier['value'] ?? null;
+            if ($percent === null || $percent === '') {
+                throw new InvalidArgumentException('درصد بازه '.($index + 1).' الزامی است.');
+            }
+
+            $normalized[] = [
+                'max_amount' => $tier['max_amount'] ?? null,
+                'percent' => $percent,
+            ];
+        }
+
+        return $normalized;
     }
 }
 

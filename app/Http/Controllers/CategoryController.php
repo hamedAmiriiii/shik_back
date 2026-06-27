@@ -161,16 +161,61 @@ class CategoryController extends Controller
     }
 
     /**
-     * نمایش جزئیات یک کتگوری
+     * یافتن دسته‌بندی متعلق به فروشگاه جاری (مسیر api/{shop}/category/{id}).
      */
-    public function show(Request $request, Category $category)
+    protected function resolveShopCategory(Request $request, $categoryId): Category
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
-        if ((int) $category->atelier_id !== $atelierId) {
-            return response(['message' => 'یافت نشد'], 404);
+
+        $category = Category::query()->where('id', $categoryId)->first();
+        if (! $category) {
+            abort(response()->json(['message' => 'دسته‌بندی یافت نشد'], 404));
         }
 
-        $category->load(['parent', 'children', 'products']);
+        if ($category->atelier_id !== null && (int) $category->atelier_id !== $atelierId) {
+            abort(response()->json(['message' => 'دسته‌بندی یافت نشد'], 404));
+        }
+
+        // دادهٔ قدیمی: atelier_id خالی — اگر محصولی از همین فروشگاه در دسته باشد مجاز است
+        if ($category->atelier_id === null) {
+            $hasShopProduct = $category->products()
+                ->where('products.atelier_id', $atelierId)
+                ->exists();
+
+            if (! $hasShopProduct) {
+                abort(response()->json(['message' => 'دسته‌بندی یافت نشد'], 404));
+            }
+        }
+
+        return $category;
+    }
+
+    protected function categoryAtelierIdForShop(Category $category, Request $request): int
+    {
+        if ($category->atelier_id !== null) {
+            return (int) $category->atelier_id;
+        }
+
+        return $this->shopAtelierIdOrAbort($request);
+    }
+
+    /**
+     * نمایش جزئیات یک کتگوری
+     */
+    public function show(Request $request, $category, string $shop = '')
+    {
+        $category = $this->resolveShopCategory($request, $category);
+
+        $atelierId = $this->categoryAtelierIdForShop($category, $request);
+        $category->load([
+            'parent',
+            'children',
+            'products' => function ($query) use ($atelierId) {
+                $query->where('products.atelier_id', $atelierId)
+                    ->with(['images']);
+            },
+        ]);
+
         return response($category);
     }
 
@@ -262,12 +307,9 @@ class CategoryController extends Controller
     /**
      * دریافت فرزندان یک کتگوری
      */
-    public function children(Request $request, Category $category)
+    public function children(Request $request, $category, string $shop = '')
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
-        if ((int) $category->atelier_id !== $atelierId) {
-            return response(['message' => 'یافت نشد'], 404);
-        }
+        $category = $this->resolveShopCategory($request, $category);
 
         $children = $category->children()->with('children')->get();
         return response($children);
@@ -277,12 +319,10 @@ class CategoryController extends Controller
      * دریافت محصولات یک کتگوری (با pagination و جستجو)
      * شامل محصولات زیرمجموعه‌ها نیز می‌شود
      */
-    public function products(Request $request, Category $category)
+    public function products(Request $request, $category, string $shop = '')
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
-        if ((int) $category->atelier_id !== $atelierId) {
-            return response(['message' => 'یافت نشد'], 404);
-        }
+        $category = $this->resolveShopCategory($request, $category);
+        $atelierId = $this->categoryAtelierIdForShop($category, $request);
 
         // دریافت تمام IDهای زیرمجموعه‌ها (شامل خود category)
         $categoryIds = $category->getAllDescendantIds();

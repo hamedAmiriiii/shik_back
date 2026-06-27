@@ -13,7 +13,7 @@ use Morilog\Jalali\Jalalian;
 
 class DailyShopReconciliationService
 {
-    public const EDITABLE_DAYS_BACK = 3;
+    public const EDITABLE_DAYS_BACK = 30;
 
     private const DEPOSIT_SLOTS = [
         'deposit_account_1' => ['deposit_record_column' => 'deposit_record_account_1_id', 'label' => 'حساب ۱'],

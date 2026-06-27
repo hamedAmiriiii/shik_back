@@ -273,17 +273,33 @@ class ProductController extends Controller
     }
 
     /**
-     * نمایش جزئیات یک محصول
+     * محصول متعلق به فروشگاه جاری (مسیر api/{shop}/product/{id}).
      */
-    public function show(Request $request, Product $product)
+    protected function resolveShopProduct(Request $request, $productId): Product
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
-        if ((int) $product->atelier_id !== $atelierId) {
-            return response(['message' => 'محصول یافت نشد'], 404);
+
+        $product = Product::query()->where('id', $productId)->first();
+        if (! $product) {
+            abort(response()->json(['message' => 'محصول یافت نشد'], 404));
         }
 
+        if ($product->atelier_id !== null && (int) $product->atelier_id !== $atelierId) {
+            abort(response()->json(['message' => 'محصول یافت نشد'], 404));
+        }
+
+        return $product;
+    }
+
+    /**
+     * نمایش جزئیات یک محصول
+     */
+    public function show(Request $request, $product, string $shop = '')
+    {
+        $product = $this->resolveShopProduct($request, $product);
         $product->load(['images', 'categories', 'manufacturer']);
-        return response($product);
+
+        return response($this->appendProductPricingMeta($product));
     }
 
     /**

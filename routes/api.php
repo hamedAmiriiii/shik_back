@@ -170,8 +170,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/installment-interest-rate', [\App\Http\Controllers\SettingController::class, 'getInstallmentInterestRate']);
         Route::post('/installment-interest-rate', [\App\Http\Controllers\SettingController::class, 'setInstallmentInterestRate']);
         Route::put('/installment-interest-rate', [\App\Http\Controllers\SettingController::class, 'setInstallmentInterestRate']);
-        Route::get('/{key}', [\App\Http\Controllers\SettingController::class, 'show']);
-        Route::put('/{key}', [\App\Http\Controllers\SettingController::class, 'update']);
+        $reservedSettingKeys = 'loyalty-credit-tiers|loyalty-credit|credit-expiry-days|installment-interest-rate';
+        Route::get('/{key}', [\App\Http\Controllers\SettingController::class, 'show'])
+            ->where('key', '^(?!'.$reservedSettingKeys.').+');
+        Route::put('/{key}', [\App\Http\Controllers\SettingController::class, 'update'])
+            ->where('key', '^(?!'.$reservedSettingKeys.').+');
     });
 
     // Installment routes - requires admin authentication

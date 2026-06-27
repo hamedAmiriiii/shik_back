@@ -174,6 +174,17 @@ trait ResolvesShopAtelierId
      */
     protected function resolveShopAtelierIdOrAbort(Request $request): int
     {
+        // ویترین آنلاین api/{shop}/... — فروشگاه از مسیر URL (ویترین عمومی؛ توکن مشتری/پرسنل فروشگاه دیگر مانع نمی‌شود)
+        $routeShop = $request->route('shop');
+        if (is_string($routeShop) && trim($routeShop) !== '') {
+            $id = $this->atelierIdFromCodeOrNull(trim($routeShop));
+            if ($id) {
+                return $id;
+            }
+
+            $this->abortUnknownShopCode($request, trim($routeShop));
+        }
+
         $actor = $this->shopRequestActor($request);
         $requestedAtelierId = $this->parseRequestedAtelierId($request);
 
@@ -208,9 +219,12 @@ trait ResolvesShopAtelierId
 
         $plainToken = $this->resolveBearerTokenFromRequest($request);
         if ($plainToken && ! $actor) {
-            abort(response()->json([
-                'message' => 'توکن نامعتبر یا منقضی شده است.',
-            ], 401));
+            $routeShop = $request->route('shop');
+            if (! (is_string($routeShop) && trim($routeShop) !== '')) {
+                abort(response()->json([
+                    'message' => 'توکن نامعتبر یا منقضی شده است.',
+                ], 401));
+            }
         }
 
         $code = $this->parseRequestedAtelierCode($request);
