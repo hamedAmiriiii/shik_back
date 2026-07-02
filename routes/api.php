@@ -199,10 +199,17 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::delete('/{phone}', [\App\Http\Controllers\InstallmentCreditController::class, 'destroy']);
     });
 
-    // Purchase installment routes - requires admin authentication
+    // Purchase installment routes - requires authentication
     Route::prefix('purchased-products')->name('purchased-products.installments.')->group(function () {
         Route::get('/{purchase}/installments', [\App\Http\Controllers\InstallmentController::class, 'index']);
         Route::post('/{purchase}/installments/{installment}/pay', [\App\Http\Controllers\InstallmentController::class, 'pay']);
+    });
+
+    Route::prefix('purchase-debts')->name('purchase-debts.')->group(function () {
+        Route::get('/grid', [\App\Http\Controllers\PurchaseDebtController::class, 'grid']);
+        Route::get('/by-phone', [\App\Http\Controllers\PurchaseDebtController::class, 'byPhone']);
+        Route::get('/{purchase}', [\App\Http\Controllers\PurchaseDebtController::class, 'show']);
+        Route::post('/{purchase}/settle', [\App\Http\Controllers\PurchaseDebtController::class, 'settle']);
     });
 
     // Financial Report routes - requires authentication

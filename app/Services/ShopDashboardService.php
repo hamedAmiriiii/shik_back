@@ -67,6 +67,8 @@ class ShopDashboardService
 
             if ($purchase->isInstallment()) {
                 $buckets[$key]['gross_sales'] += (float) $purchase->paid_amount + (float) $purchase->credit_used;
+            } elseif ($purchase->isDebt()) {
+                $buckets[$key]['gross_sales'] += $lineSales;
             } else {
                 $buckets[$key]['gross_sales'] += $lineSales;
             }
@@ -79,6 +81,9 @@ class ShopDashboardService
                 $buckets[$key]['uncollected_installments'] += (float) $purchase->installments
                     ->where('is_paid', false)
                     ->sum('amount');
+            } elseif ($purchase->isDebt() && ! $purchase->isDebtSettled()) {
+                $buckets[$key]['uncollected_debts'] = ($buckets[$key]['uncollected_debts'] ?? 0)
+                    + $purchase->payableAmount();
             }
             $buckets[$key]['purchases_count']++;
         }
@@ -113,12 +118,32 @@ class ShopDashboardService
             $buckets[$key]['installments_collected'] += (float) $installment->amount;
         }
 
+        $paidDebts = Purchase::query()
+            ->forAtelier($atelierId)
+            ->where('payment_type', 'debt')
+            ->where('is_debt_settled', true)
+            ->whereNotNull('debt_settled_at')
+            ->whereBetween('debt_settled_at', [$rangeStart, $rangeEnd])
+            ->get(['debt_settled_at', 'debt_settled_card_amount', 'debt_settled_cash_amount']);
+
+        foreach ($paidDebts as $debtPurchase) {
+            $key = Carbon::parse($debtPurchase->getRawOriginal('debt_settled_at'))
+                ->setTimezone('Asia/Tehran')
+                ->format('Y-m-d');
+            if (! isset($buckets[$key])) {
+                continue;
+            }
+            $buckets[$key]['debts_collected'] = ($buckets[$key]['debts_collected'] ?? 0)
+                + (float) $debtPurchase->debt_settled_card_amount
+                + (float) $debtPurchase->debt_settled_cash_amount;
+        }
+
         $daily = [];
         $periodTotalSales = 0.0;
         foreach ($buckets as $row) {
             $row['total_sales'] = (float) ($row['gross_sales'] - $row['total_returns']);
             $row['cash_and_card_total'] = (float) ($row['card_amount'] + $row['cash_amount']);
-            $row['total_collected'] = (float) ($row['cash_and_card_total'] + $row['installments_collected']);
+            $row['total_collected'] = (float) ($row['cash_and_card_total'] + $row['installments_collected'] + ($row['debts_collected'] ?? 0));
             $periodTotalSales += $row['total_sales'];
             $daily[] = $row;
         }
@@ -131,6 +156,7 @@ class ShopDashboardService
             'to_date_jalali' => Jalalian::fromCarbon($end)->format('Y-m-d'),
             'period_total_sales' => (float) $periodTotalSales,
             'total_uncollected_installments' => ShopSalesReportService::totalUncollectedInstallments($atelierId),
+            'total_uncollected_debts' => ShopSalesReportService::totalUncollectedDebts($atelierId),
             'daily' => $daily,
         ];
     }
@@ -158,8 +184,10 @@ class ShopDashboardService
             'cash_amount' => $report['cash_amount'],
             'cash_and_card_total' => $report['cash_and_card_total'],
             'installments_collected' => $report['installments_collected'],
+            'debts_collected' => $report['debts_collected'] ?? 0,
             'total_collected' => $report['total_collected'],
             'uncollected_installments' => $report['uncollected_installments'],
+            'uncollected_debts' => $report['uncollected_debts'] ?? 0,
             'credit_used_total' => $report['credit_used_total'],
             'settlement_total' => $report['settlement_total'],
             'purchases_count' => $purchasesCount,
@@ -181,8 +209,10 @@ class ShopDashboardService
             'cash_amount' => 0.0,
             'cash_and_card_total' => 0.0,
             'installments_collected' => 0.0,
+            'debts_collected' => 0.0,
             'total_collected' => 0.0,
             'uncollected_installments' => 0.0,
+            'uncollected_debts' => 0.0,
             'purchases_count' => 0,
         ];
     }

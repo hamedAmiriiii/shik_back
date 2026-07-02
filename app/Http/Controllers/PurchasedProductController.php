@@ -12,6 +12,7 @@ use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
 use App\Tools\PriceTools;
+use App\Tools\PhoneTools;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
@@ -96,6 +97,10 @@ class PurchasedProductController extends Controller
         // برای خریدهای نقدی: مبلغ کل خرید
         if ($purchase->isInstallment()) {
             $total += $purchase->paid_amount;
+        } elseif ($purchase->isDebt()) {
+            $total += $purchase->isDebtSettled()
+                ? ((float) $purchase->debt_settled_card_amount + (float) $purchase->debt_settled_cash_amount)
+                : $purchase->payableAmount();
         } else {
             $total += $purchase->total_amount;
         }
@@ -112,6 +117,11 @@ class PurchasedProductController extends Controller
             // اضافه کردن فیلد paid_amount برای خریدهای اقساطی
             $purchaseData['paid_amount'] = (float) $purchase->paid_amount;
         }
+        if ($purchase && $purchase->isDebt()) {
+            $purchaseData['payable_amount'] = $purchase->payableAmount();
+            $purchaseData['is_debt_settled'] = (bool) $purchase->is_debt_settled;
+            $purchaseData['payment_type_label'] = 'قرضی';
+        }
     }
     unset($purchaseData);
 
@@ -125,25 +135,31 @@ class PurchasedProductController extends Controller
     {
         $this->bindShopSettingAtelierFromRequest($request);
 
+        if ($request->has('phone')) {
+            $request->merge([
+                'phone' => PhoneTools::normalizeIranPhone($request->input('phone')),
+            ]);
+        }
+
         $request->validate([
-            'phone' => 'nullable|string|digits:11',
+            'phone' => 'required_if:payment_type,debt|nullable|string|regex:/^09\d{9}$/',
             'products' => 'required|array|min:1',
             'products.*.product_id' => [
                 'required',
                 Rule::exists('products', 'id')->whereNull('deleted_at'),
             ],
             'products.*.quantity' => 'required|integer|min:1',
-            'products.*.sale_price' => 'nullable|numeric|min:0', // قیمت فروش با تخفیف (اختیاری)
-            'products.*.discount_percent' => 'nullable|numeric|min:0|max:100', // درصد تخفیف (اختیاری)
-            'products.*.size' => 'nullable|string|max:255', // سایز انتخاب شده (اختیاری)
-            'products.*.color' => 'nullable|string|max:255', // رنگ انتخاب شده (اختیاری)
-            'use_credit' => 'nullable|boolean', // آیا کاربر می‌خواهد از اعتبارش استفاده کند؟
-            'discount_amount' => 'nullable|numeric|min:0', // مبلغ تخفیف مستقیم (اختیاری)
-            'payment_type' => 'nullable|string|in:cash,installment', // نوع پرداخت: نقدی یا اقساطی
-            'installment_count' => 'required_if:payment_type,installment|integer|min:2|max:24', // تعداد اقساط (حداقل 2، حداکثر 24)
+            'products.*.sale_price' => 'nullable|numeric|min:0',
+            'products.*.discount_percent' => 'nullable|numeric|min:0|max:100',
+            'products.*.size' => 'nullable|string|max:255',
+            'products.*.color' => 'nullable|string|max:255',
+            'use_credit' => 'nullable|boolean',
+            'discount_amount' => 'nullable|numeric|min:0',
+            'payment_type' => 'nullable|string|in:cash,installment,debt',
+            'installment_count' => 'required_if:payment_type,installment|integer|min:2|max:24',
             'card_amount' => 'nullable|numeric|min:0',
             'cash_amount' => 'nullable|numeric|min:0',
-            'payment_settlement' => 'nullable|string|in:card,cash', // میانبر: کل مبلغ پرداختی امروز روی کارت یا نقد
+            'payment_settlement' => 'nullable|string|in:card,cash',
         ]);
 
         $phone = $request->input('phone');
@@ -298,9 +314,11 @@ class PurchasedProductController extends Controller
 
         $amountPaidNow = $paymentType === 'installment'
             ? $this->roundToThreeZeroEnding($finalTotalAmount / 3)
-            : (float) $payableAmount;
+            : ($paymentType === 'debt' ? 0.0 : (float) $payableAmount);
 
-        $settlement = $this->resolvePurchaseSettlement($request, $amountPaidNow);
+        $settlement = $paymentType === 'debt'
+            ? ['card_amount' => 0.0, 'cash_amount' => 0.0]
+            : $this->resolvePurchaseSettlement($request, $amountPaidNow);
 
         // ایجاد سبد خرید (Purchase)
         $purchase = Purchase::create([
@@ -312,6 +330,7 @@ class PurchasedProductController extends Controller
             'payment_type' => $paymentType,
             'card_amount' => $settlement['card_amount'],
             'cash_amount' => $settlement['cash_amount'],
+            'is_debt_settled' => false,
             'installment_count' => $paymentType === 'installment' ? $installmentCount : null,
             'installment_amount' => $installmentAmount,
             'atelier_id' => $purchaseAtelierId,
@@ -395,8 +414,12 @@ class PurchasedProductController extends Controller
 
         // برگرداندن سبد خرید با محصولاتش و قسط‌ها (در صورت وجود)
         $purchase->load('purchasedProducts.product');
-        if ($paymentType === 'installment') {
+        if ($purchase->isInstallment()) {
             $purchase->load('installments');
+        }
+        if ($purchase->isDebt()) {
+            $purchase->setAttribute('payable_amount', $purchase->payableAmount());
+            $purchase->setAttribute('payment_type_label', 'قرضی');
         }
         
         return response($purchase, 201);
@@ -407,6 +430,10 @@ class PurchasedProductController extends Controller
         $purchase->load('purchasedProducts.product');
         if ($purchase->isInstallment()) {
             $purchase->load('installments');
+        }
+        if ($purchase->isDebt()) {
+            $purchase->setAttribute('payable_amount', $purchase->payableAmount());
+            $purchase->setAttribute('payment_type_label', 'قرضی');
         }
         return response($purchase, 200);
     }

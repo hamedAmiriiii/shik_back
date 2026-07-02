@@ -49,6 +49,8 @@ class ShopSalesReportService
 
             if ($purchase->isInstallment()) {
                 $totalSales += (float) $purchase->paid_amount + (float) $purchase->credit_used;
+            } elseif ($purchase->isDebt()) {
+                $totalSales += $lineSales;
             } else {
                 // همان مبلغ فاکتور (total_amount) — هم‌خوان با card+cash در جدول purchases
                 $totalSales += (float) $purchase->total_amount;
@@ -69,10 +71,13 @@ class ShopSalesReportService
             }
         }
 
+        $openDebts = self::openDebtsAsOf($atelierId, $endDate);
+
         $installmentsCollected = self::installmentsCollectedInRange($atelierId, $startString, $endString);
+        $debtsCollected = self::debtsCollectedInRange($atelierId, $startString, $endString);
         $cashAndCardTotal = round($cardAmount + $cashAmount, 2);
-        $settlementTotal = round($cashAndCardTotal + $creditUsedTotal + $installmentsCollected, 2);
-        $totalCollected = $cashAndCardTotal + $installmentsCollected;
+        $settlementTotal = round($cashAndCardTotal + $creditUsedTotal + $installmentsCollected + $debtsCollected, 2);
+        $totalCollected = $cashAndCardTotal + $installmentsCollected + $debtsCollected;
 
         $returnedProducts = ReturnedProduct::with('product')
             ->forAtelier($atelierId)
@@ -106,8 +111,11 @@ class ShopSalesReportService
             'cash_amount' => (float) round($cashAmount, 2),
             'cash_and_card_total' => (float) $cashAndCardTotal,
             'installments_collected' => (float) $installmentsCollected,
+            'debts_collected' => (float) $debtsCollected,
             'total_collected' => (float) round($totalCollected, 2),
             'uncollected_installments' => (float) $uncollectedFromPeriodSales,
+            'uncollected_debts' => (float) round($openDebts, 2),
+            'open_debt' => (float) round($openDebts, 2),
             'credit_used_total' => (float) round($creditUsedTotal, 2),
             'settlement_total' => (float) $settlementTotal,
             'discount_given' => (float) round($discountGiven, 2),
@@ -150,10 +158,14 @@ class ShopSalesReportService
             'cash_amount' => (float) ($metrics['cash_amount'] ?? 0),
             'card_amount' => (float) ($metrics['card_amount'] ?? 0),
             'installments_collected' => (float) ($metrics['installments_collected'] ?? 0),
+            'debts_collected' => (float) ($metrics['debts_collected'] ?? 0),
             'total_collected' => (float) ($metrics['total_collected'] ?? 0),
             'discount_given' => (float) ($metrics['discount_given'] ?? 0),
             'credit_used_total' => (float) ($metrics['credit_used_total'] ?? 0),
             'settlement_total' => (float) ($metrics['settlement_total'] ?? 0),
+            'uncollected_installments' => (float) ($metrics['uncollected_installments'] ?? 0),
+            'uncollected_debts' => (float) ($metrics['uncollected_debts'] ?? 0),
+            'open_debt' => (float) ($metrics['open_debt'] ?? $metrics['uncollected_debts'] ?? 0),
         ];
     }
 
@@ -169,6 +181,10 @@ class ShopSalesReportService
 
         if ($purchase->isInstallment()) {
             return [$card, $cash];
+        }
+
+        if ($purchase->isDebt()) {
+            return [0.0, 0.0];
         }
 
         $payable = max(0, round(
@@ -200,6 +216,60 @@ class ShopSalesReportService
                 $q->forAtelier($atelierId);
             })
             ->sum('amount');
+    }
+
+    public static function debtsCollectedInRange(int $atelierId, string $start, string $end): float
+    {
+        if (! Schema::hasColumn('purchases', 'is_debt_settled')) {
+            return 0.0;
+        }
+
+        return (float) Purchase::query()
+            ->forAtelier($atelierId)
+            ->where('payment_type', 'debt')
+            ->where('is_debt_settled', true)
+            ->whereNotNull('debt_settled_at')
+            ->whereBetween('debt_settled_at', [$start, $end])
+            ->get()
+            ->sum(function (Purchase $purchase) {
+                return (float) $purchase->debt_settled_card_amount + (float) $purchase->debt_settled_cash_amount;
+            });
+    }
+
+    public static function totalUncollectedDebts(int $atelierId): float
+    {
+        return self::openDebtsAsOf($atelierId, Carbon::now('Asia/Tehran'));
+    }
+
+    /**
+     * مجموع بدهی‌های قرضی باز تا پایان یک روز.
+     */
+    public static function openDebtsAsOf(int $atelierId, Carbon $asOfDate): float
+    {
+        if (! Schema::hasColumn('purchases', 'is_debt_settled')) {
+            return 0.0;
+        }
+
+        $endString = $asOfDate->copy()->setTimezone('Asia/Tehran')->endOfDay()->format('Y-m-d H:i:s');
+
+        return (float) Purchase::query()
+            ->forAtelier($atelierId)
+            ->where('payment_type', 'debt')
+            ->where('total_amount', '>', 0)
+            ->where('created_at', '<=', $endString)
+            ->where(function ($q) use ($endString) {
+                $q->where('is_debt_settled', false)
+                    ->orWhere(function ($q2) use ($endString) {
+                        $q2->where('is_debt_settled', true)
+                            ->whereNotNull('debt_settled_at')
+                            ->where('debt_settled_at', '>', $endString);
+                    });
+            })
+            ->with('purchasedProducts')
+            ->get()
+            ->sum(function (Purchase $purchase) {
+                return $purchase->payableAmount();
+            });
     }
 
     public static function totalUncollectedInstallments(int $atelierId): float

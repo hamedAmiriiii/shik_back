@@ -20,6 +20,11 @@ class Purchase extends Model
         'payment_type',
         'card_amount',
         'cash_amount',
+        'is_debt_settled',
+        'debt_settled_at',
+        'debt_settled_card_amount',
+        'debt_settled_cash_amount',
+        'debt_settlement_note',
         'installment_count',
         'installment_amount',
         'atelier_id',
@@ -32,6 +37,10 @@ class Purchase extends Model
         'credit_earned' => 'decimal:2',
         'card_amount' => 'decimal:2',
         'cash_amount' => 'decimal:2',
+        'is_debt_settled' => 'boolean',
+        'debt_settled_at' => 'datetime',
+        'debt_settled_card_amount' => 'decimal:2',
+        'debt_settled_cash_amount' => 'decimal:2',
         'installment_amount' => 'decimal:2',
     ];
 
@@ -108,6 +117,45 @@ class Purchase extends Model
         return $this->payment_type === 'installment';
     }
 
+    public function isDebt()
+    {
+        return $this->payment_type === 'debt';
+    }
+
+    /**
+     * مبلغ قابل پرداخت فاکتور (بعد از تخفیف و اعتبار مصرف‌شده).
+     */
+    public function payableAmount(): float
+    {
+        if ($this->isInstallment()) {
+            return max(0, round((float) $this->total_amount - (float) $this->credit_used, 2));
+        }
+
+        $lineTotal = $this->remainingLineSalesTotal();
+        if ($lineTotal <= 0) {
+            return 0.0;
+        }
+
+        return max(0, round(
+            $lineTotal - (float) $this->discount_amount - (float) $this->credit_used,
+            2
+        ));
+    }
+
+    public function isDebtSettled(): bool
+    {
+        return $this->isDebt() && (bool) $this->is_debt_settled;
+    }
+
+    public function outstandingDebtAmount(): float
+    {
+        if (! $this->isDebt() || $this->isDebtSettled()) {
+            return 0.0;
+        }
+
+        return $this->payableAmount();
+    }
+
     /**
      * محاسبه مبلغ پرداخت شده از قسط‌ها
      */
@@ -126,6 +174,10 @@ class Purchase extends Model
      */
     public function getRemainingAmountAttribute()
     {
+        if ($this->isDebt()) {
+            return $this->outstandingDebtAmount();
+        }
+
         return $this->total_amount - $this->paid_amount;
     }
 
@@ -139,6 +191,14 @@ class Purchase extends Model
         if ($this->isInstallment()) {
             return $this->paid_amount;
         }
+        if ($this->isDebt()) {
+            if ($this->isDebtSettled()) {
+                return (float) $this->debt_settled_card_amount + (float) $this->debt_settled_cash_amount;
+            }
+
+            return 0.0;
+        }
+
         return max(0, round(
             (float) $this->total_amount - (float) $this->discount_amount - (float) $this->credit_used,
             2
@@ -192,6 +252,16 @@ class Purchase extends Model
 
         if ($this->isInstallment()) {
             $this->total_amount = $lineTotal;
+
+            return;
+        }
+
+        if ($this->isDebt()) {
+            $this->total_amount = $lineTotal;
+            if (! $this->isDebtSettled()) {
+                $this->card_amount = 0;
+                $this->cash_amount = 0;
+            }
 
             return;
         }
