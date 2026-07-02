@@ -134,6 +134,13 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/', [\App\Http\Controllers\ShopSmsQuotaController::class, 'show']);
         Route::post('/estimate', [\App\Http\Controllers\ShopSmsQuotaController::class, 'estimate']);
     });
+
+    Route::prefix('sms-packages')->name('sms-packages.')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ShopSmsPackageController::class, 'index']);
+        Route::post('/{smsPackage}/purchase', [\App\Http\Controllers\ShopSmsPackageController::class, 'purchase']);
+    });
+    Route::get('sms-package-orders', [\App\Http\Controllers\ShopSmsPackageController::class, 'orders'])
+        ->name('sms-package-orders.index');
     
     // Manufacturer routes - require authentication (POST/PUT/DELETE)
     Route::post('manufacturers', [\App\Http\Controllers\ManufacturerController::class, 'store']);
@@ -218,6 +225,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('shop-sms-quota/{atelier}', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'show']);
         Route::put('shop-sms-quota/{atelier}', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'update']);
         Route::post('shop-sms-quota/{atelier}/charge', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'charge']);
+
+        Route::get('sms-package-orders', [\App\Http\Controllers\Admin\SmsPackageOrderController::class, 'index']);
+        Route::get('sms-package-orders/{smsPackageOrder}', [\App\Http\Controllers\Admin\SmsPackageOrderController::class, 'show']);
+        Route::post('sms-package-orders/{smsPackageOrder}/approve', [\App\Http\Controllers\Admin\SmsPackageOrderController::class, 'approve']);
+        Route::post('sms-package-orders/{smsPackageOrder}/reject', [\App\Http\Controllers\Admin\SmsPackageOrderController::class, 'reject']);
 
         Route::resource("cameraman", \App\Http\Controllers\Admin\CameramanController::class);
         Route::post("/cameraman/confirm/{cameraman}", [\App\Http\Controllers\Admin\CameramanController::class, "confirm"]);
