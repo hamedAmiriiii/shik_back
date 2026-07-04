@@ -256,6 +256,63 @@ class SettingController extends Controller
     }
 
     /**
+     * دریافت تنظیمات حقوق کارمندان فروشگاه.
+     */
+    public function getPayrollSettings(Request $request)
+    {
+        $atelierId = $this->staffShopAtelierId($request);
+        Setting::setContextAtelierId($atelierId);
+
+        $hourlyWage = (float) Setting::get('salary_hourly_wage', '0');
+        $monthlyWorkHours = (float) Setting::get('salary_monthly_work_hours', '220');
+
+        return response([
+            'salary_hourly_wage' => $hourlyWage,
+            'salary_monthly_work_hours' => $monthlyWorkHours,
+        ], 200);
+    }
+
+    /**
+     * تنظیم حقوق پایه ساعتی و ساعات کار ماهانه.
+     */
+    public function setPayrollSettings(Request $request)
+    {
+        $atelierId = $this->staffShopAtelierId($request);
+        Setting::setContextAtelierId($atelierId);
+
+        $this->mergeRequestPayload($request, [
+            'salary_hourly_wage',
+            'salary_monthly_work_hours',
+            'hourly_wage',
+            'monthly_work_hours',
+        ]);
+
+        if (! $request->has('salary_hourly_wage') && $request->has('hourly_wage')) {
+            $request->merge(['salary_hourly_wage' => $request->input('hourly_wage')]);
+        }
+        if (! $request->has('salary_monthly_work_hours') && $request->has('monthly_work_hours')) {
+            $request->merge(['salary_monthly_work_hours' => $request->input('monthly_work_hours')]);
+        }
+
+        $request->validate([
+            'salary_hourly_wage' => 'required|numeric|min:0',
+            'salary_monthly_work_hours' => 'required|numeric|min:1|max:744',
+        ]);
+
+        $hourlyWage = (float) $request->input('salary_hourly_wage');
+        $monthlyWorkHours = (float) $request->input('salary_monthly_work_hours');
+
+        Setting::set('salary_hourly_wage', (string) $hourlyWage);
+        Setting::set('salary_monthly_work_hours', (string) $monthlyWorkHours);
+
+        return response([
+            'message' => 'تنظیمات حقوق با موفقیت ذخیره شد.',
+            'salary_hourly_wage' => $hourlyWage,
+            'salary_monthly_work_hours' => $monthlyWorkHours,
+        ], 200);
+    }
+
+    /**
      * @param  array<int, array<string, mixed>>  $tiers
      * @return array<int, array{max_amount: mixed, percent: float|int|string}>
      */

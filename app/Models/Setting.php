@@ -46,6 +46,8 @@ class Setting extends Model
             'credit_expiry_days' => '60',
             'installment_monthly_interest_rate' => '0',
             'shop_sms_quota' => '0',
+            'salary_hourly_wage' => '0',
+            'salary_monthly_work_hours' => '220',
         ];
 
         foreach ($defaults as $key => $value) {

@@ -101,6 +101,13 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Store/Shop related routes - require authentication
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
     Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);
+    Route::resource('shop-employees', \App\Http\Controllers\ShopEmployeeController::class);
+    Route::get('employee-payrolls', [\App\Http\Controllers\EmployeePayrollController::class, 'index']);
+    Route::post('employee-payrolls', [\App\Http\Controllers\EmployeePayrollController::class, 'store']);
+    Route::get('employee-payrolls/{employeePayroll}', [\App\Http\Controllers\EmployeePayrollController::class, 'show']);
+    Route::put('employee-payrolls/{employeePayroll}', [\App\Http\Controllers\EmployeePayrollController::class, 'update']);
+    Route::delete('employee-payrolls/{employeePayroll}', [\App\Http\Controllers\EmployeePayrollController::class, 'destroy']);
+    Route::post('employee-payrolls/{employeePayroll}/pay', [\App\Http\Controllers\EmployeePayrollController::class, 'pay']);
     
     // Invoice routes - require authentication
     Route::resource('invoices', \App\Http\Controllers\InvoiceController::class);
@@ -177,7 +184,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/installment-interest-rate', [\App\Http\Controllers\SettingController::class, 'getInstallmentInterestRate']);
         Route::post('/installment-interest-rate', [\App\Http\Controllers\SettingController::class, 'setInstallmentInterestRate']);
         Route::put('/installment-interest-rate', [\App\Http\Controllers\SettingController::class, 'setInstallmentInterestRate']);
-        $reservedSettingKeys = 'loyalty-credit-tiers|loyalty-credit|credit-expiry-days|installment-interest-rate';
+        Route::get('/payroll', [\App\Http\Controllers\SettingController::class, 'getPayrollSettings']);
+        Route::post('/payroll', [\App\Http\Controllers\SettingController::class, 'setPayrollSettings']);
+        Route::put('/payroll', [\App\Http\Controllers\SettingController::class, 'setPayrollSettings']);
+        $reservedSettingKeys = 'loyalty-credit-tiers|loyalty-credit|credit-expiry-days|installment-interest-rate|payroll';
         Route::get('/{key}', [\App\Http\Controllers\SettingController::class, 'show'])
             ->where('key', '^(?!'.$reservedSettingKeys.').+');
         Route::put('/{key}', [\App\Http\Controllers\SettingController::class, 'update'])
