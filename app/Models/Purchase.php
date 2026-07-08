@@ -28,6 +28,7 @@ class Purchase extends Model
         'installment_count',
         'installment_amount',
         'atelier_id',
+        'client_id',
     ];
 
     protected $casts = [

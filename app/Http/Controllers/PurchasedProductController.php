@@ -16,6 +16,7 @@ use App\Tools\PhoneTools;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Morilog\Jalali\Jalalian;
@@ -142,6 +143,7 @@ class PurchasedProductController extends Controller
         }
 
         $request->validate([
+            'client_id' => 'nullable|string|max:64',
             'phone' => 'required_if:payment_type,debt|nullable|string|regex:/^09\d{9}$/',
             'products' => 'required|array|min:1',
             'products.*.product_id' => [
@@ -187,6 +189,14 @@ class PurchasedProductController extends Controller
                 return response(['error' => 'همه محصولات باید متعلق به یک فروشگاه باشند'], 422);
             }
             $purchaseAtelierId = $distinctAtelierIds->isEmpty() ? null : (int) $distinctAtelierIds->first();
+        }
+
+        $clientId = $this->normalizeClientId($request->input('client_id'));
+        if ($clientId !== null) {
+            $existingPurchase = $this->findPurchaseByClientId($purchaseAtelierId, $clientId);
+            if ($existingPurchase) {
+                return $this->storePurchaseResponse($existingPurchase, true);
+            }
         }
 
         // بررسی موجودی محصولات قبل از ثبت خرید
@@ -321,20 +331,32 @@ class PurchasedProductController extends Controller
             : $this->resolvePurchaseSettlement($request, $amountPaidNow);
 
         // ایجاد سبد خرید (Purchase)
-        $purchase = Purchase::create([
-            'phone' => $phone,
-            'total_amount' => $paymentType === 'installment' ? $finalTotalAmount : $grossTotal,
-            'discount_amount' => round((float) $discountAmount, 2),
-            'credit_used' => $creditUsed,
-            'credit_earned' => $creditEarned,
-            'payment_type' => $paymentType,
-            'card_amount' => $settlement['card_amount'],
-            'cash_amount' => $settlement['cash_amount'],
-            'is_debt_settled' => false,
-            'installment_count' => $paymentType === 'installment' ? $installmentCount : null,
-            'installment_amount' => $installmentAmount,
-            'atelier_id' => $purchaseAtelierId,
-        ]);
+        try {
+            $purchase = Purchase::create([
+                'phone' => $phone,
+                'total_amount' => $paymentType === 'installment' ? $finalTotalAmount : $grossTotal,
+                'discount_amount' => round((float) $discountAmount, 2),
+                'credit_used' => $creditUsed,
+                'credit_earned' => $creditEarned,
+                'payment_type' => $paymentType,
+                'card_amount' => $settlement['card_amount'],
+                'cash_amount' => $settlement['cash_amount'],
+                'is_debt_settled' => false,
+                'installment_count' => $paymentType === 'installment' ? $installmentCount : null,
+                'installment_amount' => $installmentAmount,
+                'atelier_id' => $purchaseAtelierId,
+                'client_id' => $clientId,
+            ]);
+        } catch (QueryException $e) {
+            if ($clientId !== null && $this->isDuplicateClientIdException($e)) {
+                $existingPurchase = $this->findPurchaseByClientId($purchaseAtelierId, $clientId);
+                if ($existingPurchase) {
+                    return $this->storePurchaseResponse($existingPurchase, true);
+                }
+            }
+
+            throw $e;
+        }
 
         // ذخیره محصولات خریداری شده و لینک کردن به سبد خرید
         $purchasedProducts = [];
@@ -412,7 +434,42 @@ class PurchasedProductController extends Controller
             CustomerPhone::createNewPhone($phone);
         }
 
-        // برگرداندن سبد خرید با محصولاتش و قسط‌ها (در صورت وجود)
+        return $this->storePurchaseResponse($purchase, false);
+    }
+
+    protected function normalizeClientId($clientId): ?string
+    {
+        if ($clientId === null) {
+            return null;
+        }
+
+        $clientId = trim((string) $clientId);
+
+        return $clientId !== '' ? $clientId : null;
+    }
+
+    protected function findPurchaseByClientId(?int $atelierId, string $clientId): ?Purchase
+    {
+        $query = Purchase::query()->where('client_id', $clientId);
+
+        if ($atelierId !== null) {
+            $query->where('atelier_id', $atelierId);
+        } else {
+            $query->whereNull('atelier_id');
+        }
+
+        return $query->first();
+    }
+
+    protected function isDuplicateClientIdException(QueryException $e): bool
+    {
+        $errorCode = (int) ($e->errorInfo[1] ?? 0);
+
+        return $errorCode === 1062 || strpos(strtolower($e->getMessage()), 'duplicate') !== false;
+    }
+
+    protected function storePurchaseResponse(Purchase $purchase, bool $alreadyExists)
+    {
         $purchase->load('purchasedProducts.product');
         if ($purchase->isInstallment()) {
             $purchase->load('installments');
@@ -421,8 +478,17 @@ class PurchasedProductController extends Controller
             $purchase->setAttribute('payable_amount', $purchase->payableAmount());
             $purchase->setAttribute('payment_type_label', 'قرضی');
         }
-        
-        return response($purchase, 201);
+
+        $payload = $purchase->toArray();
+        $payload['id'] = $purchase->id;
+        $payload['already_exists'] = $alreadyExists;
+
+        if ($alreadyExists) {
+            $payload['code'] = 'duplicate_client_id';
+            $payload['message'] = 'این فاکتور قبلاً با همین client_id ثبت شده است.';
+        }
+
+        return response($payload, $alreadyExists ? 200 : 201);
     }
 
     public function show(Purchase $purchase)
