@@ -28,6 +28,9 @@ class Atelier extends Model
     /** مدت آزمایش رایگان پس از ثبت‌نام */
     public const TRIAL_MONTHS = 1;
 
+    public const SUBSCRIPTION_TRIAL = 'trial';
+
+    public const SUBSCRIPTION_PAID = 'paid';
 
     protected $fillable = [
         'name',
@@ -37,12 +40,16 @@ class Atelier extends Model
         'shop_access_starts_at',
         'shop_access_ends_at',
         'shop_access_suspended',
+        'subscription_status',
+        'referred_by_user_id',
+        'paid_plan_activated_at',
     ];
 
     protected $casts = [
         'shop_access_starts_at' => 'datetime',
         'shop_access_ends_at' => 'datetime',
         'shop_access_suspended' => 'boolean',
+        'paid_plan_activated_at' => 'datetime',
     ];
 
     /**
@@ -97,7 +104,30 @@ class Atelier extends Model
             'shop_access_suspended' => (bool) $this->shop_access_suspended,
             'shop_access_active' => $this->isShopAccessActive(),
             'shop_access_days_remaining' => $daysRemaining,
+            'subscription_status' => $this->subscription_status ?? self::SUBSCRIPTION_TRIAL,
+            'subscription_status_label' => self::subscriptionStatusLabel($this->subscription_status ?? self::SUBSCRIPTION_TRIAL),
+            'is_paid_plan' => ($this->subscription_status ?? self::SUBSCRIPTION_TRIAL) === self::SUBSCRIPTION_PAID,
+            'paid_plan_activated_at' => $this->paid_plan_activated_at?->format('Y-m-d H:i:s'),
         ];
+    }
+
+    public static function subscriptionStatusLabel(?string $status): string
+    {
+        return match ($status) {
+            self::SUBSCRIPTION_PAID => 'پلن خریداری‌شده',
+            self::SUBSCRIPTION_TRIAL => 'رایگان (آزمایشی)',
+            default => (string) $status,
+        };
+    }
+
+    public function isPaidPlan(): bool
+    {
+        return ($this->subscription_status ?? self::SUBSCRIPTION_TRIAL) === self::SUBSCRIPTION_PAID;
+    }
+
+    public function referrer()
+    {
+        return $this->belongsTo(User::class, 'referred_by_user_id');
     }
 
     public function staffUsers()

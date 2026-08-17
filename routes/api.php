@@ -16,6 +16,13 @@ use App\Http\Controllers\CategoryController;
 |
 */
 
+Route::prefix('referrals')->name('referrals.')->group(function () {
+    Route::get('dashboard/{token}', [\App\Http\Controllers\PublicReferralController::class, 'dashboard'])
+        ->where('token', '[A-Za-z0-9]+');
+    Route::get('{identifier}', [\App\Http\Controllers\PublicReferralController::class, 'show'])
+        ->where('identifier', '[0-9]{11}|[A-Za-z0-9]{6,64}');
+});
+
 Route::name('auth.')->prefix('auth')->group(function () {
     Route::post('register/send-phone-code', [\App\Http\Controllers\Auth\AuthController::class, 'sendRegistrationPhoneCode']);
     Route::post('register', [\App\Http\Controllers\Auth\AuthController::class, 'register']);
@@ -124,6 +131,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     });
 
     Route::get('shop-access', [\App\Http\Controllers\ShopAccessController::class, 'show']);
+
+    Route::get('referral', [\App\Http\Controllers\ReferralController::class, 'show']);
 
     Route::get('dashboard/summary', [\App\Http\Controllers\DashboardController::class, 'summary']);
     Route::get('dashboard/sales-by-day', [\App\Http\Controllers\DashboardController::class, 'salesByDay']);

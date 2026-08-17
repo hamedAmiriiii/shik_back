@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\Atelier;
 use App\Models\User;
+use App\Services\ShopReferralService;
 use App\Tools\ImageTools;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
@@ -99,6 +100,7 @@ class AuthController extends Controller
                 'national_cart' => 'nullable|string',
                 'tech_certificate' => 'nullable|string',
                 'verification_code' => 'required|numeric|digits:5',
+                'referral_code' => 'nullable|string|max:16',
             ];
             if (in_array(User::USER_TYPE_KEY['فیلم بردار'], $types, true)) {
                 $rules['tech_certificate'] = 'required|string';
@@ -197,6 +199,12 @@ class AuthController extends Controller
                 'atelier_id' => $atelier->id,
                 'shop_staff_role' => 'owner',
             ]);
+
+            ShopReferralService::attachReferrerOnShopRegistration(
+                $user,
+                $atelier,
+                $fields['referral_code'] ?? $request->input('referral_code')
+            );
         }
 
         $user->load(['roles', 'atelier']);

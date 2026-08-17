@@ -7,6 +7,7 @@ use App\Models\Atelier;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\User;
+use App\Services\ShopReferralService;
 use App\Services\ShopSmsQuotaService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -34,6 +35,8 @@ class ShopSmsQuotaController extends Controller
                 'ateliers.shop_access_starts_at',
                 'ateliers.shop_access_ends_at',
                 'ateliers.shop_access_suspended',
+                'ateliers.subscription_status',
+                'ateliers.paid_plan_activated_at',
                 DB::raw('COALESCE(sms_quota_setting.value, 0) as shop_sms_quota'),
             ])
             ->orderByDesc('ateliers.id');
@@ -123,7 +126,11 @@ class ShopSmsQuotaController extends Controller
             'shop_access_ends_at' => 'sometimes|nullable|date',
             'shop_access_starts_at' => 'sometimes|nullable|date',
             'shop_access_suspended' => 'sometimes|boolean',
+            'subscription_status' => 'sometimes|string|in:trial,paid',
+            'activate_paid_plan' => 'sometimes|boolean',
         ]);
+
+        $wasPaid = $atelier->isPaidPlan();
 
         $hasSms = $request->has('shop_sms_quota') || $request->has('balance');
         $hasAccess = $request->has('shop_access_ends_at')
@@ -156,7 +163,19 @@ class ShopSmsQuotaController extends Controller
             if (array_key_exists('shop_access_suspended', $fields)) {
                 $update['shop_access_suspended'] = (bool) $fields['shop_access_suspended'];
             }
+            if (array_key_exists('subscription_status', $fields)) {
+                $update['subscription_status'] = $fields['subscription_status'];
+            }
             $atelier->update($update);
+        }
+
+        $shouldActivatePaidPlan = ! $wasPaid && (
+            $request->boolean('activate_paid_plan')
+            || (($fields['subscription_status'] ?? null) === Atelier::SUBSCRIPTION_PAID)
+        );
+
+        if ($shouldActivatePaidPlan) {
+            ShopReferralService::onPaidPlanActivated($atelier);
         }
 
         $atelier->refresh();
@@ -171,6 +190,7 @@ class ShopSmsQuotaController extends Controller
             'shop_access_starts_at' => $atelier->shop_access_starts_at,
             'shop_access_ends_at' => $atelier->shop_access_ends_at,
             'shop_access_suspended' => $atelier->shop_access_suspended,
+            'subscription_status' => $atelier->subscription_status,
             'shop_sms_quota' => ShopSmsQuotaService::getBalance((int) $atelier->id),
         ];
 
@@ -229,6 +249,8 @@ class ShopSmsQuotaController extends Controller
             'shop_access_starts_at' => $startsAt,
             'shop_access_ends_at' => $endsAt,
             'shop_access_suspended' => $suspended,
+            'subscription_status' => $row->subscription_status ?? Atelier::SUBSCRIPTION_TRIAL,
+            'paid_plan_activated_at' => $row->paid_plan_activated_at ?? null,
         ]);
 
         return array_merge([

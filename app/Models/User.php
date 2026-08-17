@@ -20,7 +20,8 @@ class User extends Authenticatable
      */
     protected $fillable = [
         'name', 'last_name', 'national_code', 'phone', 'atelier_id', 'shop_staff_role', 'password', 'gender',
-        'personality_image', 'birth_certificate', 'national_cart' , 'tech_certificate', 'city_id'
+        'personality_image', 'birth_certificate', 'national_cart' , 'tech_certificate', 'city_id',
+        'referral_code', 'referral_dashboard_token', 'referral_balance',
     ];
 
     /**
@@ -31,6 +32,7 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'referral_dashboard_token',
     ];
 
     /**
@@ -40,7 +42,17 @@ class User extends Authenticatable
      */
     protected $casts = [
         'email_verified_at' => 'datetime',
+        'referral_balance' => 'decimal:2',
     ];
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::created(function (User $user) {
+            \App\Services\ShopReferralService::ensureReferralIdentity($user);
+        });
+    }
 
     const USER_GENDER = [
         1 => "مرد",
@@ -115,5 +127,10 @@ class User extends Authenticatable
     public function hasRole($roleName)
     {
         return $this->roles()->where('name', $roleName)->exists();
+    }
+
+    public function referredShops()
+    {
+        return $this->hasMany(ShopReferral::class, 'referrer_user_id');
     }
 }
