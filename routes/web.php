@@ -26,9 +26,9 @@ Route::get('/clear-cache', function () {
     return "Cache cleared successfully!<br>Timezone: {$timezone}<br>Current time: {$now->format('Y-m-d H:i:s')}";
 });
 
-/*Route::get('/test', function () {
-    $target = '/home2/kermanph/atelier/storage/app/public';
+Route::get('/test', function () {
+    $target = '/home2/kermanph/hesabres/storage/app/public';
     $shortcut = '/home2/kermanph/public_html/api/storage';
     symlink($target, $shortcut);
     //\Illuminate\Support\Facades\Artisan::call('storage:link');
-});*/
+});
