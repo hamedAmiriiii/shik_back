@@ -4,16 +4,28 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Storage;
 
 class Category extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name', 'slug', 'description', 'parent_id', 'order', 'is_active', 'atelier_id'];
+    protected $fillable = ['name', 'slug', 'description', 'image', 'parent_id', 'order', 'is_active', 'atelier_id'];
+
+    protected $appends = ['image_url'];
 
     protected $casts = [
         'is_active' => 'boolean',
     ];
+
+    public function getImageUrlAttribute(): ?string
+    {
+        if (empty($this->attributes['image'])) {
+            return null;
+        }
+
+        return Storage::url($this->attributes['image']);
+    }
 
     /**
      * والد این کتگوری

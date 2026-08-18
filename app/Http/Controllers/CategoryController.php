@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Category;
 use App\Models\Product;
+use App\Tools\ImageTools;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -62,6 +64,8 @@ class CategoryController extends Controller
                 'name' => $category->name,
                 'slug' => $category->slug,
                 'description' => $category->description,
+                'image' => $category->image,
+                'image_url' => $category->image_url,
                 'parent_id' => $category->parent_id,
                 'order' => $category->order,
                 'is_active' => $category->is_active,
@@ -109,6 +113,7 @@ class CategoryController extends Controller
             'parent_id' => 'nullable|exists:categories,id',
             'order' => 'nullable|integer|min:0',
             'is_active' => 'nullable|boolean',
+            'image' => 'nullable|string',
         ]);
 
         if ($atelierId !== null) {
@@ -154,7 +159,13 @@ class CategoryController extends Controller
             $fields['is_active'] = true;
         }
 
+        $imageData = $fields['image'] ?? null;
+        unset($fields['image']);
+
         $category = Category::create($fields);
+        if (! empty($imageData)) {
+            $this->saveCategoryImage($category, $imageData);
+        }
         $category->load('parent');
 
         return response($category, 201);
@@ -241,6 +252,7 @@ class CategoryController extends Controller
             'parent_id' => 'nullable|exists:categories,id',
             'order' => 'nullable|integer|min:0',
             'is_active' => 'nullable|boolean',
+            'image' => 'nullable|string',
         ]);
 
         if ($atelierId !== null && ! empty($fields['parent_id'])) {
@@ -281,7 +293,21 @@ class CategoryController extends Controller
             }
         }
 
+        $imageData = array_key_exists('image', $fields) ? $fields['image'] : null;
+        unset($fields['image']);
+
         $category->update($fields);
+
+        if ($request->exists('image')) {
+            if (empty($imageData)) {
+                $this->deleteCategoryImage($category);
+                $category->image = null;
+                $category->save();
+            } else {
+                $this->saveCategoryImage($category, $imageData);
+            }
+        }
+
         $category->load('parent');
 
         return response($category);
@@ -300,6 +326,7 @@ class CategoryController extends Controller
             ], 422);
         }
 
+        $this->deleteCategoryImage($category);
         $category->delete();
         return response(['message' => 'کتگوری با موفقیت حذف شد']);
     }
@@ -385,6 +412,38 @@ class CategoryController extends Controller
         $products->withPath(url()->current());
         
         return response($products);
+    }
+
+    private function saveCategoryImage(Category $category, string $imageData): void
+    {
+        $imageString = $imageData;
+        if (strpos($imageData, ',') !== false) {
+            $parts = explode(',', $imageData);
+            $imageString = $parts[1];
+        }
+
+        $imageContent = base64_decode($imageString);
+        if ($imageContent === false) {
+            return;
+        }
+
+        $this->deleteCategoryImage($category);
+
+        $imagePath = ImageTools::saveFile(
+            "/categories/{$category->id}/image_" . time() . ".jpeg",
+            $imageContent
+        );
+
+        $category->image = $imagePath;
+        $category->save();
+    }
+
+    private function deleteCategoryImage(Category $category): void
+    {
+        $originalPath = $category->getOriginal('image') ?: $category->image;
+        if ($originalPath && Storage::exists('public/' . $originalPath)) {
+            Storage::delete('public/' . $originalPath);
+        }
     }
 }
 
