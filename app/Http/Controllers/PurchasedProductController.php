@@ -13,6 +13,7 @@ use App\Models\CartItem;
 use App\Models\Customer;
 use App\Tools\PriceTools;
 use App\Tools\PhoneTools;
+use App\Tools\ProductQuantityTools;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
@@ -150,7 +151,7 @@ class PurchasedProductController extends Controller
                 'required',
                 Rule::exists('products', 'id')->whereNull('deleted_at'),
             ],
-            'products.*.quantity' => 'required|integer|min:1',
+            'products.*.quantity' => 'required|numeric|min:0.001',
             'products.*.sale_price' => 'nullable|numeric|min:0',
             'products.*.discount_percent' => 'nullable|numeric|min:0|max:100',
             'products.*.size' => 'nullable|string|max:255',
@@ -205,11 +206,18 @@ class PurchasedProductController extends Controller
             if (!$product) {
                 return response(['error' => 'محصول یافت نشد'], 404);
             }
-            
-            $requestedQuantity = $productData['quantity'];
-            if ($product->quantity < $requestedQuantity) {
+
+            $unitType = $product->unit_type ?? Product::UNIT_PIECE;
+            if ($error = ProductQuantityTools::validateSaleQuantity($productData['quantity'], $unitType)) {
+                return response(['error' => "{$product->name}: {$error}"], 422);
+            }
+
+            $requestedQuantity = ProductQuantityTools::normalize($productData['quantity'], $unitType);
+            if (! ProductQuantityTools::hasSufficientStock($product->quantity, $requestedQuantity)) {
+                $unitLabel = ProductQuantityTools::unitLabel($unitType);
+
                 return response([
-                    'error' => "موجودی محصول '{$product->name}' کافی نیست. موجودی: {$product->quantity}، درخواستی: {$requestedQuantity}"
+                    'error' => "موجودی محصول '{$product->name}' کافی نیست. موجودی: {$product->quantity} {$unitLabel}، درخواستی: {$requestedQuantity} {$unitLabel}",
                 ], 400);
             }
         }
@@ -223,7 +231,8 @@ class PurchasedProductController extends Controller
             // تعیین قیمت فروش: اگر sale_price ارسال شده از آن استفاده کن، در غیر این صورت از product.sale_price
             // یا اگر discount_percent داده شده، درصد تخفیف را اعمال کن
             $baseSalePrice = $product->sale_price;
-            $quantity = $productData['quantity'];
+            $unitType = $product->unit_type ?? Product::UNIT_PIECE;
+            $quantity = ProductQuantityTools::normalize($productData['quantity'], $unitType);
             
             if (isset($productData['sale_price']) && $productData['sale_price'] !== null) {
                 $salePrice = PriceTools::roundSalePrice((float) $productData['sale_price']);
@@ -646,13 +655,24 @@ class PurchasedProductController extends Controller
     public function returnItem(Request $request, Purchase $purchase, PurchasedProduct $purchasedProduct)
     {
         $request->validate([
-            'quantity' => 'sometimes|integer|min:1',
+            'quantity' => 'sometimes|numeric|min:0.001',
             'notes' => 'nullable|string|max:2000',
         ]);
 
+        $product = $purchasedProduct->product;
+        if (! $product instanceof Product) {
+            return response(['error' => 'محصول یافت نشد'], 404);
+        }
+
+        $unitType = $product->unit_type ?? Product::UNIT_PIECE;
+        $lineQuantity = ProductQuantityTools::normalize($purchasedProduct->quantity, $unitType);
         $returnQty = $request->has('quantity')
-            ? (int) $request->input('quantity')
-            : (int) $purchasedProduct->quantity;
+            ? ProductQuantityTools::normalize($request->input('quantity'), $unitType)
+            : $lineQuantity;
+
+        if ($error = ProductQuantityTools::validateReturnQuantity($returnQty, $lineQuantity, $unitType)) {
+            return response(['error' => $error], 422);
+        }
 
         $userName = null;
         $staffAtelierId = $this->staffShopAtelierId($request);

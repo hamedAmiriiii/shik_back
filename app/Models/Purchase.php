@@ -216,7 +216,7 @@ class Purchase extends Model
         }
 
         return round((float) $this->purchasedProducts->sum(function ($pp) {
-            return (float) $pp->sale_price * (int) $pp->quantity;
+            return (float) $pp->sale_price * (float) $pp->quantity;
         }), 2);
     }
 
@@ -230,7 +230,7 @@ class Purchase extends Model
         }
 
         return round((float) $this->purchasedProducts->sum(function ($pp) {
-            return (float) $pp->purchase_price * (int) $pp->quantity;
+            return (float) $pp->purchase_price * (float) $pp->quantity;
         }), 2);
     }
 

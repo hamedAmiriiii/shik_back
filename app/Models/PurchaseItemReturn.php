@@ -29,6 +29,7 @@ class PurchaseItemReturn extends Model
     ];
 
     protected $casts = [
+        'quantity' => 'decimal:3',
         'sale_price' => 'decimal:2',
         'purchase_price' => 'decimal:2',
         'return_sale_total' => 'decimal:2',

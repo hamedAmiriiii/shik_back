@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Purchase;
+use App\Models\Product;
 use App\Tools\PhoneTools;
+use App\Tools\ProductQuantityTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -259,14 +261,18 @@ class PurchaseDebtController extends Controller
             'debt_settlement_note' => $purchase->debt_settlement_note,
             'created_at' => $purchase->created_at,
             'products' => $purchase->purchasedProducts->map(function ($item) {
+                $product = $item->product;
+
                 return [
                     'id' => $item->id,
                     'product_id' => $item->product_id,
-                    'product_name' => $item->product ? $item->product->name : null,
-                    'quantity' => (int) $item->quantity,
+                    'product_name' => $product ? $product->name : null,
+                    'quantity' => (float) $item->quantity,
+                    'unit_type' => $product?->unit_type ?? Product::UNIT_PIECE,
+                    'unit_label' => ProductQuantityTools::unitLabel($product?->unit_type),
                     'sale_price' => (float) $item->sale_price,
                     'purchase_price' => (float) $item->purchase_price,
-                    'line_total' => round((float) $item->sale_price * (int) $item->quantity, 2),
+                    'line_total' => round((float) $item->sale_price * (float) $item->quantity, 2),
                     'size' => $item->size,
                     'color' => $item->color,
                 ];

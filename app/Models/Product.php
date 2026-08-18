@@ -10,15 +10,25 @@ class Product extends Model
 {
     use HasFactory, SoftDeletes;
 
-    protected $fillable = ["name", "price_buy", "quantity", "barcode", "sale_price", "purchase_price", "original_sale_price", "sizes", "colors", "manufacturer_id", "atelier_id"];
+    public const UNIT_PIECE = 'piece';
+
+    public const UNIT_KG = 'kg';
+
+    protected $fillable = ["name", "price_buy", "quantity", "unit_type", "barcode", "sale_price", "purchase_price", "original_sale_price", "sizes", "colors", "manufacturer_id", "atelier_id"];
 
     protected $casts = [
         'purchase_price' => 'decimal:2',
         'sale_price' => 'decimal:2',
         'original_sale_price' => 'decimal:2',
+        'quantity' => 'decimal:3',
         'sizes' => 'array',
         'colors' => 'array',
     ];
+
+    public function isWeightBased(): bool
+    {
+        return ($this->unit_type ?? self::UNIT_PIECE) === self::UNIT_KG;
+    }
 
     public function scopeFilterByPrice($query, $minPrice, $maxPrice)
     {

@@ -52,7 +52,7 @@ class PurchaseItemReturnGridService
 
             $monthTotalSale += (float) $row['return_sale_total'];
             $monthTotalPurchase += (float) $row['return_purchase_total'];
-            $monthTotalQty += (int) $row['quantity'];
+            $monthTotalQty += (float) $row['quantity'];
 
             $dateKey = $row['date'];
             if (! isset($dailyBuckets[$dateKey])) {
@@ -66,7 +66,7 @@ class PurchaseItemReturnGridService
                 ];
             }
             $dailyBuckets[$dateKey]['transactions_count']++;
-            $dailyBuckets[$dateKey]['quantity'] += (int) $row['quantity'];
+            $dailyBuckets[$dateKey]['quantity'] += (float) $row['quantity'];
             $dailyBuckets[$dateKey]['total_sale_price'] += (float) $row['return_sale_total'];
             $dailyBuckets[$dateKey]['total_purchase_price'] += (float) $row['return_purchase_total'];
         }
@@ -120,7 +120,7 @@ class PurchaseItemReturnGridService
             'product_id' => (int) $item->product_id,
             'product_name' => $product?->name,
             'barcode' => $product?->barcode,
-            'quantity' => (int) $item->quantity,
+            'quantity' => (float) $item->quantity,
             'sale_price' => (float) $item->sale_price,
             'purchase_price' => (float) $item->purchase_price,
             'return_sale_total' => (float) $item->return_sale_total,

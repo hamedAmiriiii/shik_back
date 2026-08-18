@@ -8,6 +8,7 @@ use App\Models\PurchasedProduct;
 use App\Models\Product;
 use App\Models\UserShiksho;
 use App\Tools\PriceTools;
+use App\Tools\ProductQuantityTools;
 use Carbon\Carbon;
 use Morilog\Jalali\Jalalian;
 
@@ -21,7 +22,7 @@ class PurchaseItemReturnService
     public static function processReturn(
         Purchase $purchase,
         PurchasedProduct $purchasedProduct,
-        int $returnQuantity,
+        float $returnQuantity,
         ?string $userName = null,
         ?string $notes = null
     ): array {
@@ -29,16 +30,17 @@ class PurchaseItemReturnService
             throw new \InvalidArgumentException('این محصول متعلق به این خرید نیست');
         }
 
-        $lineQty = (int) $purchasedProduct->quantity;
-        if ($returnQuantity < 1 || $returnQuantity > $lineQty) {
-            throw new \InvalidArgumentException(
-                "تعداد برگشت باید بین ۱ و {$lineQty} باشد"
-            );
-        }
-
         $product = $purchasedProduct->product;
         if (! $product instanceof Product) {
             throw new \InvalidArgumentException('محصول یافت نشد');
+        }
+
+        $unitType = $product->unit_type ?? Product::UNIT_PIECE;
+        $returnQuantity = ProductQuantityTools::normalize($returnQuantity, $unitType);
+        $lineQty = ProductQuantityTools::normalize($purchasedProduct->quantity, $unitType);
+
+        if ($error = ProductQuantityTools::validateReturnQuantity($returnQuantity, $lineQty, $unitType)) {
+            throw new \InvalidArgumentException($error);
         }
 
         $unitSale = (float) $purchasedProduct->sale_price;
@@ -48,7 +50,7 @@ class PurchaseItemReturnService
 
         $purchase->load('purchasedProducts');
         $lineTotalBeforeReturn = (float) $purchase->purchasedProducts->sum(function ($pp) {
-            return (float) $pp->sale_price * (int) $pp->quantity;
+            return (float) $pp->sale_price * (float) $pp->quantity;
         });
         $ratio = $lineTotalBeforeReturn > 0
             ? min(1, $returnAmount / $lineTotalBeforeReturn)
@@ -82,10 +84,10 @@ class PurchaseItemReturnService
         $product->increment('quantity', $returnQuantity);
 
         $purchasedProductId = (int) $purchasedProduct->id;
-        if ($returnQuantity >= $lineQty) {
+        if (ProductQuantityTools::isFullReturn($returnQuantity, $lineQty)) {
             $purchasedProduct->delete();
         } else {
-            $purchasedProduct->quantity = $lineQty - $returnQuantity;
+            $purchasedProduct->quantity = ProductQuantityTools::normalize($lineQty - $returnQuantity, $unitType);
             $purchasedProduct->save();
         }
 

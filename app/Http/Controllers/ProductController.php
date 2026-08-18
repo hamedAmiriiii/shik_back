@@ -6,6 +6,7 @@ use App\Models\Product;
 use App\Models\ProductImage;
 use App\Tools\ImageTools;
 use App\Tools\PriceTools;
+use App\Tools\ProductQuantityTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
@@ -87,6 +88,12 @@ class ProductController extends Controller
             $this->productValidationMessages()
         );
 
+        $fields['unit_type'] = $fields['unit_type'] ?? Product::UNIT_PIECE;
+        if ($error = ProductQuantityTools::validateProductStockQuantity($fields['quantity'], $fields['unit_type'])) {
+            return response(['message' => $error], 422);
+        }
+        $fields['quantity'] = ProductQuantityTools::normalize($fields['quantity'], $fields['unit_type']);
+
         // محاسبه قیمت با تخفیف در صورت وجود
         if (isset($fields['discount_percent']) && $fields['discount_percent'] > 0) {
             // اگر original_sale_price داده شده از آن استفاده کن، در غیر این صورت از sale_price
@@ -164,7 +171,8 @@ class ProductController extends Controller
             'name' => 'required|string|max:255',
             'purchase_price' => 'required|numeric|min:0',
             'sale_price' => 'required|numeric|min:0',
-            'quantity' => 'required|integer|min:0',
+            'quantity' => 'required|numeric|min:0',
+            'unit_type' => 'nullable|string|in:'.Product::UNIT_PIECE.','.Product::UNIT_KG,
             'barcode' => $barcodeRules,
             'original_sale_price' => 'nullable|numeric|min:0',
             'discount_percent' => 'nullable|numeric|min:0|max:100',
@@ -404,6 +412,12 @@ class ProductController extends Controller
             $this->productValidationRules($atelierId, $product->id),
             $this->productValidationMessages()
         );
+
+        $fields['unit_type'] = $fields['unit_type'] ?? ($product->unit_type ?? Product::UNIT_PIECE);
+        if ($error = ProductQuantityTools::validateProductStockQuantity($fields['quantity'], $fields['unit_type'])) {
+            return response(['message' => $error], 422);
+        }
+        $fields['quantity'] = ProductQuantityTools::normalize($fields['quantity'], $fields['unit_type']);
 
         // محاسبه قیمت با تخفیف در صورت وجود
         if (isset($fields['discount_percent'])) {
@@ -786,6 +800,11 @@ class ProductController extends Controller
         $product->discount_percent = round($discountPercent, 2);
         $product->discount_amount = round((float) $discountAmount, 2);
         $product->has_discount = $discountPercent > 0;
+
+        $unitType = $product->unit_type ?? Product::UNIT_PIECE;
+        $product->unit_type = $unitType;
+        $product->unit_label = ProductQuantityTools::unitLabel($unitType);
+        $product->price_unit_label = ProductQuantityTools::priceUnitLabel($unitType);
 
         return $product;
     }

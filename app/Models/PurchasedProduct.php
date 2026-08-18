@@ -15,6 +15,7 @@ class PurchasedProduct extends Model
     protected $casts = [
         'purchase_price' => 'decimal:2',
         'sale_price' => 'decimal:2',
+        'quantity' => 'decimal:3',
     ];
 
     public function getCreatedAtAttribute($value): string
