@@ -29,6 +29,8 @@ class Purchase extends Model
         'installment_amount',
         'atelier_id',
         'client_id',
+        'shop_table_id',
+        'table_label',
     ];
 
     protected $casts = [
@@ -76,6 +78,14 @@ class Purchase extends Model
                         });
                 });
         });
+    }
+
+    /**
+     * میز مربوط به این سفارش (سفارش پای میز)
+     */
+    public function shopTable()
+    {
+        return $this->belongsTo(ShopTable::class);
     }
 
     /**

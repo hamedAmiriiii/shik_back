@@ -45,6 +45,13 @@ Route::prefix('{shop}')
         Route::get('category/{category}/children', [CategoryController::class, 'children'])->where('category', '[0-9]+')->name('category.children');
         Route::get('category/{category}/products', [CategoryController::class, 'products'])->where('category', '[0-9]+')->name('category.products');
 
+        // ===== سفارش پای میز (QR) — بدون نیاز به لاگین =====
+        Route::get('tables/{tableNumber}', [\App\Http\Controllers\TableOrderController::class, 'tableInfo'])
+            ->where('tableNumber', '[0-9]+')
+            ->name('table.info');
+        Route::post('table-order', [\App\Http\Controllers\TableOrderController::class, 'store'])
+            ->name('table-order.store');
+
         Route::middleware('auth:sanctum')->prefix('cart')->name('cart.')->group(function () {
             Route::get('/', [CartController::class, 'show']);
             Route::post('/', [CartController::class, 'store']);

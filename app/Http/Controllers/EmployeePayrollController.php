@@ -49,7 +49,7 @@ class EmployeePayrollController extends Controller
                 ->first();
 
             $paginator = (clone $filterQuery)
-                ->with(['employee'])
+                ->with(['employee', 'payments'])
                 ->orderByDesc('payroll_year')
                 ->orderByDesc('payroll_month')
                 ->orderByDesc('id')
@@ -66,6 +66,17 @@ class EmployeePayrollController extends Controller
         }
 
         $payload = $paginator->toArray();
+
+        foreach ($payload['data'] as &$row) {
+            $payroll = $paginator->getCollection()->firstWhere('id', $row['id']);
+            if ($payroll) {
+                $totalPaid = $payroll->payments->sum('amount');
+                $row['total_paid'] = round((float) $totalPaid, 2);
+                $row['remaining'] = round(max(0, (float) $payroll->salary_amount - (float) $totalPaid), 2);
+                $row['payments'] = $payroll->payments->values();
+            }
+        }
+        unset($row);
         $payload['meta'] = array_merge($payload['meta'] ?? [], [
             'total_salary_amount' => (float) round((float) ($stats->total_salary_amount ?? 0), 2),
             'payroll_count' => (int) ($stats->payroll_count ?? 0),

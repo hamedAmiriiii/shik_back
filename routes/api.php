@@ -104,6 +104,19 @@ Route::get('manufacturers', [\App\Http\Controllers\ManufacturerController::class
 Route::get('manufacturers/{manufacturer}', [\App\Http\Controllers\ManufacturerController::class, 'show']);
 Route::get('manufacturers/report/sales', [\App\Http\Controllers\ManufacturerController::class, 'salesReport']);
 
+// ===== سفارش پای میز — فقط لیست و تسویه، نیاز به لاگین ادمین =====
+Route::middleware('auth:sanctum')->prefix('shop-tables')->name('shop-tables.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\ShopTableController::class, 'index']);
+    Route::post('/', [\App\Http\Controllers\ShopTableController::class, 'store']);
+    Route::post('/create-defaults', [\App\Http\Controllers\ShopTableController::class, 'createDefaults']);
+    Route::put('/{shopTable}', [\App\Http\Controllers\ShopTableController::class, 'update']);
+    Route::delete('/{shopTable}', [\App\Http\Controllers\ShopTableController::class, 'destroy']);
+});
+
+Route::middleware('auth:sanctum')->prefix('table-orders')->name('table-orders.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\TableOrderController::class, 'index']);
+});
+
 Route::group(['middleware' => ['auth:sanctum']], function () {
     // Store/Shop related routes - require authentication
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
