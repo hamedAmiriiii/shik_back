@@ -52,6 +52,10 @@ Route::prefix('{shop}')
         Route::post('table-order', [\App\Http\Controllers\TableOrderController::class, 'store'])
             ->name('table-order.store');
 
+        // اعتبار و سفارش‌های قبلی با شماره موبایل — بدون لاگین
+        Route::match(['get', 'post'], 'guest/lookup', [\App\Http\Controllers\GuestCustomerController::class, 'lookup'])
+            ->name('guest.lookup');
+
         Route::middleware('auth:sanctum')->prefix('cart')->name('cart.')->group(function () {
             Route::get('/', [CartController::class, 'show']);
             Route::post('/', [CartController::class, 'store']);

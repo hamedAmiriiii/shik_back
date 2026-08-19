@@ -2,12 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\CustomerPhone;
 use App\Models\Purchase;
 use App\Models\PurchasedProduct;
 use App\Models\Product;
+use App\Models\Setting;
 use App\Models\ShopTable;
+use App\Models\UserShiksho;
+use App\Tools\PhoneTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class TableOrderController extends Controller
 {
@@ -17,15 +22,31 @@ class TableOrderController extends Controller
      *
      * body: {
      *   table_number: 1,
+     *   phone: "0912...",
+     *   use_credit: true,
      *   products: [{product_id: 5, quantity: 2}, ...]
      * }
      */
     public function store(Request $request)
     {
-        $atelierId = (int) $request->attributes->get('atelier_id');
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        Setting::setShopContext($atelierId);
+
+        if ($request->filled('phone')) {
+            $request->merge([
+                'phone' => PhoneTools::normalizeIranPhone($request->input('phone')),
+            ]);
+        }
 
         $request->validate([
             'table_number' => 'required|integer|min:1',
+            'phone' => [
+                Rule::requiredIf($request->boolean('use_credit')),
+                'nullable',
+                'string',
+                'regex:/^09\d{9}$/',
+            ],
+            'use_credit' => 'nullable|boolean',
             'products' => 'required|array|min:1',
             'products.*.product_id' => 'required|integer|exists:products,id',
             'products.*.quantity' => 'required|numeric|min:0.001',
@@ -35,6 +56,8 @@ class TableOrderController extends Controller
         ]);
 
         $tableNumber = $request->table_number;
+        $phone = $request->input('phone');
+        $useCredit = $request->boolean('use_credit');
 
         // پیدا کردن یا ساخت خودکار میز
         $shopTable = ShopTable::firstOrCreate(
@@ -75,12 +98,24 @@ class TableOrderController extends Controller
 
             $tableLabel = $shopTable->display_name;
 
+            $creditUsed = 0.0;
+            if ($phone && $useCredit) {
+                $userShiksho = UserShiksho::where('phone', $phone)
+                    ->where('atelier_id', $atelierId)
+                    ->first();
+                if ($userShiksho && $userShiksho->credit > 0) {
+                    $creditUsed = min((float) $userShiksho->credit, $totalAmount);
+                    $userShiksho->useCredit($creditUsed);
+                }
+            }
+
             $purchase = Purchase::create([
                 'atelier_id' => $atelierId,
                 'shop_table_id' => $shopTable->id,
                 'table_label' => $tableLabel,
-                'phone' => null,
+                'phone' => $phone,
                 'total_amount' => $totalAmount,
+                'credit_used' => $creditUsed,
                 'payment_type' => 'debt',
                 'is_debt_settled' => false,
                 'debt_settlement_note' => $request->note,
@@ -101,14 +136,28 @@ class TableOrderController extends Controller
                 $line['product']->decrement('quantity', $line['quantity']);
             }
 
+            if ($phone) {
+                CustomerPhone::createNewPhone($phone);
+            }
+
             DB::commit();
 
-            $purchase->load('purchasedProducts.product');
+            $purchase->load(['purchasedProducts.product', 'shopTable']);
+
+            $remainingCredit = 0.0;
+            if ($phone) {
+                $remainingCredit = (float) (UserShiksho::where('phone', $phone)
+                    ->where('atelier_id', $atelierId)
+                    ->value('credit') ?? 0);
+            }
 
             return response()->json([
                 'message' => 'سفارش پای میز ثبت شد و منتظر پرداخت است',
-                'purchase' => $purchase,
+                'purchase' => app(GuestCustomerController::class)->guestPurchasePayload($purchase),
                 'table' => $shopTable,
+                'credit_used' => $creditUsed,
+                'payable_amount' => $purchase->payableAmount(),
+                'credit' => $remainingCredit,
             ], 201);
 
         } catch (\Exception $e) {
@@ -156,7 +205,7 @@ class TableOrderController extends Controller
      */
     public function tableInfo(Request $request, int $tableNumber)
     {
-        $atelierId = (int) $request->attributes->get('atelier_id');
+        $atelierId = $this->shopAtelierIdOrAbort($request);
 
         $shopTable = ShopTable::where('atelier_id', $atelierId)
             ->where('table_number', $tableNumber)
