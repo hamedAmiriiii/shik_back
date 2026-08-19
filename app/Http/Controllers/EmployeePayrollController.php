@@ -42,9 +42,10 @@ class EmployeePayrollController extends Controller
                 ->selectRaw('
                     COUNT(*) as payroll_count,
                     SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as paid_count,
+                    SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as partial_count,
                     SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as pending_count,
                     COALESCE(SUM(salary_amount), 0) as total_salary_amount
-                ', [EmployeePayroll::STATUS_PAID, EmployeePayroll::STATUS_PENDING])
+                ', [EmployeePayroll::STATUS_PAID, EmployeePayroll::STATUS_PARTIAL, EmployeePayroll::STATUS_PENDING])
                 ->first();
 
             $paginator = (clone $filterQuery)
@@ -69,6 +70,7 @@ class EmployeePayrollController extends Controller
             'total_salary_amount' => (float) round((float) ($stats->total_salary_amount ?? 0), 2),
             'payroll_count' => (int) ($stats->payroll_count ?? 0),
             'paid_count' => (int) ($stats->paid_count ?? 0),
+            'partial_count' => (int) ($stats->partial_count ?? 0),
             'pending_count' => (int) ($stats->pending_count ?? 0),
             'filters' => [
                 'payroll_year' => $this->payrollYearFromRequest($request),
@@ -108,9 +110,25 @@ class EmployeePayrollController extends Controller
             return response()->json(['message' => 'کارمند متعلق به این فروشگاه نیست.'], 422);
         }
 
-        $hourlyWage = $this->resolveHourlyWage($atelierId, $fields);
         $hoursWorked = (float) $fields['hours_worked'];
-        $salaryAmount = round($hourlyWage * $hoursWorked, 2);
+        $calc = $employee->calculateSalary($hoursWorked);
+
+        // نرخ ساعتی override در صورت ارسال دستی
+        if (array_key_exists('hourly_wage', $fields) && (float) $fields['hourly_wage'] > 0) {
+            $hourlyWage = (float) $fields['hourly_wage'];
+            $calc = $employee->calculateSalary($hoursWorked);
+            // بازمحاسبه با نرخ override
+            $calc['overtime_amount'] = round($hourlyWage * $calc['overtime_hours'], 2);
+            $calc['salary_amount'] = round($calc['base_salary_snapshot'] > 0
+                ? (($hoursWorked >= $calc['base_work_hours_snapshot'] && $calc['base_work_hours_snapshot'] > 0)
+                    ? $calc['base_salary_snapshot'] + $calc['overtime_amount']
+                    : ($calc['base_work_hours_snapshot'] > 0
+                        ? round(($calc['base_salary_snapshot'] / $calc['base_work_hours_snapshot']) * $hoursWorked, 2) + $calc['overtime_amount']
+                        : $calc['overtime_amount']))
+                : $hourlyWage * $hoursWorked, 2);
+        } else {
+            $hourlyWage = (float) $employee->hourly_wage;
+        }
 
         $existing = EmployeePayroll::query()
             ->where('shop_employee_id', $employee->id)
@@ -118,9 +136,9 @@ class EmployeePayrollController extends Controller
             ->where('payroll_month', (int) $fields['payroll_month'])
             ->first();
 
-        if ($existing && $existing->isPaid()) {
+        if ($existing && ($existing->isPaid() || $existing->isPartial())) {
             return response()->json([
-                'message' => 'این ماه برای این کارمند پرداخت شده و قابل تغییر نیست.',
+                'message' => 'این ماه برای این کارمند پرداختی ثبت شده و ساعت‌کاری آن قابل تغییر نیست.',
             ], 422);
         }
 
@@ -134,23 +152,45 @@ class EmployeePayrollController extends Controller
                 'atelier_id' => $atelierId,
                 'hours_worked' => $hoursWorked,
                 'hourly_wage' => $hourlyWage,
-                'salary_amount' => $salaryAmount,
+                'salary_amount' => $calc['salary_amount'],
+                'base_salary_snapshot' => $calc['base_salary_snapshot'],
+                'base_work_hours_snapshot' => $calc['base_work_hours_snapshot'],
+                'overtime_hours' => $calc['overtime_hours'],
+                'overtime_amount' => $calc['overtime_amount'],
                 'status' => EmployeePayroll::STATUS_PENDING,
                 'note' => $fields['note'] ?? null,
             ]
         );
 
-        return response($payroll->load('employee'), 201);
+        $payroll->load('employee');
+        $totalPaid = $payroll->totalPaid();
+
+        return response(array_merge($payroll->toArray(), [
+            'total_paid' => $totalPaid,
+            'remaining' => $payroll->remaining(),
+            'salary_breakdown' => [
+                'base_salary' => $calc['base_salary_snapshot'],
+                'base_work_hours' => $calc['base_work_hours_snapshot'],
+                'overtime_hours' => $calc['overtime_hours'],
+                'overtime_amount' => $calc['overtime_amount'],
+            ],
+        ]), 201);
     }
 
     public function show(Request $request, EmployeePayroll $employeePayroll)
     {
         $this->assertModelBelongsToStaffAtelier($request, $employeePayroll);
 
-        return response($employeePayroll->load([
+        $payroll = $employeePayroll->load([
             'employee',
             'paidBy:id,name,last_name',
             'expense:id,title,amount,date,type',
+            'payments.paidBy:id,name,last_name',
+        ]);
+
+        return response(array_merge($payroll->toArray(), [
+            'total_paid' => $employeePayroll->totalPaid(),
+            'remaining' => $employeePayroll->remaining(),
         ]), 200);
     }
 
@@ -165,9 +205,9 @@ class EmployeePayrollController extends Controller
 
         $this->assertModelBelongsToStaffAtelier($request, $employeePayroll);
 
-        if ($employeePayroll->isPaid()) {
+        if ($employeePayroll->isPaid() || $employeePayroll->isPartial()) {
             return response()->json([
-                'message' => 'این حقوق پرداخت شده و قابل ویرایش نیست.',
+                'message' => 'پس از ثبت پرداخت، ساعت‌کاری قابل ویرایش نیست.',
             ], 422);
         }
 
@@ -240,64 +280,6 @@ class EmployeePayrollController extends Controller
         $employeePayroll->delete();
 
         return response(['message' => 'کارکرد ماهانه با موفقیت حذف شد.'], 200);
-    }
-
-    public function pay(Request $request, EmployeePayroll $employeePayroll)
-    {
-        $actor = $this->requireStaffShopUser($request);
-        $this->assertModelBelongsToStaffAtelier($request, $employeePayroll);
-
-        if ($employeePayroll->isPaid()) {
-            return response()->json(['message' => 'این حقوق قبلاً پرداخت شده است.'], 422);
-        }
-
-        $fields = $request->validate([
-            'note' => 'nullable|string|max:2000',
-        ]);
-
-        DB::transaction(function () use ($employeePayroll, $actor, $fields) {
-            $locked = EmployeePayroll::query()
-                ->where('id', $employeePayroll->id)
-                ->lockForUpdate()
-                ->with('employee:id,atelier_id,name,phone')
-                ->first();
-
-            if (! $locked || $locked->isPaid()) {
-                abort(response()->json(['message' => 'این حقوق قبلاً پرداخت شده است.'], 422));
-            }
-
-            $userName = trim(($actor->name ?? '').' '.($actor->last_name ?? ''));
-            if ($userName === '') {
-                $userName = 'کاربر سیستم';
-            }
-
-            $expenseTitle = 'پرداخت حقوق '.$locked->employee->name.' - '.$locked->payroll_year.'/'.$locked->payroll_month;
-            $expense = Expense::create([
-                'user_name' => $userName,
-                'date' => now()->format('Y-m-d'),
-                'amount' => (float) $locked->salary_amount,
-                'title' => $expenseTitle,
-                'type' => 'جاری',
-                'atelier_id' => (int) $locked->atelier_id,
-            ]);
-
-            $locked->update([
-                'status' => EmployeePayroll::STATUS_PAID,
-                'paid_at' => now(),
-                'paid_by_user_id' => $actor->id,
-                'expense_id' => $expense->id,
-                'note' => $fields['note'] ?? $locked->note,
-            ]);
-        });
-
-        return response([
-            'message' => 'حقوق پرداخت شد و در هزینه‌ها ثبت گردید.',
-            'payroll' => $employeePayroll->fresh()->load([
-                'employee',
-                'paidBy:id,name,last_name',
-                'expense:id,title,amount,date,type',
-            ]),
-        ], 200);
     }
 
     protected function applyListFilters(Request $request, Builder $query): void

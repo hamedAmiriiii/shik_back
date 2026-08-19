@@ -114,7 +114,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('employee-payrolls/{employeePayroll}', [\App\Http\Controllers\EmployeePayrollController::class, 'show']);
     Route::put('employee-payrolls/{employeePayroll}', [\App\Http\Controllers\EmployeePayrollController::class, 'update']);
     Route::delete('employee-payrolls/{employeePayroll}', [\App\Http\Controllers\EmployeePayrollController::class, 'destroy']);
-    Route::post('employee-payrolls/{employeePayroll}/pay', [\App\Http\Controllers\EmployeePayrollController::class, 'pay']);
+    // پرداخت‌های چندمرحله‌ای هر فیش حقوقی
+    Route::get('employee-payrolls/{employeePayroll}/payments', [\App\Http\Controllers\EmployeePayrollPaymentController::class, 'index']);
+    Route::post('employee-payrolls/{employeePayroll}/payments', [\App\Http\Controllers\EmployeePayrollPaymentController::class, 'store']);
+    Route::delete('employee-payrolls/{employeePayroll}/payments/{payment}', [\App\Http\Controllers\EmployeePayrollPaymentController::class, 'destroy']);
     
     // Invoice routes - require authentication
     Route::resource('invoices', \App\Http\Controllers\InvoiceController::class);

@@ -78,6 +78,10 @@ class ShopEmployeeController extends Controller
             'name' => 'required|string|max:255',
             'phone' => 'nullable|string|regex:/^09\d{9}$/',
             'is_active' => 'nullable|boolean',
+            'base_salary' => 'nullable|numeric|min:0',
+            'base_work_hours' => 'nullable|numeric|min:0',
+            'hourly_wage' => 'nullable|numeric|min:0',
+            'note' => 'nullable|string|max:2000',
         ]);
 
         $employee = ShopEmployee::create([
@@ -85,6 +89,10 @@ class ShopEmployeeController extends Controller
             'name' => $fields['name'],
             'phone' => $fields['phone'] ?? null,
             'is_active' => array_key_exists('is_active', $fields) ? (bool) $fields['is_active'] : true,
+            'base_salary' => $fields['base_salary'] ?? 0,
+            'base_work_hours' => $fields['base_work_hours'] ?? 0,
+            'hourly_wage' => $fields['hourly_wage'] ?? 0,
+            'note' => $fields['note'] ?? null,
         ]);
 
         return response($employee, 201);
@@ -117,6 +125,10 @@ class ShopEmployeeController extends Controller
             'name' => 'sometimes|required|string|max:255',
             'phone' => 'sometimes|nullable|string|regex:/^09\d{9}$/',
             'is_active' => 'sometimes|boolean',
+            'base_salary' => 'sometimes|numeric|min:0',
+            'base_work_hours' => 'sometimes|numeric|min:0',
+            'hourly_wage' => 'sometimes|numeric|min:0',
+            'note' => 'sometimes|nullable|string|max:2000',
         ]);
 
         $shopEmployee->update($fields);
