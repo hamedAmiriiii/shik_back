@@ -172,7 +172,9 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::put("product/{product}", [ProductController::class, 'update'])->where('product', '[0-9]+')->name('product.update');
     Route::delete("product/{product}", [ProductController::class, 'destroy'])->where('product', '[0-9]+');
     Route::delete("product/{product}/image/{imageId}", [ProductController::class, 'deleteImage']);
+    Route::post("products/bulk-store", [ProductController::class, 'bulkStore']);
     Route::post("products/apply-discount", [ProductController::class, 'applyDiscount']);
+    Route::put("products/bulk-update", [ProductController::class, 'bulkUpdate']);
 
     // Category routes that require authentication
     Route::post("category", [CategoryController::class, 'store']);

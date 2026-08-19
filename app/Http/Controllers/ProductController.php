@@ -88,64 +88,127 @@ class ProductController extends Controller
             $this->productValidationMessages()
         );
 
-        $fields['unit_type'] = $fields['unit_type'] ?? Product::UNIT_PIECE;
-        if ($error = ProductQuantityTools::validateProductStockQuantity($fields['quantity'], $fields['unit_type'])) {
-            return response(['message' => $error], 422);
-        }
-        $fields['quantity'] = ProductQuantityTools::normalize($fields['quantity'], $fields['unit_type']);
-
-        // محاسبه قیمت با تخفیف در صورت وجود
-        if (isset($fields['discount_percent']) && $fields['discount_percent'] > 0) {
-            // اگر original_sale_price داده شده از آن استفاده کن، در غیر این صورت از sale_price
-            $basePrice = $fields['original_sale_price'] ?? $fields['sale_price'];
-            
-            // محاسبه تخفیف
-            $discountAmount = ($basePrice * $fields['discount_percent']) / 100;
-            $priceAfterDiscount = max(0, $basePrice - $discountAmount);
-            $fields['sale_price'] = PriceTools::roundSalePrice((float) $priceAfterDiscount);
-            $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $basePrice);
-            unset($fields['discount_percent']); // حذف از fields چون در دیتابیس نیست
-        } else {
-            $fields['sale_price'] = PriceTools::roundSalePrice((float) $fields['sale_price']);
-            if (!isset($fields['original_sale_price'])) {
-                $fields['original_sale_price'] = $fields['sale_price'];
-            } else {
-                $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price']);
-            }
+        $prepared = $this->prepareProductFieldsForCreate($fields);
+        if (is_string($prepared)) {
+            return response(['message' => $prepared], 422);
         }
 
-        $sellerBarcode = isset($fields['barcode']) && $fields['barcode'] !== ''
-            ? (string) $fields['barcode']
-            : null;
-
-        if ($sellerBarcode !== null) {
-            $fields['barcode'] = $sellerBarcode;
-        } else {
-            $fields['barcode'] = $this->generateTemporaryBarcode($atelierId);
-        }
-
-        $fields['atelier_id'] = $atelierId;
-        $product = Product::create($fields);
-
-        if ($sellerBarcode === null) {
-            $product->barcode = (string) $product->id;
-            $product->save();
-        }
-
-        // ذخیره عکس‌ها
-        if ($request->has('images') && is_array($request->images)) {
-            $this->saveProductImages($product, $request->images);
-        }
-
-        // اتصال کتگوری‌ها
-        if ($request->has('category_ids') && is_array($request->category_ids)) {
-            $product->categories()->sync($request->category_ids);
-        }
-
-        // بارگذاری مجدد محصول با عکس‌ها و کتگوری‌ها
+        $product = $this->createProductFromPreparedFields($prepared, $atelierId, $request->all());
         $product->load(['images', 'categories']);
 
-        return response($product, 201);
+        return response($this->appendProductPricingMeta($product), 201);
+    }
+
+    /**
+     * ثبت/به‌روزرسانی گروهی: اگر بارکد در فروشگاه باشد آپدیت، وگرنه ثبت جدید.
+     */
+    public function bulkStore(Request $request)
+    {
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            abort(response()->json([
+                'message' => 'ثبت محصول فقط با حساب پرسنل متصل به فروشگاه (کاربر با atelier_id) امکان‌پذیر است.',
+            ], 422));
+        }
+
+        $productsData = $request->input('products', []);
+        if (! is_array($productsData)) {
+            return response(['message' => 'فرمت products نامعتبر است.'], 422);
+        }
+
+        $request->validate([
+            'products' => 'required|array|min:1|max:200',
+            'products.*.name' => 'required|string|max:255',
+            'products.*.purchase_price' => 'required|numeric|min:0',
+            'products.*.sale_price' => 'required|numeric|min:0',
+            'products.*.quantity' => 'required|numeric|min:0',
+            'products.*.unit_type' => 'nullable|string|in:'.Product::UNIT_PIECE.','.Product::UNIT_KG,
+            'products.*.barcode' => 'nullable|string|min:1|max:255',
+            'products.*.original_sale_price' => 'nullable|numeric|min:0',
+            'products.*.discount_percent' => 'nullable|numeric|min:0|max:100',
+            'products.*.manufacturer_id' => 'nullable|exists:manufacturers,id',
+            'products.*.images' => 'nullable|array',
+            'products.*.images.*' => 'nullable|string',
+            'products.*.category_ids' => 'nullable|array',
+            'products.*.category_ids.*' => 'exists:categories,id',
+            'products.*.sizes' => 'nullable|array',
+            'products.*.sizes.*' => 'string',
+            'products.*.colors' => 'nullable|array',
+            'products.*.colors.*' => 'string',
+        ], $this->productValidationMessages());
+
+        $barcodesInRequest = [];
+        foreach ($productsData as $productData) {
+            $barcode = trim((string) ($productData['barcode'] ?? ''));
+            if ($barcode === '') {
+                continue;
+            }
+
+            if (isset($barcodesInRequest[$barcode])) {
+                return response(['message' => "بارکد «{$barcode}» در لیست تکراری است."], 422);
+            }
+            $barcodesInRequest[$barcode] = true;
+        }
+
+        $existingByBarcode = collect();
+        if (! empty($barcodesInRequest)) {
+            $existingByBarcode = Product::where('atelier_id', $atelierId)
+                ->whereIn('barcode', array_keys($barcodesInRequest))
+                ->whereNull('deleted_at')
+                ->get()
+                ->keyBy('barcode');
+        }
+
+        $createdProducts = [];
+        $updatedProducts = [];
+
+        try {
+            DB::transaction(function () use ($productsData, $atelierId, $existingByBarcode, &$createdProducts, &$updatedProducts) {
+                foreach ($productsData as $productData) {
+                    if (isset($productData['barcode'])) {
+                        $productData['barcode'] = trim((string) $productData['barcode']);
+                        if ($productData['barcode'] === '') {
+                            unset($productData['barcode']);
+                        }
+                    }
+
+                    $barcode = $productData['barcode'] ?? null;
+                    $existing = $barcode !== null ? $existingByBarcode->get($barcode) : null;
+
+                    if ($existing) {
+                        $prepared = $this->prepareProductFieldsForUpdate($productData, $existing);
+                        if (is_string($prepared)) {
+                            throw new \InvalidArgumentException($prepared);
+                        }
+
+                        $existing->update($prepared);
+                        $this->syncProductRelations($existing, $productData);
+                        $existing->load(['images', 'categories']);
+                        $updatedProducts[] = $this->appendProductPricingMeta($existing);
+                    } else {
+                        $prepared = $this->prepareProductFieldsForCreate($productData);
+                        if (is_string($prepared)) {
+                            throw new \InvalidArgumentException($prepared);
+                        }
+
+                        $product = $this->createProductFromPreparedFields($prepared, $atelierId, $productData);
+                        $product->load(['images', 'categories']);
+                        $createdProducts[] = $this->appendProductPricingMeta($product);
+                    }
+                }
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response(['message' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'message' => 'محصولات با موفقیت پردازش شدند.',
+            'created_count' => count($createdProducts),
+            'updated_count' => count($updatedProducts),
+            'created' => $createdProducts,
+            'updated' => $updatedProducts,
+            'products' => array_merge($createdProducts, $updatedProducts),
+        ], 200);
     }
 
     /**
@@ -413,28 +476,147 @@ class ProductController extends Controller
             $this->productValidationMessages()
         );
 
+        $prepared = $this->prepareProductFieldsForUpdate($fields, $product);
+        if (is_string($prepared)) {
+            return response(['message' => $prepared], 422);
+        }
+
+        $product->update($prepared);
+        $this->syncProductRelations($product, $request->all());
+
+        $product->load(['images', 'categories']);
+
+        return response($this->appendProductPricingMeta($product));
+    }
+
+    /**
+     * ویرایش گروهی محصولات در یک درخواست
+     */
+    public function bulkUpdate(Request $request)
+    {
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            abort(response()->json([
+                'message' => 'ویرایش محصول فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
+            ], 422));
+        }
+
+        $productsData = $request->input('products', []);
+        if (! is_array($productsData)) {
+            return response(['message' => 'فرمت products نامعتبر است.'], 422);
+        }
+
+        $request->validate([
+            'products' => 'required|array|min:1|max:200',
+            'products.*.id' => 'required|integer|distinct',
+            'products.*.name' => 'required|string|max:255',
+            'products.*.purchase_price' => 'required|numeric|min:0',
+            'products.*.sale_price' => 'required|numeric|min:0',
+            'products.*.quantity' => 'required|numeric|min:0',
+            'products.*.unit_type' => 'nullable|string|in:'.Product::UNIT_PIECE.','.Product::UNIT_KG,
+            'products.*.barcode' => 'required|string|min:1|max:255',
+            'products.*.original_sale_price' => 'nullable|numeric|min:0',
+            'products.*.discount_percent' => 'nullable|numeric|min:0|max:100',
+            'products.*.manufacturer_id' => 'nullable|exists:manufacturers,id',
+            'products.*.category_ids' => 'nullable|array',
+            'products.*.category_ids.*' => 'exists:categories,id',
+            'products.*.sizes' => 'nullable|array',
+            'products.*.sizes.*' => 'string',
+            'products.*.colors' => 'nullable|array',
+            'products.*.colors.*' => 'string',
+        ], $this->productValidationMessages());
+
+        $productIds = collect($productsData)->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $products = Product::whereIn('id', $productIds)
+            ->where('atelier_id', $atelierId)
+            ->get()
+            ->keyBy('id');
+
+        if ($products->count() !== count(array_unique($productIds))) {
+            return response(['message' => 'برخی محصولات یافت نشد یا متعلق به فروشگاه شما نیست.'], 422);
+        }
+
+        $barcodesInRequest = [];
+        foreach ($productsData as $index => $productData) {
+            $barcode = trim((string) ($productData['barcode'] ?? ''));
+            if ($barcode === '') {
+                return response(['message' => "ردیف {$index}: بارکد الزامی است."], 422);
+            }
+
+            if (isset($barcodesInRequest[$barcode])) {
+                return response(['message' => "بارکد «{$barcode}» در لیست تکراری است."], 422);
+            }
+            $barcodesInRequest[$barcode] = (int) $productData['id'];
+        }
+
+        foreach ($barcodesInRequest as $barcode => $productId) {
+            $exists = Product::where('barcode', $barcode)
+                ->where('atelier_id', $atelierId)
+                ->where('id', '!=', $productId)
+                ->whereNull('deleted_at')
+                ->exists();
+
+            if ($exists) {
+                return response(['message' => "بارکد «{$barcode}» قبلاً برای کالای دیگری ثبت شده است."], 422);
+            }
+        }
+
+        $updatedProducts = [];
+
+        try {
+            DB::transaction(function () use ($productsData, $products, &$updatedProducts) {
+                foreach ($productsData as $productData) {
+                    $product = $products->get((int) $productData['id']);
+                    $productData['barcode'] = trim((string) $productData['barcode']);
+
+                    $prepared = $this->prepareProductFieldsForUpdate($productData, $product);
+                    if (is_string($prepared)) {
+                        throw new \InvalidArgumentException($prepared);
+                    }
+
+                    $product->update($prepared);
+                    $this->syncProductRelations($product, $productData);
+
+                    $product->load(['images', 'categories']);
+                    $updatedProducts[] = $this->appendProductPricingMeta($product);
+                }
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response(['message' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'message' => 'محصولات با موفقیت به‌روزرسانی شدند.',
+            'updated_count' => count($updatedProducts),
+            'products' => $updatedProducts,
+        ]);
+    }
+
+    /**
+     * آماده‌سازی فیلدهای به‌روزرسانی محصول (قیمت، موجودی، واحد).
+     *
+     * @return array<string, mixed>|string
+     */
+    private function prepareProductFieldsForUpdate(array $fields, Product $product)
+    {
         $fields['unit_type'] = $fields['unit_type'] ?? ($product->unit_type ?? Product::UNIT_PIECE);
         if ($error = ProductQuantityTools::validateProductStockQuantity($fields['quantity'], $fields['unit_type'])) {
-            return response(['message' => $error], 422);
+            return $error;
         }
         $fields['quantity'] = ProductQuantityTools::normalize($fields['quantity'], $fields['unit_type']);
 
-        // محاسبه قیمت با تخفیف در صورت وجود
         if (isset($fields['discount_percent'])) {
             if ($fields['discount_percent'] >= 0) {
-                // اگر original_sale_price داده شده از آن استفاده کن، در غیر این صورت از original_sale_price موجود یا sale_price
-               $basePrice = $fields['sale_price'] ?? $fields['sale_price'] ?? $product->original_sale_price ;
-                
-                // محاسبه تخفیف
+                $basePrice = $fields['sale_price'] ?? $product->original_sale_price;
                 $discountAmount = ($basePrice * $fields['discount_percent']) / 100;
                 $priceAfterDiscount = max(0, $basePrice - $discountAmount);
                 $fields['sale_price'] = PriceTools::roundSalePrice((float) $priceAfterDiscount);
                 $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $basePrice);
             }
-            unset($fields['discount_percent']); // حذف از fields چون در دیتابیس نیست
+            unset($fields['discount_percent']);
         } else {
             $fields['sale_price'] = PriceTools::roundSalePrice((float) $fields['sale_price']);
-            if (!isset($fields['original_sale_price'])) {
+            if (! isset($fields['original_sale_price'])) {
                 if ($product->original_sale_price !== null) {
                     $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $product->original_sale_price);
                 } else {
@@ -445,28 +627,91 @@ class ProductController extends Controller
             }
         }
 
-        $product->update($fields);
+        unset($fields['id'], $fields['images'], $fields['category_ids']);
 
-        // مدیریت عکس‌ها - اضافه کردن به عکس‌های قبلی
-        if ($request->has('images') && is_array($request->images) && !empty($request->images)) {
-            // فقط عکس‌های جدید را اضافه می‌کنیم (جایگزین نمی‌کنیم)
-            $this->saveProductImages($product, $request->images);
+        return $fields;
+    }
+
+    /**
+     * آماده‌سازی فیلدهای ثبت محصول (قیمت، موجودی، واحد).
+     *
+     * @return array<string, mixed>|string
+     */
+    private function prepareProductFieldsForCreate(array $fields)
+    {
+        $fields['unit_type'] = $fields['unit_type'] ?? Product::UNIT_PIECE;
+        if ($error = ProductQuantityTools::validateProductStockQuantity($fields['quantity'], $fields['unit_type'])) {
+            return $error;
         }
+        $fields['quantity'] = ProductQuantityTools::normalize($fields['quantity'], $fields['unit_type']);
 
-        // مدیریت کتگوری‌ها
-        if ($request->has('category_ids')) {
-            if (is_array($request->category_ids) && !empty($request->category_ids)) {
-                $product->categories()->sync($request->category_ids);
+        if (isset($fields['discount_percent']) && $fields['discount_percent'] > 0) {
+            $basePrice = $fields['original_sale_price'] ?? $fields['sale_price'];
+            $discountAmount = ($basePrice * $fields['discount_percent']) / 100;
+            $priceAfterDiscount = max(0, $basePrice - $discountAmount);
+            $fields['sale_price'] = PriceTools::roundSalePrice((float) $priceAfterDiscount);
+            $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $basePrice);
+        } else {
+            $fields['sale_price'] = PriceTools::roundSalePrice((float) $fields['sale_price']);
+            if (! isset($fields['original_sale_price'])) {
+                $fields['original_sale_price'] = $fields['sale_price'];
             } else {
-                // اگر آرایه خالی باشد، تمام کتگوری‌ها را حذف می‌کنیم
-                $product->categories()->detach();
+                $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price']);
             }
         }
 
-        // بارگذاری مجدد محصول با عکس‌ها و کتگوری‌ها
-        $product->load(['images', 'categories']);
+        unset($fields['discount_percent'], $fields['images'], $fields['category_ids']);
 
-        return response($product);
+        if (isset($fields['barcode'])) {
+            $fields['barcode'] = trim((string) $fields['barcode']);
+            if ($fields['barcode'] === '') {
+                unset($fields['barcode']);
+            }
+        }
+
+        return $fields;
+    }
+
+    /**
+     * ایجاد محصول از فیلدهای آماده‌شده.
+     */
+    private function createProductFromPreparedFields(array $fields, int $atelierId, array $relationsData = []): Product
+    {
+        $sellerBarcode = $fields['barcode'] ?? null;
+
+        if ($sellerBarcode === null) {
+            $fields['barcode'] = $this->generateTemporaryBarcode($atelierId);
+        }
+
+        $fields['atelier_id'] = $atelierId;
+        $product = Product::create($fields);
+
+        if ($sellerBarcode === null) {
+            $product->barcode = (string) $product->id;
+            $product->save();
+        }
+
+        $this->syncProductRelations($product, $relationsData);
+
+        return $product;
+    }
+
+    /**
+     * همگام‌سازی دسته‌بندی‌ها و عکس‌های محصول در صورت ارسال.
+     */
+    private function syncProductRelations(Product $product, array $data): void
+    {
+        if (array_key_exists('images', $data) && is_array($data['images']) && ! empty($data['images'])) {
+            $this->saveProductImages($product, $data['images']);
+        }
+
+        if (array_key_exists('category_ids', $data)) {
+            if (is_array($data['category_ids']) && ! empty($data['category_ids'])) {
+                $product->categories()->sync($data['category_ids']);
+            } else {
+                $product->categories()->detach();
+            }
+        }
     }
 
     /**
