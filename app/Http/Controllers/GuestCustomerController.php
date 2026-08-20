@@ -15,7 +15,7 @@ class GuestCustomerController extends Controller
      * اعتبار و سفارش‌های قبلی همین فروشگاه با شماره موبایل (بدون لاگین).
      * GET|POST /api/{shop}/guest/lookup
      */
-    public function lookup(Request $request)
+    public function lookup(Request $request, $shop = null)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
         Setting::setShopContext($atelierId);

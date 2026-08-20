@@ -22,7 +22,7 @@ class TableOrderController extends Controller
      * ثبت سفارش پای میز — هنوز خرید نیست، تا پرداخت در table_orders می‌ماند.
      * POST /api/{shop}/table-order
      */
-    public function store(Request $request)
+    public function store(Request $request, $shop = null)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
         Setting::setShopContext($atelierId);
@@ -207,6 +207,56 @@ class TableOrderController extends Controller
     }
 
     /**
+     * تعداد سفارش‌های پای میز رسیدگی‌نشده — مناسب پولینگ هر ۳۰ ثانیه
+     * GET /api/table-orders/pending-count
+     */
+    public function pendingCount(Request $request)
+    {
+        $this->requireStaffShopUser($request);
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+
+        $base = TableOrder::query()
+            ->where('atelier_id', $atelierId)
+            ->where('status', TableOrder::STATUS_PENDING);
+
+        $count = (clone $base)->count();
+        $withReceipt = (clone $base)->whereNotNull('receipt_path')->count();
+        $latest = (clone $base)->orderByDesc('id')->first(['id', 'created_at', 'updated_at']);
+
+        $byMethod = (clone $base)
+            ->selectRaw('payment_method, COUNT(*) as total')
+            ->groupBy('payment_method')
+            ->pluck('total', 'payment_method');
+
+        $byTable = (clone $base)
+            ->selectRaw('shop_table_id, table_label, COUNT(*) as total')
+            ->groupBy('shop_table_id', 'table_label')
+            ->orderByDesc('total')
+            ->get()
+            ->map(function ($row) {
+                return [
+                    'shop_table_id' => (int) $row->shop_table_id,
+                    'table_label' => $row->table_label,
+                    'count' => (int) $row->total,
+                ];
+            })
+            ->values();
+
+        return response()->json([
+            'count' => $count,
+            'with_receipt' => $withReceipt,
+            'latest_id' => $latest ? (int) $latest->id : null,
+            'latest_at' => $latest ? $latest->updated_at : null,
+            'by_payment_method' => [
+                TableOrder::METHOD_ONLINE => (int) ($byMethod[TableOrder::METHOD_ONLINE] ?? 0),
+                TableOrder::METHOD_CARD_TO_CARD => (int) ($byMethod[TableOrder::METHOD_CARD_TO_CARD] ?? 0),
+                TableOrder::METHOD_POS => (int) ($byMethod[TableOrder::METHOD_POS] ?? 0),
+            ],
+            'by_table' => $byTable,
+        ]);
+    }
+
+    /**
      * جزئیات یک سفارش پای میز (برای ادمین — شامل رسید)
      * GET /api/table-orders/{tableOrder}
      */
@@ -249,7 +299,7 @@ class TableOrderController extends Controller
     }
 
     /**
-     * لغو سفارش پای میزِ پرداخت‌نشده.
+     * لغو سفارش پای میزِ پرداخت‌نشده توسط ادمین
      * POST /api/table-orders/{tableOrder}/cancel
      */
     public function cancel(Request $request, TableOrder $tableOrder)
@@ -257,15 +307,118 @@ class TableOrderController extends Controller
         $this->requireStaffShopUser($request);
         $this->assertModelBelongsToStaffAtelier($request, $tableOrder);
 
-        if (! $tableOrder->isPending()) {
-            return response()->json(['message' => 'فقط سفارش منتظر پرداخت قابل لغو است.'], 422);
+        return $this->cancelPendingOrder($tableOrder, 'staff');
+    }
+
+    /**
+     * لغو سفارش پای میز توسط مشتری (بدون لاگین)
+     * POST /api/{shop}/table-order/{tableOrder}/cancel
+     */
+    public function guestCancel(Request $request, $shop, TableOrder $tableOrder)
+    {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $this->assertGuestTableOrder($tableOrder, $atelierId);
+
+        if ($request->filled('phone')) {
+            $request->merge([
+                'phone' => PhoneTools::normalizeIranPhone($request->input('phone')),
+            ]);
         }
 
-        $tableOrder->update(['status' => TableOrder::STATUS_CANCELLED]);
+        if ($tableOrder->phone) {
+            $request->validate([
+                'phone' => 'required|string|regex:/^09\d{9}$/',
+            ]);
+            if ($request->input('phone') !== $tableOrder->phone) {
+                return response()->json(['message' => 'شماره موبایل با این سفارش مطابقت ندارد.'], 422);
+            }
+        }
+
+        return $this->cancelPendingOrder($tableOrder, 'customer');
+    }
+
+    /**
+     * لیست سفارش‌های پای میز مشتری که هنوز فاکتور نشده‌اند
+     * GET /api/{shop}/table-orders?table_number=1&phone=09...
+     */
+    public function guestIndex(Request $request, $shop = null)
+    {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        Setting::setShopContext($atelierId);
+
+        if ($request->filled('phone')) {
+            $request->merge([
+                'phone' => PhoneTools::normalizeIranPhone($request->input('phone')),
+            ]);
+        }
+
+        $request->validate([
+            'table_number' => 'nullable|integer|min:1',
+            'phone' => 'nullable|string|regex:/^09\d{9}$/',
+        ]);
+
+        if (! $request->filled('table_number') && ! $request->filled('phone')) {
+            return response()->json([
+                'message' => 'شماره میز یا شماره موبایل را بفرستید.',
+            ], 422);
+        }
+
+        $query = TableOrder::query()
+            ->where('atelier_id', $atelierId)
+            ->whereNull('purchase_id')
+            ->where('status', '!=', TableOrder::STATUS_PAID)
+            ->with(['items.product', 'shopTable'])
+            ->orderByDesc('id');
+
+        if ($request->filled('table_number')) {
+            $query->whereHas('shopTable', function ($q) use ($request) {
+                $q->where('table_number', $request->table_number);
+            });
+        }
+
+        if ($request->filled('phone')) {
+            $query->where('phone', $request->input('phone'));
+        }
+
+        $orders = $query->get()->map(fn (TableOrder $order) => $order->toPublicArray())->values();
 
         return response()->json([
-            'message' => 'سفارش لغو شد',
-            'table_order' => $tableOrder->fresh(['items.product', 'shopTable'])->toPublicArray(),
+            'count' => $orders->count(),
+            'table_orders' => $orders,
+        ]);
+    }
+
+    /**
+     * مشاهده یک سفارش پای میز قبل از تبدیل به فاکتور (بدون لاگین)
+     * GET /api/{shop}/table-order/{tableOrder}
+     */
+    public function guestShow(Request $request, $shop, TableOrder $tableOrder)
+    {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $this->assertGuestTableOrder($tableOrder, $atelierId);
+        Setting::setShopContext($atelierId);
+
+        if ($request->filled('phone')) {
+            $request->merge([
+                'phone' => PhoneTools::normalizeIranPhone($request->input('phone')),
+            ]);
+        }
+
+        if ($tableOrder->phone && $request->filled('phone') && $request->input('phone') !== $tableOrder->phone) {
+            return response()->json(['message' => 'سفارش یافت نشد'], 404);
+        }
+
+        if ($tableOrder->purchase_id || $tableOrder->status === TableOrder::STATUS_PAID) {
+            return response()->json([
+                'message' => 'این سفارش پرداخت شده و به فاکتور منتقل شده است.',
+                'purchase_id' => $tableOrder->purchase_id,
+            ], 410);
+        }
+
+        $tableOrder->load(['items.product', 'shopTable']);
+
+        return response()->json([
+            'table_order' => $tableOrder->toPublicArray(),
         ]);
     }
 
@@ -273,7 +426,7 @@ class TableOrderController extends Controller
      * اطلاعات میز + سفارش‌های فعال (پرداخت‌نشده)
      * GET /api/{shop}/tables/{table_number}
      */
-    public function tableInfo(Request $request, int $tableNumber)
+    public function tableInfo(Request $request, $shop, $tableNumber)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
         Setting::setShopContext($atelierId);
@@ -302,7 +455,7 @@ class TableOrderController extends Controller
      * ارسال/جایگزینی رسید کارت‌به‌کارت توسط مشتری (بدون لاگین)
      * POST /api/{shop}/table-order/{tableOrder}/receipt
      */
-    public function uploadReceipt(Request $request, TableOrder $tableOrder)
+    public function uploadReceipt(Request $request, $shop, TableOrder $tableOrder)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
         $this->assertGuestTableOrder($tableOrder, $atelierId);
@@ -329,6 +482,24 @@ class TableOrderController extends Controller
         return response()->json([
             'message' => 'رسید با موفقیت ثبت شد',
             'table_order' => $tableOrder->fresh(['items.product', 'shopTable'])->toPublicArray(),
+        ]);
+    }
+
+    private function cancelPendingOrder(TableOrder $tableOrder, string $cancelledBy)
+    {
+        if (! $tableOrder->isPending()) {
+            return response()->json(['message' => 'فقط سفارش منتظر پرداخت قابل لغو است.'], 422);
+        }
+
+        $tableOrder->update(['status' => TableOrder::STATUS_CANCELLED]);
+
+        $payload = $tableOrder->fresh(['items.product', 'shopTable'])->toPublicArray();
+        $payload['cancelled_by'] = $cancelledBy;
+
+        return response()->json([
+            'message' => 'سفارش لغو شد',
+            'cancelled_by' => $cancelledBy,
+            'table_order' => $payload,
         ]);
     }
 

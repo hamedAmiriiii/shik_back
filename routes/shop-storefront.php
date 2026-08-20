@@ -51,8 +51,14 @@ Route::prefix('{shop}')
             ->name('table.info');
         Route::post('table-order', [\App\Http\Controllers\TableOrderController::class, 'store'])
             ->name('table-order.store');
+        Route::get('table-orders', [\App\Http\Controllers\TableOrderController::class, 'guestIndex'])
+            ->name('table-order.index');
+        Route::get('table-order/{tableOrder}', [\App\Http\Controllers\TableOrderController::class, 'guestShow'])
+            ->name('table-order.show');
         Route::post('table-order/{tableOrder}/receipt', [\App\Http\Controllers\TableOrderController::class, 'uploadReceipt'])
             ->name('table-order.receipt');
+        Route::post('table-order/{tableOrder}/cancel', [\App\Http\Controllers\TableOrderController::class, 'guestCancel'])
+            ->name('table-order.cancel');
 
         // اعتبار و سفارش‌های قبلی با شماره موبایل — بدون لاگین
         Route::match(['get', 'post'], 'guest/lookup', [\App\Http\Controllers\GuestCustomerController::class, 'lookup'])

@@ -13,7 +13,7 @@ class ShopStorefrontController extends Controller
     /**
      * اطلاعات عمومی فروشگاه برای ویترین آنلاین (مسیر: api/{shop}).
      */
-    public function show(Request $request)
+    public function show(Request $request, $shop = null)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
         $atelier = Atelier::findOrFail($atelierId);
