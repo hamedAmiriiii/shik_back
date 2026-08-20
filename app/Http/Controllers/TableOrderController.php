@@ -365,8 +365,8 @@ class TableOrderController extends Controller
 
         $query = TableOrder::query()
             ->where('atelier_id', $atelierId)
+            ->where('status', TableOrder::STATUS_PENDING)
             ->whereNull('purchase_id')
-            ->where('status', '!=', TableOrder::STATUS_PAID)
             ->with(['items.product', 'shopTable'])
             ->orderByDesc('id');
 
@@ -405,6 +405,10 @@ class TableOrderController extends Controller
         }
 
         if ($tableOrder->phone && $request->filled('phone') && $request->input('phone') !== $tableOrder->phone) {
+            return response()->json(['message' => 'سفارش یافت نشد'], 404);
+        }
+
+        if ($tableOrder->status === TableOrder::STATUS_CANCELLED) {
             return response()->json(['message' => 'سفارش یافت نشد'], 404);
         }
 
@@ -491,13 +495,20 @@ class TableOrderController extends Controller
             return response()->json(['message' => 'فقط سفارش منتظر پرداخت قابل لغو است.'], 422);
         }
 
-        $tableOrder->update(['status' => TableOrder::STATUS_CANCELLED]);
-
-        $payload = $tableOrder->fresh(['items.product', 'shopTable'])->toPublicArray();
+        $tableOrder->load(['items.product', 'shopTable']);
+        $payload = $tableOrder->toPublicArray();
         $payload['cancelled_by'] = $cancelledBy;
 
+        $receiptPath = $tableOrder->receipt_path;
+        $tableOrder->items()->delete();
+        $tableOrder->delete();
+
+        if ($receiptPath && Storage::exists('public/'.$receiptPath)) {
+            Storage::delete('public/'.$receiptPath);
+        }
+
         return response()->json([
-            'message' => 'سفارش لغو شد',
+            'message' => 'سفارش لغو و حذف شد',
             'cancelled_by' => $cancelledBy,
             'table_order' => $payload,
         ]);
