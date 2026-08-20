@@ -48,6 +48,9 @@ class Setting extends Model
             'shop_sms_quota' => '0',
             'salary_hourly_wage' => '0',
             'salary_monthly_work_hours' => '220',
+            'shop_card_number' => '',
+            'shop_card_holder' => '',
+            'shop_bank_name' => '',
         ];
 
         foreach ($defaults as $key => $value) {

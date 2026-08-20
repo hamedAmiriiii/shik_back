@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Purchase;
 use App\Models\Setting;
+use App\Models\TableOrder;
 use App\Models\UserShiksho;
 use App\Tools\PhoneTools;
 use Illuminate\Http\Request;
@@ -44,10 +45,21 @@ class GuestCustomerController extends Controller
             fn (Purchase $purchase) => $this->guestPurchasePayload($purchase)
         )->values()->all();
 
+        $pendingOrders = TableOrder::query()
+            ->where('atelier_id', $atelierId)
+            ->where('phone', $phone)
+            ->where('status', TableOrder::STATUS_PENDING)
+            ->with(['items.product', 'shopTable'])
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (TableOrder $order) => $order->toPublicArray())
+            ->values();
+
         return response()->json([
             'phone' => $phone,
             'credit' => $credit,
             'has_credit' => $credit > 0,
+            'pending_orders' => $pendingOrders,
             'orders' => $payload,
         ]);
     }

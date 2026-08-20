@@ -34,8 +34,7 @@ class ShopTable extends Model
 
     public function pendingOrders(): HasMany
     {
-        return $this->hasMany(Purchase::class, 'shop_table_id')
-            ->whereIn('payment_type', ['debt'])
-            ->where('is_debt_settled', false);
+        return $this->hasMany(TableOrder::class, 'shop_table_id')
+            ->where('status', TableOrder::STATUS_PENDING);
     }
 }

@@ -51,6 +51,8 @@ Route::prefix('{shop}')
             ->name('table.info');
         Route::post('table-order', [\App\Http\Controllers\TableOrderController::class, 'store'])
             ->name('table-order.store');
+        Route::post('table-order/{tableOrder}/receipt', [\App\Http\Controllers\TableOrderController::class, 'uploadReceipt'])
+            ->name('table-order.receipt');
 
         // اعتبار و سفارش‌های قبلی با شماره موبایل — بدون لاگین
         Route::match(['get', 'post'], 'guest/lookup', [\App\Http\Controllers\GuestCustomerController::class, 'lookup'])

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Atelier;
 use App\Models\Setting;
+use App\Models\TableOrder;
 use App\Services\ShopLoyaltyCreditTierService;
 use Illuminate\Http\Request;
 
@@ -31,6 +32,7 @@ class ShopStorefrontController extends Controller
                 'enable_loyalty_credit' => Setting::isEnabled('enable_loyalty_credit', true),
                 'loyalty_credit_tiers' => ShopLoyaltyCreditTierService::tiersForApi($atelierId),
             ],
+            'payment_methods' => TableOrder::paymentMethodsForApi(),
         ]);
     }
 }

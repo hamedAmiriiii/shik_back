@@ -1,30 +1,6 @@
--- ========================================================
--- سفارش پای میز — Shop Tables & Table Orders
--- معادل migration‌های 2026_08_19_200000 و 200001
--- ========================================================
+-- سفارش پای میز قبل از پرداخت (معادل migration 2026_08_20_100000)
+-- اگر shop_tables را قبلاً ساخته‌اید، فقط همین فایل را اجرا کنید.
 
--- ۱. جدول میزهای فروشگاه
-CREATE TABLE IF NOT EXISTS `shop_tables` (
-    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    `atelier_id` BIGINT UNSIGNED NOT NULL,
-    `table_number` SMALLINT UNSIGNED NOT NULL,
-    `label` VARCHAR(100) NULL,
-    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
-    `created_at` TIMESTAMP NULL,
-    `updated_at` TIMESTAMP NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `shop_tables_unique` (`atelier_id`, `table_number`),
-    KEY `shop_tables_atelier_active` (`atelier_id`, `is_active`),
-    CONSTRAINT `shop_tables_atelier_id_fk` FOREIGN KEY (`atelier_id`) REFERENCES `ateliers` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ۲. فیلدهای میز روی جدول purchases
-ALTER TABLE `purchases`
-    ADD COLUMN `shop_table_id` BIGINT UNSIGNED NULL AFTER `atelier_id`,
-    ADD COLUMN `table_label` VARCHAR(100) NULL AFTER `shop_table_id`,
-    ADD KEY `purchases_shop_table_id_index` (`shop_table_id`);
-
--- ۳. سفارش پای میز (قبل از پرداخت) — معادل 2026_08_20_100000
 CREATE TABLE IF NOT EXISTS `table_orders` (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `atelier_id` BIGINT UNSIGNED NOT NULL,
@@ -63,9 +39,3 @@ CREATE TABLE IF NOT EXISTS `table_order_items` (
     KEY `table_order_items_order_id` (`table_order_id`),
     CONSTRAINT `table_order_items_order_id_fk` FOREIGN KEY (`table_order_id`) REFERENCES `table_orders` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ========================================================
--- نکته: سفارش مشتری پای میز اول در table_orders می‌ماند.
--- بعد از پرداخت پرسنل (POST /api/table-orders/{id}/pay)
--- یک ردیف در purchases ساخته می‌شود و status = paid می‌شود.
--- ========================================================

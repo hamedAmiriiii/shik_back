@@ -115,6 +115,9 @@ Route::middleware('auth:sanctum')->prefix('shop-tables')->name('shop-tables.')->
 
 Route::middleware('auth:sanctum')->prefix('table-orders')->name('table-orders.')->group(function () {
     Route::get('/', [\App\Http\Controllers\TableOrderController::class, 'index']);
+    Route::get('/{tableOrder}', [\App\Http\Controllers\TableOrderController::class, 'show']);
+    Route::post('/{tableOrder}/pay', [\App\Http\Controllers\TableOrderController::class, 'pay']);
+    Route::post('/{tableOrder}/cancel', [\App\Http\Controllers\TableOrderController::class, 'cancel']);
 });
 
 Route::group(['middleware' => ['auth:sanctum']], function () {
