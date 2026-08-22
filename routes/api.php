@@ -125,6 +125,12 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Store/Shop related routes - require authentication
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
     Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);
+    Route::resource('raw-materials', \App\Http\Controllers\RawMaterialController::class)->except(['create', 'edit']);
+    Route::post('raw-materials/{rawMaterial}/lots', [\App\Http\Controllers\RawMaterialController::class, 'storeLot']);
+    Route::delete('raw-materials/{rawMaterial}/lots/{lot}', [\App\Http\Controllers\RawMaterialController::class, 'destroyLot']);
+    Route::resource('produced-goods', \App\Http\Controllers\ProducedGoodController::class)->except(['create', 'edit']);
+    Route::post('produced-goods/{producedGood}/produce', [\App\Http\Controllers\ProducedGoodController::class, 'produce']);
+    Route::get('produced-goods/{producedGood}/productions', [\App\Http\Controllers\ProducedGoodController::class, 'productions']);
     Route::resource('shop-employees', \App\Http\Controllers\ShopEmployeeController::class);
     Route::get('employee-payrolls', [\App\Http\Controllers\EmployeePayrollController::class, 'index']);
     Route::post('employee-payrolls', [\App\Http\Controllers\EmployeePayrollController::class, 'store']);
