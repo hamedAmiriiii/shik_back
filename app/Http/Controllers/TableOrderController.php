@@ -74,6 +74,18 @@ class TableOrderController extends Controller
 
         DB::beginTransaction();
         try {
+            ShopTable::query()->where('id', $shopTable->id)->lockForUpdate()->first();
+
+            $existing = $this->activeOrderForTable($atelierId, (int) $shopTable->id, true);
+            if ($existing) {
+                DB::rollBack();
+
+                return response()->json([
+                    'message' => 'این میز یک سفارش فعال دارد. تا پرداخت یا لغو آن نمی‌توان سفارش جدید ثبت کرد.',
+                    'code' => 'table_has_active_order',
+                    'table_order' => $existing->toPublicArray(),
+                ], 409);
+            }
             $totalAmount = 0;
             $lines = [];
 
@@ -512,6 +524,27 @@ class TableOrderController extends Controller
             'cancelled_by' => $cancelledBy,
             'table_order' => $payload,
         ]);
+    }
+
+    private function activeOrderForTable(int $atelierId, int $shopTableId, bool $lock = false): ?TableOrder
+    {
+        $query = TableOrder::query()
+            ->where('atelier_id', $atelierId)
+            ->where('shop_table_id', $shopTableId)
+            ->where('status', TableOrder::STATUS_PENDING)
+            ->whereNull('purchase_id')
+            ->orderByDesc('id');
+
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+
+        $order = $query->first();
+        if ($order) {
+            $order->load(['items.product', 'shopTable']);
+        }
+
+        return $order;
     }
 
     private function assertGuestTableOrder(TableOrder $tableOrder, int $atelierId): void
