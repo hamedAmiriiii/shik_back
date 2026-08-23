@@ -11,7 +11,12 @@ class RawMaterial extends Model
     protected $fillable = [
         'atelier_id',
         'name',
+        'sale_price',
         'note',
+    ];
+
+    protected $casts = [
+        'sale_price' => 'decimal:2',
     ];
 
     public function atelier(): BelongsTo

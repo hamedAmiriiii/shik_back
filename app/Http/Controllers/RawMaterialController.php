@@ -77,6 +77,7 @@ class RawMaterialController extends Controller
                 Rule::unique('raw_materials', 'name')->where('atelier_id', $atelierId),
             ],
             'note' => 'nullable|string',
+            'sale_price' => 'nullable|numeric|min:0',
             'quantity_kg' => 'nullable|numeric|min:0.001',
             'price_per_kg' => 'nullable|numeric|min:0|required_with:quantity_kg',
             'purchased_at' => 'nullable|date',
@@ -85,6 +86,7 @@ class RawMaterialController extends Controller
         $material = RawMaterial::create([
             'atelier_id' => $atelierId,
             'name' => $fields['name'],
+            'sale_price' => $fields['sale_price'] ?? 0,
             'note' => $fields['note'] ?? null,
         ]);
 
@@ -124,6 +126,7 @@ class RawMaterialController extends Controller
                     ->where('atelier_id', $atelierId)
                     ->ignore($rawMaterial->id),
             ],
+            'sale_price' => 'nullable|numeric|min:0',
             'note' => 'nullable|string',
         ]);
 

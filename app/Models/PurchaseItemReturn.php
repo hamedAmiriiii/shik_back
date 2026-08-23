@@ -13,6 +13,8 @@ class PurchaseItemReturn extends Model
         'purchase_id',
         'purchased_product_id',
         'product_id',
+        'produced_good_id',
+        'raw_material_id',
         'quantity',
         'sale_price',
         'purchase_price',

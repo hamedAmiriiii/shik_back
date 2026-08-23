@@ -11,6 +11,7 @@ use App\Models\CustomerPhone;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
+use App\Services\ShopPosSaleService;
 use App\Tools\PriceTools;
 use App\Tools\PhoneTools;
 use App\Tools\ProductQuantityTools;
@@ -19,6 +20,7 @@ use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Morilog\Jalali\Jalalian;
 
@@ -34,7 +36,12 @@ class PurchasedProductController extends Controller
     // 1. cart_id ندارند (فروش فیزیکی مستقیم)
     // 2. یا cart_id دارند و Cart status آن‌ها shipped است
     // 3. مجموع مبلغشان بیشتر از 0 است
-    $query = Purchase::with(['purchasedProducts.product', 'installments'])
+    $query = Purchase::with([
+            'purchasedProducts.product',
+            'purchasedProducts.producedGood',
+            'purchasedProducts.rawMaterial',
+            'installments',
+        ])
         ->where('atelier_id', $atelierId)
         ->where('total_amount', '>', 0) // فقط خریدهایی که مجموع مبلغشان بیشتر از 0 است
         ->where(function($q) {
@@ -148,9 +155,20 @@ class PurchasedProductController extends Controller
             'phone' => 'required_if:payment_type,debt|nullable|string|regex:/^09\d{9}$/',
             'products' => 'required|array|min:1',
             'products.*.product_id' => [
-                'required',
+                'nullable',
+                'integer',
                 Rule::exists('products', 'id')->whereNull('deleted_at'),
             ],
+            'products.*.produced_good_id' => array_values(array_filter([
+                'nullable',
+                'integer',
+                Schema::hasTable('produced_goods') ? 'exists:produced_goods,id' : null,
+            ])),
+            'products.*.raw_material_id' => array_values(array_filter([
+                'nullable',
+                'integer',
+                Schema::hasTable('raw_materials') ? 'exists:raw_materials,id' : null,
+            ])),
             'products.*.quantity' => 'required|numeric|min:0.001',
             'products.*.sale_price' => 'nullable|numeric|min:0',
             'products.*.discount_percent' => 'nullable|numeric|min:0|max:100',
@@ -169,28 +187,22 @@ class PurchasedProductController extends Controller
         $useCredit = $request->input('use_credit', false);
         $paymentType = $request->input('payment_type', 'cash'); // پیش‌فرض: نقدی
         $installmentCount = $request->input('installment_count');
-        
-        // خواندن همه محصولات در یک query
-        $productIds = array_column($request->input('products'), 'product_id');
-        $products = Product::whereIn('id', $productIds)->get()->keyBy('id');
 
         $staffAtelierId = $this->staffShopAtelierId($request);
-        $distinctAtelierIds = $products->pluck('atelier_id')->unique()->filter(function ($id) {
-            return $id !== null && $id !== '';
-        });
-        if ($staffAtelierId !== null) {
-            foreach ($products as $p) {
-                if ((int) $p->atelier_id !== (int) $staffAtelierId) {
-                    return response(['error' => 'یک یا چند محصول متعلق به فروشگاه شما نیست'], 422);
-                }
+        $posSale = app(ShopPosSaleService::class);
+        try {
+            $preparedLines = $posSale->prepareLines($request->input('products'), $staffAtelierId);
+            $posSale->assertStock($preparedLines);
+        } catch (\RuntimeException $e) {
+            $status = strpos($e->getMessage(), 'یافت نشد') !== false ? 404 : 422;
+            if (strpos($e->getMessage(), 'موجودی') !== false) {
+                $status = 400;
             }
-            $purchaseAtelierId = (int) $staffAtelierId;
-        } else {
-            if ($distinctAtelierIds->count() > 1) {
-                return response(['error' => 'همه محصولات باید متعلق به یک فروشگاه باشند'], 422);
-            }
-            $purchaseAtelierId = $distinctAtelierIds->isEmpty() ? null : (int) $distinctAtelierIds->first();
+
+            return response(['error' => $e->getMessage()], $status);
         }
+
+        $purchaseAtelierId = $posSale->purchaseAtelierId($preparedLines, $staffAtelierId);
 
         $clientId = $this->normalizeClientId($request->input('client_id'));
         if ($clientId !== null) {
@@ -200,60 +212,21 @@ class PurchasedProductController extends Controller
             }
         }
 
-        // بررسی موجودی محصولات قبل از ثبت خرید
-        foreach ($request->input('products') as $productData) {
-            $product = $products->get($productData['product_id']);
-            if (!$product) {
-                return response(['error' => 'محصول یافت نشد'], 404);
-            }
-
-            $unitType = $product->unit_type ?? Product::UNIT_PIECE;
-            if ($error = ProductQuantityTools::validateSaleQuantity($productData['quantity'], $unitType)) {
-                return response(['error' => "{$product->name}: {$error}"], 422);
-            }
-
-            $requestedQuantity = ProductQuantityTools::normalize($productData['quantity'], $unitType);
-            if (! ProductQuantityTools::hasSufficientStock($product->quantity, $requestedQuantity)) {
-                $unitLabel = ProductQuantityTools::unitLabel($unitType);
-
-                return response([
-                    'error' => "موجودی محصول '{$product->name}' کافی نیست. موجودی: {$product->quantity} {$unitLabel}، درخواستی: {$requestedQuantity} {$unitLabel}",
-                ], 400);
-            }
-        }
-        
         // محاسبه مجموع مبلغ خرید بر اساس sale_price (با در نظر گیری تخفیف)
         $originalTotalAmount = 0;
         $productsData = [];
-        foreach ($request->input('products') as $productData) {
-            $product = $products->get($productData['product_id']);
-            
-            // تعیین قیمت فروش: اگر sale_price ارسال شده از آن استفاده کن، در غیر این صورت از product.sale_price
-            // یا اگر discount_percent داده شده، درصد تخفیف را اعمال کن
-            $baseSalePrice = $product->sale_price;
-            $unitType = $product->unit_type ?? Product::UNIT_PIECE;
-            $quantity = ProductQuantityTools::normalize($productData['quantity'], $unitType);
-            
-            if (isset($productData['sale_price']) && $productData['sale_price'] !== null) {
-                $salePrice = PriceTools::roundSalePrice((float) $productData['sale_price']);
-            } elseif (isset($productData['discount_percent']) && $productData['discount_percent'] > 0) {
-                $discountAmount = ($baseSalePrice * $productData['discount_percent']) / 100;
-                $priceAfterDiscount = max(0, $baseSalePrice - $discountAmount);
-                $salePrice = PriceTools::roundSalePrice((float) $priceAfterDiscount);
-            } else {
-                $salePrice = PriceTools::roundSalePrice((float) $baseSalePrice);
-            }
-            
-            $originalTotalAmount += $quantity * $salePrice;
-            
-            // ذخیره اطلاعات محصول برای استفاده بعدی
+        foreach ($preparedLines as $line) {
+            $originalTotalAmount += $line['quantity'] * $line['sale_price'];
             $productsData[] = [
-                'product_id' => $productData['product_id'],
-                'quantity' => $quantity,
-                'sale_price' => $salePrice, // قیمت واقعی فروش (با تخفیف)
-                'purchase_price' => $product->purchase_price, // برای ذخیره در purchased_products
-                'size' => $productData['size'] ?? null, // سایز انتخاب شده
-                'color' => $productData['color'] ?? null, // رنگ انتخاب شده
+                'product_id' => $line['product_id'],
+                'produced_good_id' => $line['produced_good_id'],
+                'raw_material_id' => $line['raw_material_id'],
+                'item_name' => $line['item_name'],
+                'quantity' => $line['quantity'],
+                'sale_price' => $line['sale_price'],
+                'purchase_price' => $line['purchase_price'],
+                'size' => $line['size'] ?? null,
+                'color' => $line['color'] ?? null,
             ];
         }
 
@@ -341,6 +314,7 @@ class PurchasedProductController extends Controller
 
         // ایجاد سبد خرید (Purchase)
         try {
+            DB::beginTransaction();
             $purchase = Purchase::create([
                 'phone' => $phone,
                 'total_amount' => $paymentType === 'installment' ? $finalTotalAmount : $grossTotal,
@@ -356,7 +330,27 @@ class PurchasedProductController extends Controller
                 'atelier_id' => $purchaseAtelierId,
                 'client_id' => $clientId,
             ]);
+
+            $purchasedProducts = [];
+            foreach ($productsData as $productData) {
+                $purchasedProducts[] = PurchasedProduct::create([
+                    'purchase_id' => $purchase->id,
+                    'product_id' => $productData['product_id'],
+                    'produced_good_id' => $productData['produced_good_id'],
+                    'raw_material_id' => $productData['raw_material_id'],
+                    'item_name' => $productData['item_name'],
+                    'quantity' => $productData['quantity'],
+                    'purchase_price' => $productData['purchase_price'],
+                    'sale_price' => $productData['sale_price'],
+                    'size' => $productData['size'] ?? null,
+                    'color' => $productData['color'] ?? null,
+                ]);
+            }
+
+            $posSale->commitStock($preparedLines, $purchasedProducts);
+            DB::commit();
         } catch (QueryException $e) {
+            DB::rollBack();
             if ($clientId !== null && $this->isDuplicateClientIdException($e)) {
                 $existingPurchase = $this->findPurchaseByClientId($purchaseAtelierId, $clientId);
                 if ($existingPurchase) {
@@ -365,26 +359,10 @@ class PurchasedProductController extends Controller
             }
 
             throw $e;
-        }
+        } catch (\RuntimeException $e) {
+            DB::rollBack();
 
-        // ذخیره محصولات خریداری شده و لینک کردن به سبد خرید
-        $purchasedProducts = [];
-        foreach ($productsData as $productData) {
-            $purchasedProducts[] = PurchasedProduct::create([
-                'purchase_id' => $purchase->id,
-                'product_id' => $productData['product_id'],
-                'quantity' => $productData['quantity'],
-                'purchase_price' => $productData['purchase_price'], // قیمت خرید محصول برای ثبت
-                'sale_price' => $productData['sale_price'], // قیمت واقعی فروش (با تخفیف)
-                'size' => $productData['size'] ?? null, // سایز انتخاب شده
-                'color' => $productData['color'] ?? null, // رنگ انتخاب شده
-            ]);
-        }
-
-        // کسر موجودی محصولات بعد از ثبت خرید
-        foreach ($productsData as $productData) {
-            $product = $products->get($productData['product_id']);
-            $product->decrement('quantity', $productData['quantity']);
+            return response(['error' => $e->getMessage()], 400);
         }
 
         // ایجاد قسط‌ها در صورت اقساطی بودن
@@ -479,7 +457,7 @@ class PurchasedProductController extends Controller
 
     protected function storePurchaseResponse(Purchase $purchase, bool $alreadyExists)
     {
-        $purchase->load('purchasedProducts.product');
+        $purchase->load(['purchasedProducts.product', 'purchasedProducts.producedGood', 'purchasedProducts.rawMaterial']);
         if ($purchase->isInstallment()) {
             $purchase->load('installments');
         }
@@ -502,7 +480,7 @@ class PurchasedProductController extends Controller
 
     public function show(Purchase $purchase)
     {
-        $purchase->load('purchasedProducts.product');
+        $purchase->load(['purchasedProducts.product', 'purchasedProducts.producedGood', 'purchasedProducts.rawMaterial']);
         if ($purchase->isInstallment()) {
             $purchase->load('installments');
         }
@@ -524,7 +502,11 @@ class PurchasedProductController extends Controller
 
         $purchase->update($request->only(['phone', 'total_amount', 'credit_used', 'credit_earned']));
 
-        return response($purchase->load('purchasedProducts.product'), 200);
+        return response($purchase->load([
+            'purchasedProducts.product',
+            'purchasedProducts.producedGood',
+            'purchasedProducts.rawMaterial',
+        ]), 200);
     }
 
     public function destroy(Purchase $purchase)
@@ -660,11 +642,12 @@ class PurchasedProductController extends Controller
         ]);
 
         $product = $purchasedProduct->product;
-        if (! $product instanceof Product) {
+        $unitType = $product instanceof Product
+            ? ($product->unit_type ?? Product::UNIT_PIECE)
+            : Product::UNIT_KG;
+        if (! $product && ! $purchasedProduct->produced_good_id && ! $purchasedProduct->raw_material_id) {
             return response(['error' => 'محصول یافت نشد'], 404);
         }
-
-        $unitType = $product->unit_type ?? Product::UNIT_PIECE;
         $lineQuantity = ProductQuantityTools::normalize($purchasedProduct->quantity, $unitType);
         $returnQty = $request->has('quantity')
             ? ProductQuantityTools::normalize($request->input('quantity'), $unitType)

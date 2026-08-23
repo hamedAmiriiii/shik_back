@@ -12,6 +12,7 @@ class Production extends Model
         'atelier_id',
         'produced_good_id',
         'quantity_kg',
+        'remaining_kg',
         'total_cost',
         'cost_per_kg',
         'note',
@@ -19,6 +20,7 @@ class Production extends Model
 
     protected $casts = [
         'quantity_kg' => 'decimal:3',
+        'remaining_kg' => 'decimal:3',
         'total_cost' => 'decimal:2',
         'cost_per_kg' => 'decimal:2',
     ];

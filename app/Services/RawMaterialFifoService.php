@@ -158,9 +158,20 @@ class RawMaterialFifoService
         }
 
         $qty = $quantityKg > 0 ? $quantityKg : 1;
+        $costPerKg = round($total / $qty, 2);
+        $salePrice = round((float) $good->sale_price, 2);
+        $profitPerKg = round($salePrice - $costPerKg, 2);
+
         $good->setAttribute('quantity_kg', $quantityKg);
         $good->setAttribute('total_cost', round($total, 2));
-        $good->setAttribute('cost_per_kg', round($total / $qty, 2));
+        $good->setAttribute('cost_per_kg', $costPerKg);
+        $good->setAttribute('sale_price', $salePrice);
+        $good->setAttribute('profit_per_kg', $profitPerKg);
+        $good->setAttribute(
+            'profit_percent',
+            $costPerKg > 0 ? round(($profitPerKg / $costPerKg) * 100, 2) : null
+        );
+        $good->setAttribute('stock_kg', round((float) Production::where('produced_good_id', $good->id)->sum('remaining_kg'), 3));
         $good->setAttribute('ingredient_costs', $lines);
         $good->setAttribute('stock_sufficient', $sufficient);
         $good->setAttribute('shortages', $shortages);
@@ -207,6 +218,7 @@ class RawMaterialFifoService
                 'atelier_id' => $good->atelier_id,
                 'produced_good_id' => $good->id,
                 'quantity_kg' => $quantityKg,
+                'remaining_kg' => $quantityKg,
                 'total_cost' => 0,
                 'cost_per_kg' => 0,
                 'note' => $note,

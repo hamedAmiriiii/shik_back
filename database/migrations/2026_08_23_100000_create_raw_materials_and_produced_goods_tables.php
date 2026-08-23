@@ -12,6 +12,7 @@ class CreateRawMaterialsAndProducedGoodsTables extends Migration
             $table->id();
             $table->unsignedBigInteger('atelier_id');
             $table->string('name');
+            $table->decimal('sale_price', 15, 2)->default(0);
             $table->text('note')->nullable();
             $table->timestamps();
 
@@ -41,6 +42,7 @@ class CreateRawMaterialsAndProducedGoodsTables extends Migration
             $table->id();
             $table->unsignedBigInteger('atelier_id');
             $table->string('name');
+            $table->decimal('sale_price', 15, 2)->default(0);
             $table->text('note')->nullable();
             $table->timestamps();
 
@@ -67,6 +69,7 @@ class CreateRawMaterialsAndProducedGoodsTables extends Migration
             $table->unsignedBigInteger('atelier_id');
             $table->unsignedBigInteger('produced_good_id');
             $table->decimal('quantity_kg', 12, 3);
+            $table->decimal('remaining_kg', 12, 3)->default(0);
             $table->decimal('total_cost', 15, 2)->default(0);
             $table->decimal('cost_per_kg', 15, 2)->default(0);
             $table->text('note')->nullable();

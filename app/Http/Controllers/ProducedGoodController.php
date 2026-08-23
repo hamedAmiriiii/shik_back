@@ -77,6 +77,7 @@ class ProducedGoodController extends Controller
             $good = ProducedGood::create([
                 'atelier_id' => $atelierId,
                 'name' => $fields['name'],
+                'sale_price' => $fields['sale_price'] ?? 0,
                 'note' => $fields['note'] ?? null,
             ]);
             $this->syncIngredients($good, $fields['ingredients'] ?? []);
@@ -117,6 +118,9 @@ class ProducedGoodController extends Controller
             $payload = [];
             if (array_key_exists('name', $fields)) {
                 $payload['name'] = $fields['name'];
+            }
+            if (array_key_exists('sale_price', $fields)) {
+                $payload['sale_price'] = $fields['sale_price'];
             }
             if (array_key_exists('note', $fields)) {
                 $payload['note'] = $fields['note'];
@@ -238,6 +242,7 @@ class ProducedGoodController extends Controller
 
         return $request->validate([
             'name' => $nameRule,
+            'sale_price' => 'nullable|numeric|min:0',
             'note' => 'nullable|string',
             'ingredients' => $ingredientsRule,
             'ingredients.*.raw_material_id' => 'required|integer',
