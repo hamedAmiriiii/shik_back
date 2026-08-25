@@ -23,7 +23,7 @@ class ShopSalesReportService
         $startString = $startDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
         $endString = $endDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
 
-        $purchases = Purchase::with(['purchasedProducts.product', 'installments'])
+        $purchases = Purchase::with(['purchasedProducts.product', 'installments', 'cheque'])
             ->forAtelier($atelierId)
             ->whereBetween('created_at', [$startString, $endString])
             ->get();
@@ -51,6 +51,8 @@ class ShopSalesReportService
                 $totalSales += (float) $purchase->paid_amount + (float) $purchase->credit_used;
             } elseif ($purchase->isDebt()) {
                 $totalSales += $lineSales;
+            } elseif ($purchase->isCheque()) {
+                // فروش چکی تا وصول در sales نیست؛ اثر منفی از open_cheques و درآمد از incomes
             } else {
                 // همان مبلغ فاکتور (total_amount) — هم‌خوان با card+cash در جدول purchases
                 $totalSales += (float) $purchase->total_amount;
@@ -72,12 +74,14 @@ class ShopSalesReportService
         }
 
         $openDebts = self::openDebtsAsOf($atelierId, $endDate);
+        $openCheques = self::openChequeSalesAsOf($atelierId, $endDate);
 
         $installmentsCollected = self::installmentsCollectedInRange($atelierId, $startString, $endString);
         $debtsCollected = self::debtsCollectedInRange($atelierId, $startString, $endString);
+        $chequesCollected = self::chequesCollectedInRange($atelierId, $startString, $endString);
         $cashAndCardTotal = round($cardAmount + $cashAmount, 2);
-        $settlementTotal = round($cashAndCardTotal + $creditUsedTotal + $installmentsCollected + $debtsCollected, 2);
-        $totalCollected = $cashAndCardTotal + $installmentsCollected + $debtsCollected;
+        $settlementTotal = round($cashAndCardTotal + $creditUsedTotal + $installmentsCollected + $debtsCollected + $chequesCollected, 2);
+        $totalCollected = $cashAndCardTotal + $installmentsCollected + $debtsCollected + $chequesCollected;
 
         $returnedProducts = ReturnedProduct::with('product')
             ->forAtelier($atelierId)
@@ -112,10 +116,13 @@ class ShopSalesReportService
             'cash_and_card_total' => (float) $cashAndCardTotal,
             'installments_collected' => (float) $installmentsCollected,
             'debts_collected' => (float) $debtsCollected,
+            'cheques_collected' => (float) $chequesCollected,
             'total_collected' => (float) round($totalCollected, 2),
             'uncollected_installments' => (float) $uncollectedFromPeriodSales,
             'uncollected_debts' => (float) round($openDebts, 2),
+            'uncollected_cheques' => (float) round($openCheques, 2),
             'open_debt' => (float) round($openDebts, 2),
+            'open_cheques' => (float) round($openCheques, 2),
             'credit_used_total' => (float) round($creditUsedTotal, 2),
             'settlement_total' => (float) $settlementTotal,
             'discount_given' => (float) round($discountGiven, 2),
@@ -159,13 +166,16 @@ class ShopSalesReportService
             'card_amount' => (float) ($metrics['card_amount'] ?? 0),
             'installments_collected' => (float) ($metrics['installments_collected'] ?? 0),
             'debts_collected' => (float) ($metrics['debts_collected'] ?? 0),
+            'cheques_collected' => (float) ($metrics['cheques_collected'] ?? 0),
             'total_collected' => (float) ($metrics['total_collected'] ?? 0),
             'discount_given' => (float) ($metrics['discount_given'] ?? 0),
             'credit_used_total' => (float) ($metrics['credit_used_total'] ?? 0),
             'settlement_total' => (float) ($metrics['settlement_total'] ?? 0),
             'uncollected_installments' => (float) ($metrics['uncollected_installments'] ?? 0),
             'uncollected_debts' => (float) ($metrics['uncollected_debts'] ?? 0),
+            'uncollected_cheques' => (float) ($metrics['uncollected_cheques'] ?? 0),
             'open_debt' => (float) ($metrics['open_debt'] ?? $metrics['uncollected_debts'] ?? 0),
+            'open_cheques' => (float) ($metrics['open_cheques'] ?? $metrics['uncollected_cheques'] ?? 0),
         ];
     }
 
@@ -184,6 +194,10 @@ class ShopSalesReportService
         }
 
         if ($purchase->isDebt()) {
+            return [0.0, 0.0];
+        }
+
+        if ($purchase->isCheque()) {
             return [0.0, 0.0];
         }
 
@@ -236,9 +250,71 @@ class ShopSalesReportService
             });
     }
 
+    /**
+     * مبلغ چک‌های متصل به فروش که در بازه وصول شده‌اند.
+     */
+    public static function chequesCollectedInRange(int $atelierId, string $start, string $end): float
+    {
+        if (! Schema::hasTable('cheques') || ! Schema::hasColumn('purchases', 'cheque_id')) {
+            return 0.0;
+        }
+
+        return (float) Purchase::query()
+            ->forAtelier($atelierId)
+            ->where('payment_type', 'cheque')
+            ->whereNotNull('cheque_id')
+            ->whereHas('cheque', function ($q) use ($start, $end) {
+                $q->where('status', \App\Models\Cheque::STATUS_CLEARED)
+                    ->whereNotNull('cleared_at')
+                    ->whereBetween('cleared_at', [$start, $end]);
+            })
+            ->with(['purchasedProducts', 'cheque'])
+            ->get()
+            ->sum(function (Purchase $purchase) {
+                return $purchase->payableAmount();
+            });
+    }
+
     public static function totalUncollectedDebts(int $atelierId): float
     {
         return self::openDebtsAsOf($atelierId, Carbon::now('Asia/Tehran'));
+    }
+
+    public static function totalUncollectedCheques(int $atelierId): float
+    {
+        return self::openChequeSalesAsOf($atelierId, Carbon::now('Asia/Tehran'));
+    }
+
+    /**
+     * مجموع فروش‌های چکی وصول‌نشده تا پایان یک روز (اثر منفی روی موجودی حساب).
+     */
+    public static function openChequeSalesAsOf(int $atelierId, Carbon $asOfDate): float
+    {
+        if (! Schema::hasColumn('purchases', 'cheque_id')) {
+            return 0.0;
+        }
+
+        $endString = $asOfDate->copy()->setTimezone('Asia/Tehran')->endOfDay()->format('Y-m-d H:i:s');
+
+        return (float) Purchase::query()
+            ->forAtelier($atelierId)
+            ->where('payment_type', 'cheque')
+            ->where('total_amount', '>', 0)
+            ->where('created_at', '<=', $endString)
+            ->where(function ($q) use ($endString) {
+                $q->whereHas('cheque', function ($cq) use ($endString) {
+                    $cq->where(function ($c2) use ($endString) {
+                        $c2->where('status', '!=', \App\Models\Cheque::STATUS_CLEARED)
+                            ->orWhereNull('cleared_at')
+                            ->orWhere('cleared_at', '>', $endString);
+                    });
+                })->orWhereDoesntHave('cheque');
+            })
+            ->with(['purchasedProducts', 'cheque'])
+            ->get()
+            ->sum(function (Purchase $purchase) {
+                return $purchase->payableAmount();
+            });
     }
 
     /**

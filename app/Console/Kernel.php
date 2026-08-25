@@ -53,6 +53,19 @@ class Kernel extends ConsoleKernel
             ->after(function () {
                 \Log::info('Scheduled task: installments:send-reminders - اجرا شد');
             });
+
+        // تبدیل چک‌های صادرهٔ سررسیدشده به هزینه - روزانه در ساعت 00:05 (به وقت تهران)
+        $schedule->command('cheques:convert-due')
+            ->dailyAt('00:05')
+            ->before(function () {
+                \Log::info('Scheduled task: cheques:convert-due - شروع اجرا', [
+                    'time' => now()->format('Y-m-d H:i:s'),
+                    'timezone' => config('app.timezone'),
+                ]);
+            })
+            ->after(function () {
+                \Log::info('Scheduled task: cheques:convert-due - اجرا شد');
+            });
     }
 
     /**

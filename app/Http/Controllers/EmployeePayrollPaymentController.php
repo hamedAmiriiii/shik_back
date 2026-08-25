@@ -22,27 +22,22 @@ class EmployeePayrollPaymentController extends Controller
             ->orderBy('created_at')
             ->get();
 
-        return response([
+        return response(array_merge([
             'payroll_id' => $employeePayroll->id,
-            'salary_amount' => (float) $employeePayroll->salary_amount,
-            'total_paid' => $employeePayroll->totalPaid(),
-            'remaining' => $employeePayroll->remaining(),
-            'status' => $employeePayroll->status,
             'payments' => $payments,
-        ], 200);
+        ], $employeePayroll->paymentSummary()), 200);
     }
 
     /**
      * ثبت پرداخت (بخشی از حقوق، مساعده، سایر)
+     *
+     * مساعده می‌تواند از مانده/حقوق بیشتر باشد و بعداً از حقوق محاسبه‌شده کسر می‌شود.
+     * پرداخت نوع salary فقط تا سقف مانده (پس از کسر مساعده) مجاز است.
      */
     public function store(Request $request, EmployeePayroll $employeePayroll)
     {
         $actor = $this->requireStaffShopUser($request);
         $this->assertModelBelongsToStaffAtelier($request, $employeePayroll);
-
-        if ($employeePayroll->isPaid()) {
-            return response()->json(['message' => 'حقوق این ماه کاملاً تسویه شده است.'], 422);
-        }
 
         $fields = $request->validate([
             'amount' => 'required|numeric|min:1',
@@ -54,75 +49,94 @@ class EmployeePayrollPaymentController extends Controller
         $paymentType = $fields['payment_type'] ?? EmployeePayrollPayment::TYPE_SALARY;
         $amount = (float) $fields['amount'];
 
-        // برای نوع salary بررسی سقف
-        if ($paymentType === EmployeePayrollPayment::TYPE_SALARY) {
-            $remaining = $employeePayroll->remaining();
-            if ($amount > $remaining + 0.01) {
-                return response()->json([
-                    'message' => "مبلغ پرداخت ({$amount}) بیشتر از مانده حقوق ({$remaining}) است.",
-                ], 422);
-            }
+        // پرداخت حقوق فقط وقتی مانده‌ای بعد از مساعده باقی مانده باشد
+        if ($paymentType === EmployeePayrollPayment::TYPE_SALARY && $employeePayroll->isPaid()) {
+            return response()->json([
+                'message' => 'حقوق این ماه کاملاً تسویه شده است (مساعده‌ها از حقوق کسر شده‌اند).',
+            ], 422);
         }
 
         $payment = null;
 
-        DB::transaction(function () use ($employeePayroll, $actor, $fields, $paymentType, $amount, &$payment) {
-            $locked = EmployeePayroll::query()
-                ->where('id', $employeePayroll->id)
-                ->lockForUpdate()
-                ->with('employee:id,atelier_id,name,phone')
-                ->first();
+        try {
+            DB::transaction(function () use ($employeePayroll, $actor, $fields, $paymentType, $amount, &$payment) {
+                $locked = EmployeePayroll::query()
+                    ->where('id', $employeePayroll->id)
+                    ->lockForUpdate()
+                    ->with('employee:id,atelier_id,name,phone')
+                    ->first();
 
-            if (! $locked) {
-                abort(response()->json(['message' => 'فیش حقوقی یافت نشد.'], 404));
-            }
+                if (! $locked) {
+                    abort(response()->json(['message' => 'فیش حقوقی یافت نشد.'], 404));
+                }
 
-            $userName = trim(($actor->name ?? '').' '.($actor->last_name ?? ''));
-            if ($userName === '') {
-                $userName = 'کاربر سیستم';
-            }
+                // پرداخت حقوق: سقف = مانده پس از کسر مساعده و پرداخت‌های قبلی
+                if ($paymentType === EmployeePayrollPayment::TYPE_SALARY) {
+                    $remaining = $locked->remaining();
+                    if ($remaining <= 0.01) {
+                        abort(response()->json([
+                            'message' => 'مانده‌ای برای پرداخت حقوق باقی نمانده است. مساعده‌های ثبت‌شده از حقوق کسر شده‌اند.',
+                            'total_advances' => $locked->totalAdvances(),
+                            'remaining' => $remaining,
+                        ], 422));
+                    }
+                    if ($amount > $remaining + 0.01) {
+                        abort(response()->json([
+                            'message' => "مبلغ پرداخت حقوق ({$amount}) بیشتر از مانده پس از کسر مساعده ({$remaining}) است.",
+                            'total_advances' => $locked->totalAdvances(),
+                            'remaining' => $remaining,
+                        ], 422));
+                    }
+                }
 
-            $titleMap = [
-                EmployeePayrollPayment::TYPE_SALARY => 'پرداخت حقوق',
-                EmployeePayrollPayment::TYPE_ADVANCE => 'مساعده',
-                EmployeePayrollPayment::TYPE_OTHER => $fields['title'] ?? 'سایر',
-            ];
-            $expenseTitle = ($titleMap[$paymentType] ?? 'پرداخت') . ' '
-                . $locked->employee->name . ' - '
-                . $locked->payroll_year . '/' . $locked->payroll_month;
+                $userName = trim(($actor->name ?? '').' '.($actor->last_name ?? ''));
+                if ($userName === '') {
+                    $userName = 'کاربر سیستم';
+                }
 
-            $expense = Expense::create([
-                'user_name' => $userName,
-                'date' => now()->format('Y-m-d'),
-                'amount' => $amount,
-                'title' => $expenseTitle,
-                'type' => 'جاری',
-                'atelier_id' => (int) $locked->atelier_id,
-            ]);
+                $titleMap = [
+                    EmployeePayrollPayment::TYPE_SALARY => 'پرداخت حقوق',
+                    EmployeePayrollPayment::TYPE_ADVANCE => 'مساعده',
+                    EmployeePayrollPayment::TYPE_OTHER => $fields['title'] ?? 'سایر',
+                ];
+                $expenseTitle = ($titleMap[$paymentType] ?? 'پرداخت').' '
+                    .$locked->employee->name.' - '
+                    .$locked->payroll_year.'/'.$locked->payroll_month;
 
-            $payment = EmployeePayrollPayment::create([
-                'atelier_id' => (int) $locked->atelier_id,
-                'payroll_id' => $locked->id,
-                'amount' => $amount,
-                'payment_type' => $paymentType,
-                'title' => $fields['title'] ?? null,
-                'paid_by_user_id' => $actor->id,
-                'expense_id' => $expense->id,
-                'note' => $fields['note'] ?? null,
-            ]);
+                $expense = Expense::create([
+                    'user_name' => $userName,
+                    'date' => now()->format('Y-m-d'),
+                    'amount' => $amount,
+                    'title' => $expenseTitle,
+                    'type' => 'جاری',
+                    'atelier_id' => (int) $locked->atelier_id,
+                ]);
 
-            $locked->syncStatus();
-        });
+                $payment = EmployeePayrollPayment::create([
+                    'atelier_id' => (int) $locked->atelier_id,
+                    'payroll_id' => $locked->id,
+                    'amount' => $amount,
+                    'payment_type' => $paymentType,
+                    'title' => $fields['title'] ?? null,
+                    'paid_by_user_id' => $actor->id,
+                    'expense_id' => $expense->id,
+                    'note' => $fields['note'] ?? null,
+                ]);
+
+                $locked->syncStatus();
+            });
+        } catch (\Illuminate\Http\Exceptions\HttpResponseException $e) {
+            throw $e;
+        }
 
         $employeePayroll->refresh();
 
-        return response([
-            'message' => 'پرداخت با موفقیت ثبت شد.',
+        return response(array_merge([
+            'message' => $paymentType === EmployeePayrollPayment::TYPE_ADVANCE
+                ? 'مساعده ثبت شد و از حقوق محاسبه‌شده کسر خواهد شد.'
+                : 'پرداخت با موفقیت ثبت شد.',
             'payment' => $payment->load('paidBy:id,name,last_name'),
-            'total_paid' => $employeePayroll->totalPaid(),
-            'remaining' => $employeePayroll->remaining(),
-            'status' => $employeePayroll->status,
-        ], 201);
+        ], $employeePayroll->paymentSummary()), 201);
     }
 
     /**
@@ -146,11 +160,8 @@ class EmployeePayrollPaymentController extends Controller
 
         $employeePayroll->refresh();
 
-        return response([
+        return response(array_merge([
             'message' => 'پرداخت حذف شد.',
-            'total_paid' => $employeePayroll->totalPaid(),
-            'remaining' => $employeePayroll->remaining(),
-            'status' => $employeePayroll->status,
-        ], 200);
+        ], $employeePayroll->paymentSummary()), 200);
     }
 }

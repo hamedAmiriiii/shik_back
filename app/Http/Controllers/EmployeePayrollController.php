@@ -70,9 +70,14 @@ class EmployeePayrollController extends Controller
         foreach ($payload['data'] as &$row) {
             $payroll = $paginator->getCollection()->firstWhere('id', $row['id']);
             if ($payroll) {
-                $totalPaid = $payroll->payments->sum('amount');
-                $row['total_paid'] = round((float) $totalPaid, 2);
-                $row['remaining'] = round(max(0, (float) $payroll->salary_amount - (float) $totalPaid), 2);
+                $totalPaid = (float) $payroll->payments->sum('amount');
+                $totalAdvances = (float) $payroll->payments
+                    ->where('payment_type', \App\Models\EmployeePayrollPayment::TYPE_ADVANCE)
+                    ->sum('amount');
+                $row['total_paid'] = round($totalPaid, 2);
+                $row['total_advances'] = round($totalAdvances, 2);
+                $row['remaining'] = round(max(0, (float) $payroll->salary_amount - $totalPaid), 2);
+                $row['overpaid_amount'] = round(max(0, $totalPaid - (float) $payroll->salary_amount), 2);
                 $row['payments'] = $payroll->payments->values();
             }
         }
@@ -147,9 +152,10 @@ class EmployeePayrollController extends Controller
             ->where('payroll_month', (int) $fields['payroll_month'])
             ->first();
 
-        if ($existing && ($existing->isPaid() || $existing->isPartial())) {
+        // مساعده مانع محاسبه مجدد حقوق نیست؛ فقط بعد از پرداخت «حقوق» قفل می‌شود
+        if ($existing && ! $existing->canRecalculateSalary()) {
             return response()->json([
-                'message' => 'این ماه برای این کارمند پرداختی ثبت شده و ساعت‌کاری آن قابل تغییر نیست.',
+                'message' => 'برای این ماه پرداخت حقوق ثبت شده و ساعت‌کاری قابل تغییر نیست. مساعده‌ها از مانده حقوق کسر می‌شوند.',
             ], 422);
         }
 
@@ -168,17 +174,15 @@ class EmployeePayrollController extends Controller
                 'base_work_hours_snapshot' => $calc['base_work_hours_snapshot'],
                 'overtime_hours' => $calc['overtime_hours'],
                 'overtime_amount' => $calc['overtime_amount'],
-                'status' => EmployeePayroll::STATUS_PENDING,
                 'note' => $fields['note'] ?? null,
             ]
         );
 
-        $payroll->load('employee');
-        $totalPaid = $payroll->totalPaid();
+        // بعد از محاسبه حقوق، مساعده‌های قبلی از مانده کسر و وضعیت همگام می‌شود
+        $payroll->syncStatus();
+        $payroll->load(['employee', 'payments']);
 
-        return response(array_merge($payroll->toArray(), [
-            'total_paid' => $totalPaid,
-            'remaining' => $payroll->remaining(),
+        return response(array_merge($payroll->toArray(), $payroll->paymentSummary(), [
             'salary_breakdown' => [
                 'base_salary' => $calc['base_salary_snapshot'],
                 'base_work_hours' => $calc['base_work_hours_snapshot'],
@@ -199,10 +203,7 @@ class EmployeePayrollController extends Controller
             'payments.paidBy:id,name,last_name',
         ]);
 
-        return response(array_merge($payroll->toArray(), [
-            'total_paid' => $employeePayroll->totalPaid(),
-            'remaining' => $employeePayroll->remaining(),
-        ]), 200);
+        return response(array_merge($payroll->toArray(), $employeePayroll->paymentSummary()), 200);
     }
 
     public function update(Request $request, EmployeePayroll $employeePayroll)
@@ -216,9 +217,9 @@ class EmployeePayrollController extends Controller
 
         $this->assertModelBelongsToStaffAtelier($request, $employeePayroll);
 
-        if ($employeePayroll->isPaid() || $employeePayroll->isPartial()) {
+        if (! $employeePayroll->canRecalculateSalary()) {
             return response()->json([
-                'message' => 'پس از ثبت پرداخت، ساعت‌کاری قابل ویرایش نیست.',
+                'message' => 'پس از ثبت پرداخت حقوق، ساعت‌کاری قابل ویرایش نیست. مساعده‌ها از مانده حقوق کسر می‌شوند.',
             ], 422);
         }
 
@@ -252,29 +253,63 @@ class EmployeePayrollController extends Controller
             ], 422);
         }
 
-        $hourlyWage = array_key_exists('hourly_wage', $fields)
-            ? (float) $fields['hourly_wage']
-            : (float) $employeePayroll->hourly_wage;
-        if ($hourlyWage <= 0) {
-            $hourlyWage = $this->resolveHourlyWage($atelierId, $fields, (float) $employeePayroll->hourly_wage);
-        }
-
+        $employee = $employeePayroll->employee;
         $hoursWorked = array_key_exists('hours_worked', $fields)
             ? (float) $fields['hours_worked']
             : (float) $employeePayroll->hours_worked;
+
+        $calc = $employee
+            ? $employee->calculateSalary($hoursWorked)
+            : [
+                'salary_amount' => round((float) $employeePayroll->hourly_wage * $hoursWorked, 2),
+                'base_salary_snapshot' => (float) $employeePayroll->base_salary_snapshot,
+                'base_work_hours_snapshot' => (float) $employeePayroll->base_work_hours_snapshot,
+                'overtime_hours' => 0,
+                'overtime_amount' => 0,
+            ];
+
+        $hourlyWage = array_key_exists('hourly_wage', $fields) && (float) $fields['hourly_wage'] > 0
+            ? (float) $fields['hourly_wage']
+            : (float) ($employee->hourly_wage ?? $employeePayroll->hourly_wage);
+
+        if (array_key_exists('hourly_wage', $fields) && (float) $fields['hourly_wage'] > 0) {
+            $calc['overtime_amount'] = round($hourlyWage * $calc['overtime_hours'], 2);
+            $baseSnap = (float) $calc['base_salary_snapshot'];
+            $baseHoursSnap = (float) $calc['base_work_hours_snapshot'];
+            if ($baseSnap > 0) {
+                if ($hoursWorked >= $baseHoursSnap && $baseHoursSnap > 0) {
+                    $calc['salary_amount'] = round($baseSnap + $calc['overtime_amount'], 2);
+                } elseif ($baseHoursSnap > 0) {
+                    $calc['salary_amount'] = round(($baseSnap / $baseHoursSnap) * $hoursWorked + $calc['overtime_amount'], 2);
+                } else {
+                    $calc['salary_amount'] = round($calc['overtime_amount'], 2);
+                }
+            } else {
+                $calc['salary_amount'] = round($hourlyWage * $hoursWorked, 2);
+            }
+        }
 
         $employeePayroll->update([
             'payroll_year' => $payrollYear,
             'payroll_month' => $payrollMonth,
             'hours_worked' => $hoursWorked,
             'hourly_wage' => $hourlyWage,
-            'salary_amount' => round($hourlyWage * $hoursWorked, 2),
+            'salary_amount' => $calc['salary_amount'],
+            'base_salary_snapshot' => $calc['base_salary_snapshot'],
+            'base_work_hours_snapshot' => $calc['base_work_hours_snapshot'],
+            'overtime_hours' => $calc['overtime_hours'],
+            'overtime_amount' => $calc['overtime_amount'],
             'note' => array_key_exists('note', $fields) ? $fields['note'] : $employeePayroll->note,
         ]);
 
+        $employeePayroll->syncStatus();
+
         return response([
             'message' => 'کارکرد ماهانه با موفقیت به‌روزرسانی شد.',
-            'payroll' => $employeePayroll->fresh()->load('employee'),
+            'payroll' => array_merge(
+                $employeePayroll->fresh()->load(['employee', 'payments'])->toArray(),
+                $employeePayroll->paymentSummary()
+            ),
         ], 200);
     }
 
@@ -282,13 +317,22 @@ class EmployeePayrollController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $employeePayroll);
 
-        if ($employeePayroll->isPaid()) {
+        if ($employeePayroll->hasSalaryPayments()) {
             return response()->json([
-                'message' => 'این حقوق پرداخت شده و قابل حذف نیست.',
+                'message' => 'این فیش پرداخت حقوق دارد و قابل حذف نیست. ابتدا پرداخت‌های حقوق را حذف کنید.',
             ], 422);
         }
 
-        $employeePayroll->delete();
+        DB::transaction(function () use ($employeePayroll) {
+            $employeePayroll->load('payments');
+            foreach ($employeePayroll->payments as $payment) {
+                if ($payment->expense_id) {
+                    Expense::where('id', $payment->expense_id)->delete();
+                }
+                $payment->delete();
+            }
+            $employeePayroll->delete();
+        });
 
         return response(['message' => 'کارکرد ماهانه با موفقیت حذف شد.'], 200);
     }

@@ -6,6 +6,7 @@ use App\Models\PurchasedProduct;
 use App\Models\Purchase;
 use App\Models\Product;
 use App\Models\Installment;
+use App\Models\Cheque;
 use App\Models\UserShiksho;
 use App\Models\CustomerPhone;
 use App\Models\Cart;
@@ -41,6 +42,7 @@ class PurchasedProductController extends Controller
             'purchasedProducts.producedGood',
             'purchasedProducts.rawMaterial',
             'installments',
+            'cheque',
         ])
         ->where('atelier_id', $atelierId)
         ->where('total_amount', '>', 0) // فقط خریدهایی که مجموع مبلغشان بیشتر از 0 است
@@ -110,6 +112,10 @@ class PurchasedProductController extends Controller
             $total += $purchase->isDebtSettled()
                 ? ((float) $purchase->debt_settled_card_amount + (float) $purchase->debt_settled_cash_amount)
                 : $purchase->payableAmount();
+        } elseif ($purchase->isCheque()) {
+            $total += $purchase->isChequeSettled()
+                ? $purchase->payableAmount()
+                : 0;
         } else {
             $total += $purchase->total_amount;
         }
@@ -130,6 +136,13 @@ class PurchasedProductController extends Controller
             $purchaseData['payable_amount'] = $purchase->payableAmount();
             $purchaseData['is_debt_settled'] = (bool) $purchase->is_debt_settled;
             $purchaseData['payment_type_label'] = 'قرضی';
+        }
+        if ($purchase && $purchase->isCheque()) {
+            $purchaseData['payable_amount'] = $purchase->payableAmount();
+            $purchaseData['is_cheque_settled'] = $purchase->isChequeSettled();
+            $purchaseData['outstanding_cheque_amount'] = $purchase->outstandingChequeAmount();
+            $purchaseData['payment_type_label'] = 'چکی';
+            $purchaseData['cheque_id'] = $purchase->cheque_id;
         }
     }
     unset($purchaseData);
@@ -176,7 +189,8 @@ class PurchasedProductController extends Controller
             'products.*.color' => 'nullable|string|max:255',
             'use_credit' => 'nullable|boolean',
             'discount_amount' => 'nullable|numeric|min:0',
-            'payment_type' => 'nullable|string|in:cash,installment,debt',
+            'payment_type' => 'nullable|string|in:cash,installment,debt,cheque',
+            'cheque_id' => 'required_if:payment_type,cheque|nullable|integer|exists:cheques,id',
             'installment_count' => 'required_if:payment_type,installment|integer|min:2|max:24',
             'card_amount' => 'nullable|numeric|min:0',
             'cash_amount' => 'nullable|numeric|min:0',
@@ -187,6 +201,7 @@ class PurchasedProductController extends Controller
         $useCredit = $request->input('use_credit', false);
         $paymentType = $request->input('payment_type', 'cash'); // پیش‌فرض: نقدی
         $installmentCount = $request->input('installment_count');
+        $chequeId = $request->input('cheque_id');
 
         $staffAtelierId = $this->staffShopAtelierId($request);
         $posSale = app(ShopPosSaleService::class);
@@ -306,15 +321,59 @@ class PurchasedProductController extends Controller
 
         $amountPaidNow = $paymentType === 'installment'
             ? $this->roundToThreeZeroEnding($finalTotalAmount / 3)
-            : ($paymentType === 'debt' ? 0.0 : (float) $payableAmount);
+            : (in_array($paymentType, ['debt', 'cheque'], true) ? 0.0 : (float) $payableAmount);
 
-        $settlement = $paymentType === 'debt'
+        $settlement = in_array($paymentType, ['debt', 'cheque'], true)
             ? ['card_amount' => 0.0, 'cash_amount' => 0.0]
             : $this->resolvePurchaseSettlement($request, $amountPaidNow);
+
+        $linkedCheque = null;
+        if ($paymentType === 'cheque') {
+            $linkedCheque = Cheque::find($chequeId);
+            if (!$linkedCheque) {
+                return response(['error' => 'چک یافت نشد.'], 404);
+            }
+            if ($linkedCheque->type !== Cheque::TYPE_RECEIVED) {
+                return response(['error' => 'فقط چک دریافتی قابل اتصال به فروش است.'], 422);
+            }
+            if ($linkedCheque->status !== Cheque::STATUS_PENDING) {
+                return response(['error' => 'فقط چک در انتظار وصول قابل اتصال به فروش است.'], 422);
+            }
+            if ($linkedCheque->purchase_id) {
+                return response(['error' => 'این چک قبلاً به فروش دیگری وصل شده است.'], 422);
+            }
+            if ($purchaseAtelierId !== null && (int) $linkedCheque->atelier_id !== (int) $purchaseAtelierId) {
+                return response(['error' => 'چک متعلق به این فروشگاه نیست.'], 422);
+            }
+            if (abs((float) $linkedCheque->amount - (float) $payableAmount) > 0.02) {
+                return response([
+                    'error' => 'مبلغ چک با مبلغ قابل پرداخت فروش یکسان نیست.',
+                    'cheque_amount' => (float) $linkedCheque->amount,
+                    'payable_amount' => (float) $payableAmount,
+                ], 422);
+            }
+        }
 
         // ایجاد سبد خرید (Purchase)
         try {
             DB::beginTransaction();
+
+            if ($paymentType === 'cheque') {
+                $linkedCheque = Cheque::query()
+                    ->where('id', $chequeId)
+                    ->where('type', Cheque::TYPE_RECEIVED)
+                    ->where('status', Cheque::STATUS_PENDING)
+                    ->whereNull('purchase_id')
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$linkedCheque) {
+                    DB::rollBack();
+
+                    return response(['error' => 'چک برای اتصال به فروش در دسترس نیست.'], 422);
+                }
+            }
+
             $purchase = Purchase::create([
                 'phone' => $phone,
                 'total_amount' => $paymentType === 'installment' ? $finalTotalAmount : $grossTotal,
@@ -322,6 +381,7 @@ class PurchasedProductController extends Controller
                 'credit_used' => $creditUsed,
                 'credit_earned' => $creditEarned,
                 'payment_type' => $paymentType,
+                'cheque_id' => $paymentType === 'cheque' ? $linkedCheque->id : null,
                 'card_amount' => $settlement['card_amount'],
                 'cash_amount' => $settlement['cash_amount'],
                 'is_debt_settled' => false,
@@ -330,6 +390,10 @@ class PurchasedProductController extends Controller
                 'atelier_id' => $purchaseAtelierId,
                 'client_id' => $clientId,
             ]);
+
+            if ($paymentType === 'cheque' && $linkedCheque) {
+                $linkedCheque->update(['purchase_id' => $purchase->id]);
+            }
 
             $purchasedProducts = [];
             foreach ($productsData as $productData) {
@@ -465,6 +529,13 @@ class PurchasedProductController extends Controller
             $purchase->setAttribute('payable_amount', $purchase->payableAmount());
             $purchase->setAttribute('payment_type_label', 'قرضی');
         }
+        if ($purchase->isCheque()) {
+            $purchase->load('cheque');
+            $purchase->setAttribute('payable_amount', $purchase->payableAmount());
+            $purchase->setAttribute('is_cheque_settled', $purchase->isChequeSettled());
+            $purchase->setAttribute('outstanding_cheque_amount', $purchase->outstandingChequeAmount());
+            $purchase->setAttribute('payment_type_label', 'چکی');
+        }
 
         $payload = $purchase->toArray();
         $payload['id'] = $purchase->id;
@@ -487,6 +558,13 @@ class PurchasedProductController extends Controller
         if ($purchase->isDebt()) {
             $purchase->setAttribute('payable_amount', $purchase->payableAmount());
             $purchase->setAttribute('payment_type_label', 'قرضی');
+        }
+        if ($purchase->isCheque()) {
+            $purchase->load('cheque');
+            $purchase->setAttribute('payable_amount', $purchase->payableAmount());
+            $purchase->setAttribute('is_cheque_settled', $purchase->isChequeSettled());
+            $purchase->setAttribute('outstanding_cheque_amount', $purchase->outstandingChequeAmount());
+            $purchase->setAttribute('payment_type_label', 'چکی');
         }
         return response($purchase, 200);
     }

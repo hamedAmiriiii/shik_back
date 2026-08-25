@@ -125,6 +125,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Store/Shop related routes - require authentication
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
     Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);
+
+    // چک‌ها (صادره / دریافتی) — وصول دستی: هزینه یا درآمد
+    Route::get('cheques/upcoming', [\App\Http\Controllers\ChequeController::class, 'upcoming']);
+    Route::post('cheques/{cheque}/clear', [\App\Http\Controllers\ChequeController::class, 'clear']);
+    Route::resource('cheques', \App\Http\Controllers\ChequeController::class)->except(['create', 'edit']);
     Route::get('pos-catalog', [\App\Http\Controllers\PosCatalogController::class, 'index']);
     Route::resource('raw-materials', \App\Http\Controllers\RawMaterialController::class)->except(['create', 'edit']);
     Route::post('raw-materials/{rawMaterial}/lots', [\App\Http\Controllers\RawMaterialController::class, 'storeLot']);

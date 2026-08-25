@@ -36,7 +36,7 @@ class ShopPosSaleService
     {
         $prepared = [];
         foreach ($inputLines as $row) {
-            $prepared[] = $this->prepareLine($row);
+            $prepared[] = $this->prepareLine($row, $staffAtelierId);
         }
 
         $atelierIds = array_unique(array_filter(array_column($prepared, 'atelier_id')));
@@ -169,11 +169,16 @@ class ShopPosSaleService
         }
     }
 
-    private function prepareLine(array $row): array
+    private function prepareLine(array $row, ?int $staffAtelierId): array
     {
         $productId = $row['product_id'] ?? null;
         $goodId = $row['produced_good_id'] ?? null;
         $materialId = $row['raw_material_id'] ?? null;
+
+        if (! empty($row['item_type']) && $row['item_type'] === self::KIND_PRODUCED_GOOD && empty($goodId) && ! empty($productId)) {
+            $goodId = $productId;
+            $productId = null;
+        }
 
         $filled = (int) ! empty($productId) + (int) ! empty($goodId) + (int) ! empty($materialId);
         if ($filled !== 1) {
@@ -181,57 +186,27 @@ class ShopPosSaleService
         }
 
         if (! empty($goodId)) {
-            $good = ProducedGood::find($goodId);
-            if (! $good) {
-                throw new RuntimeException('کالای تولیدی یافت نشد');
-            }
-            $qty = ProductQuantityTools::normalize($row['quantity'], Product::UNIT_KG);
-            $baseSale = (float) $good->sale_price;
-            $salePrice = $this->resolveSalePrice($row, $baseSale);
-
-            return [
-                'kind' => self::KIND_PRODUCED_GOOD,
-                'product_id' => null,
-                'produced_good_id' => $good->id,
-                'raw_material_id' => null,
-                'item_name' => $good->name,
-                'atelier_id' => $good->atelier_id,
-                'quantity' => $qty,
-                'sale_price' => $salePrice,
-                'purchase_price' => $this->producedGoodCostPerKg($good, $qty),
-                'size' => $row['size'] ?? null,
-                'color' => $row['color'] ?? null,
-                'model' => $good,
-            ];
+            return $this->prepareProducedGoodLine($row, (int) $goodId);
         }
 
         if (! empty($materialId)) {
-            $material = RawMaterial::find($materialId);
-            if (! $material) {
-                throw new RuntimeException('ماده اولیه یافت نشد');
-            }
-            $qty = ProductQuantityTools::normalize($row['quantity'], Product::UNIT_KG);
-            $salePrice = $this->resolveSalePrice($row, (float) $material->sale_price);
-            $plan = $this->fifo->plan($material, $qty);
-
-            return [
-                'kind' => self::KIND_RAW_MATERIAL,
-                'product_id' => null,
-                'produced_good_id' => null,
-                'raw_material_id' => $material->id,
-                'item_name' => $material->name,
-                'atelier_id' => $material->atelier_id,
-                'quantity' => $qty,
-                'sale_price' => $salePrice,
-                'purchase_price' => $qty > 0 ? round($plan['cost'] / $qty, 2) : 0,
-                'size' => $row['size'] ?? null,
-                'color' => $row['color'] ?? null,
-                'model' => $material,
-            ];
+            return $this->prepareRawMaterialLine($row, (int) $materialId);
         }
 
-        $product = Product::find($productId);
+        $productQuery = Product::query()->where('id', $productId);
+        if ($staffAtelierId !== null) {
+            $productQuery->where('atelier_id', $staffAtelierId);
+        }
+        $product = $productQuery->first();
         if (! $product) {
+            $goodQuery = ProducedGood::query()->where('id', $productId);
+            if ($staffAtelierId !== null) {
+                $goodQuery->where('atelier_id', $staffAtelierId);
+            }
+            $good = $goodQuery->first();
+            if ($good) {
+                return $this->prepareProducedGoodLine($row, (int) $good->id);
+            }
             throw new RuntimeException('محصول یافت نشد');
         }
         $unitType = $product->unit_type ?? Product::UNIT_PIECE;
@@ -251,6 +226,57 @@ class ShopPosSaleService
             'size' => $row['size'] ?? null,
             'color' => $row['color'] ?? null,
             'model' => $product,
+        ];
+    }
+
+    private function prepareProducedGoodLine(array $row, int $goodId): array
+    {
+        $good = ProducedGood::find($goodId);
+        if (! $good) {
+            throw new RuntimeException('کالای تولیدی یافت نشد');
+        }
+        $qty = ProductQuantityTools::normalize($row['quantity'], Product::UNIT_KG);
+        $salePrice = $this->resolveSalePrice($row, (float) $good->sale_price);
+
+        return [
+            'kind' => self::KIND_PRODUCED_GOOD,
+            'product_id' => null,
+            'produced_good_id' => $good->id,
+            'raw_material_id' => null,
+            'item_name' => $good->name,
+            'atelier_id' => $good->atelier_id,
+            'quantity' => $qty,
+            'sale_price' => $salePrice,
+            'purchase_price' => $this->producedGoodCostPerKg($good, $qty),
+            'size' => $row['size'] ?? null,
+            'color' => $row['color'] ?? null,
+            'model' => $good,
+        ];
+    }
+
+    private function prepareRawMaterialLine(array $row, int $materialId): array
+    {
+        $material = RawMaterial::find($materialId);
+        if (! $material) {
+            throw new RuntimeException('ماده اولیه یافت نشد');
+        }
+        $qty = ProductQuantityTools::normalize($row['quantity'], Product::UNIT_KG);
+        $salePrice = $this->resolveSalePrice($row, (float) $material->sale_price);
+        $plan = $this->fifo->plan($material, $qty);
+
+        return [
+            'kind' => self::KIND_RAW_MATERIAL,
+            'product_id' => null,
+            'produced_good_id' => null,
+            'raw_material_id' => $material->id,
+            'item_name' => $material->name,
+            'atelier_id' => $material->atelier_id,
+            'quantity' => $qty,
+            'sale_price' => $salePrice,
+            'purchase_price' => $qty > 0 ? round($plan['cost'] / $qty, 2) : 0,
+            'size' => $row['size'] ?? null,
+            'color' => $row['color'] ?? null,
+            'model' => $material,
         ];
     }
 

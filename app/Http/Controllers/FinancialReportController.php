@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Expense;
+use App\Models\Income;
 use App\Models\Invoice;
 use App\Models\Purchase;
 use App\Services\ShopSalesReportService;
@@ -61,6 +62,7 @@ class FinancialReportController extends Controller
                 $firstPurchaseDate = Purchase::forAtelier($atelierId)->min('created_at');
                 $firstExpenseDate = Expense::where('atelier_id', $atelierId)->min('date');
                 $firstInvoiceDate = Invoice::where('atelier_id', $atelierId)->min('date');
+                $firstIncomeDate = Income::where('atelier_id', $atelierId)->min('date');
                 
                 // تبدیل تاریخ‌های expense و invoice به Carbon (اگر وجود داشته باشند)
                 $dates = [];
@@ -72,6 +74,9 @@ class FinancialReportController extends Controller
                 }
                 if ($firstInvoiceDate) {
                     $dates[] = Carbon::parse($firstInvoiceDate);
+                }
+                if ($firstIncomeDate) {
+                    $dates[] = Carbon::parse($firstIncomeDate);
                 }
                 
                 // اگر داده‌ای وجود داشت، از اولین تاریخ شروع می‌کنیم
@@ -106,6 +111,7 @@ class FinancialReportController extends Controller
             'total_purchases' => 0,
             'total_profit' => 0,
             'total_expenses' => 0,
+            'total_incomes' => 0,
             'total_invoices' => 0,
             'total_net_profit' => 0,
             'total_account_balance' => 0,
@@ -116,6 +122,8 @@ class FinancialReportController extends Controller
             'installments_collected' => 0,
             'total_collected' => 0,
             'uncollected_installments' => 0,
+            'open_cheques' => 0,
+            'cheques_collected' => 0,
             'credit_used_total' => 0,
         ];
 
@@ -135,6 +143,7 @@ class FinancialReportController extends Controller
             $totals['total_purchases'] += $monthData['total_purchases'];
             $totals['total_profit'] += $monthData['total_profit'];
             $totals['total_expenses'] += $monthData['total_expenses'];
+            $totals['total_incomes'] += $monthData['total_incomes'];
             $totals['total_invoices'] += $monthData['total_invoices'];
             $totals['total_net_profit'] += $monthData['net_profit'];
             $totals['total_account_balance'] += $monthData['account_balance'];
@@ -145,6 +154,8 @@ class FinancialReportController extends Controller
             $totals['installments_collected'] += $monthData['installments_collected'];
             $totals['total_collected'] += $monthData['total_collected'];
             $totals['uncollected_installments'] += $monthData['uncollected_installments'];
+            $totals['open_cheques'] += $monthData['open_cheques'];
+            $totals['cheques_collected'] += $monthData['cheques_collected'];
             $totals['credit_used_total'] += $monthData['credit_used_total'];
         }
 
@@ -316,6 +327,31 @@ class FinancialReportController extends Controller
             ->whereDate('date', '<=', $end->format('Y-m-d'))
             ->sum('amount');
 
+        $totalIncomes = Income::where('atelier_id', $atelierId)
+            ->whereDate('date', '>=', $start->format('Y-m-d'))
+            ->whereDate('date', '<=', $end->format('Y-m-d'))
+            ->sum('amount');
+
+        // درآمد حاصل از وصول چکِ متصل به فروش در موجودی جداگانه از open_cheques لحاظ می‌شود
+        // تا با رفع کسر open_cheques دوباره شمرده نشود.
+        $saleLinkedChequeIncomeIds = \App\Models\Cheque::query()
+            ->where('atelier_id', $atelierId)
+            ->whereNotNull('purchase_id')
+            ->whereNotNull('income_id')
+            ->pluck('income_id');
+
+        $saleLinkedIncomes = 0.0;
+        if ($saleLinkedChequeIncomeIds->isNotEmpty()) {
+            $saleLinkedIncomes = (float) Income::where('atelier_id', $atelierId)
+                ->whereIn('id', $saleLinkedChequeIncomeIds)
+                ->whereDate('date', '>=', $start->format('Y-m-d'))
+                ->whereDate('date', '<=', $end->format('Y-m-d'))
+                ->sum('amount');
+        }
+
+        $incomesForBalance = (float) $totalIncomes - $saleLinkedIncomes;
+        $openCheques = (float) ($metrics['open_cheques'] ?? 0);
+
         $totalInvoices = Invoice::where('atelier_id', $atelierId)
             ->whereDate('date', '>=', $start->format('Y-m-d'))
             ->whereDate('date', '<=', $end->format('Y-m-d'))
@@ -324,8 +360,9 @@ class FinancialReportController extends Controller
         // خالص سود = سود - هزینه‌های جاری
         $netProfit = $totalProfit - $totalExpenses;
 
-        // موجودی حساب ≈ فروش خالص منهای هزینه‌ها، فاکتورها و اعتبار مصرف‌شده
-        $accountBalance = $netSales - $totalExpenses - $totalInvoices - $metrics['credit_used_total'];
+        // موجودی: فروش + درآمدها − هزینه‌ها − فاکتورها − اعتبار − فروش‌های چکی وصول‌نشده
+        $accountBalance = $netSales + $incomesForBalance - $totalExpenses - $totalInvoices
+            - $metrics['credit_used_total'] - $openCheques;
 
         return [
             'year' => $year,
@@ -335,9 +372,12 @@ class FinancialReportController extends Controller
             'total_purchases' => round($netPurchase, 2),
             'total_profit' => round($totalProfit, 2),
             'total_expenses' => round($totalExpenses, 2),
+            'total_incomes' => round($totalIncomes, 2),
             'total_invoices' => round($totalInvoices, 2),
             'net_profit' => round($netProfit, 2),
             'account_balance' => round($accountBalance, 2),
+            'open_cheques' => round($openCheques, 2),
+            'cheques_collected' => round((float) ($metrics['cheques_collected'] ?? 0), 2),
             'credit_earned_from_purchases' => round($metrics['credit_earned_from_purchases'], 2),
             'manual_credit_granted' => round($metrics['manual_credit_granted'], 2),
             'total_credit_granted' => round($totalCreditGranted, 2),

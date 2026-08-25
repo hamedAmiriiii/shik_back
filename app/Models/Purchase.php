@@ -18,6 +18,7 @@ class Purchase extends Model
         'credit_used',
         'credit_earned',
         'payment_type',
+        'cheque_id',
         'card_amount',
         'cash_amount',
         'is_debt_settled',
@@ -97,6 +98,14 @@ class Purchase extends Model
     }
 
     /**
+     * چک متصل به فروش چکی
+     */
+    public function cheque()
+    {
+        return $this->belongsTo(Cheque::class);
+    }
+
+    /**
      * قسط‌های این خرید
      */
     public function installments()
@@ -131,6 +140,33 @@ class Purchase extends Model
     public function isDebt()
     {
         return $this->payment_type === 'debt';
+    }
+
+    public function isCheque()
+    {
+        return $this->payment_type === 'cheque';
+    }
+
+    public function isChequeSettled(): bool
+    {
+        if (! $this->isCheque()) {
+            return false;
+        }
+
+        if ($this->relationLoaded('cheque')) {
+            return $this->cheque && $this->cheque->status === Cheque::STATUS_CLEARED;
+        }
+
+        return $this->cheque()->where('status', Cheque::STATUS_CLEARED)->exists();
+    }
+
+    public function outstandingChequeAmount(): float
+    {
+        if (! $this->isCheque() || $this->isChequeSettled()) {
+            return 0.0;
+        }
+
+        return $this->payableAmount();
     }
 
     /**
@@ -188,6 +224,9 @@ class Purchase extends Model
         if ($this->isDebt()) {
             return $this->outstandingDebtAmount();
         }
+        if ($this->isCheque()) {
+            return $this->outstandingChequeAmount();
+        }
 
         return $this->total_amount - $this->paid_amount;
     }
@@ -208,6 +247,9 @@ class Purchase extends Model
             }
 
             return 0.0;
+        }
+        if ($this->isCheque()) {
+            return $this->isChequeSettled() ? $this->payableAmount() : 0.0;
         }
 
         return max(0, round(
@@ -270,6 +312,16 @@ class Purchase extends Model
         if ($this->isDebt()) {
             $this->total_amount = $lineTotal;
             if (! $this->isDebtSettled()) {
+                $this->card_amount = 0;
+                $this->cash_amount = 0;
+            }
+
+            return;
+        }
+
+        if ($this->isCheque()) {
+            $this->total_amount = $lineTotal;
+            if (! $this->isChequeSettled()) {
                 $this->card_amount = 0;
                 $this->cash_amount = 0;
             }

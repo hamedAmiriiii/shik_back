@@ -76,14 +76,50 @@ class EmployeePayroll extends Model
         return $this->status === self::STATUS_PARTIAL;
     }
 
+    /**
+     * آیا پرداخت از نوع «حقوق» ثبت شده؟ (مساعده به‌تنهایی قفل محاسبه حقوق نیست)
+     */
+    public function hasSalaryPayments(): bool
+    {
+        return $this->payments()
+            ->where('payment_type', EmployeePayrollPayment::TYPE_SALARY)
+            ->exists();
+    }
+
     public function totalPaid(): float
     {
         return round((float) $this->payments()->sum('amount'), 2);
     }
 
+    public function totalAdvances(): float
+    {
+        return round((float) $this->payments()
+            ->where('payment_type', EmployeePayrollPayment::TYPE_ADVANCE)
+            ->sum('amount'), 2);
+    }
+
+    /**
+     * مانده قابل پرداخت حقوق پس از کسر مساعده و سایر پرداخت‌ها
+     */
     public function remaining(): float
     {
         return round(max(0, (float) $this->salary_amount - $this->totalPaid()), 2);
+    }
+
+    /**
+     * مبلغی که بیش از حقوق پرداخت شده (مثلاً مساعده بیشتر از حقوق نهایی)
+     */
+    public function overpaidAmount(): float
+    {
+        return round(max(0, $this->totalPaid() - (float) $this->salary_amount), 2);
+    }
+
+    /**
+     * تا وقتی پرداخت «حقوق» ثبت نشده، می‌توان ساعت/حقوق را دوباره محاسبه کرد.
+     */
+    public function canRecalculateSalary(): bool
+    {
+        return ! $this->hasSalaryPayments();
     }
 
     public function syncStatus(): void
@@ -100,5 +136,22 @@ class EmployeePayroll extends Model
         }
 
         $this->update(['status' => $status]);
+    }
+
+    /**
+     * خلاصه پرداخت برای پاسخ API
+     *
+     * @return array<string, float|string>
+     */
+    public function paymentSummary(): array
+    {
+        return [
+            'salary_amount' => round((float) $this->salary_amount, 2),
+            'total_paid' => $this->totalPaid(),
+            'total_advances' => $this->totalAdvances(),
+            'remaining' => $this->remaining(),
+            'overpaid_amount' => $this->overpaidAmount(),
+            'status' => $this->status,
+        ];
     }
 }

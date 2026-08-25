@@ -4,10 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Models\Product;
 use App\Models\ProductImage;
+use App\Models\ProducedGood;
+use App\Services\ProducedGoodCostService;
 use App\Tools\ImageTools;
 use App\Tools\PriceTools;
 use App\Tools\ProductQuantityTools;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -319,6 +322,7 @@ class ProductController extends Controller
         
         // اضافه کردن اطلاعات تخفیف به هر محصول
         $products->transform(function ($product) {
+            $product->item_type = 'product';
             // اگر original_sale_price null باشد، آن را برابر sale_price قرار بده
             if ($product->original_sale_price === null) {
                 $product->original_sale_price = $product->sale_price;
@@ -339,8 +343,10 @@ class ProductController extends Controller
             
             return $product;
         });
+
+        $producedGoods = $this->producedGoodsForProductAll($request, $atelierId, $searchDataModel);
         
-        return response($products);
+        return response($products->concat($producedGoods)->values());
     }
 
     /**
@@ -1016,6 +1022,57 @@ class ProductController extends Controller
                 $query->orderByDesc('products.id');
                 break;
         }
+    }
+
+    /**
+     * کالاهای تولیدی همین فروشگاه برای لیست product-all.
+     */
+    private function producedGoodsForProductAll(Request $request, int $atelierId, $searchDataModel)
+    {
+        if (! Schema::hasTable('produced_goods')) {
+            return collect();
+        }
+
+        $query = ProducedGood::query()
+            ->where('atelier_id', $atelierId)
+            ->with('ingredients.rawMaterial')
+            ->orderBy('name');
+
+        if ($searchDataModel) {
+            $query->where(function ($q) use ($searchDataModel) {
+                if (is_object($searchDataModel) && isset($searchDataModel->name) && $searchDataModel->name !== '') {
+                    $q->where('name', 'like', '%'.$searchDataModel->name.'%');
+                } elseif (is_string($searchDataModel) && $searchDataModel !== '') {
+                    $q->where('name', 'like', '%'.$searchDataModel.'%');
+                }
+            });
+        }
+
+        $costService = app(ProducedGoodCostService::class);
+
+        return $query->get()->map(function (ProducedGood $good) use ($costService) {
+            $costService->attachCost($good);
+
+            return [
+                'id' => $good->id,
+                'item_type' => 'produced_good',
+                'produced_good_id' => $good->id,
+                'product_id' => null,
+                'name' => $good->name,
+                'sale_price' => (float) $good->sale_price,
+                'purchase_price' => (float) $good->cost_per_kg,
+                'cost_per_kg' => (float) $good->cost_per_kg,
+                'profit_per_kg' => (float) $good->profit_per_kg,
+                'profit_percent' => $good->profit_percent,
+                'quantity' => (float) $good->stock_kg,
+                'unit_type' => Product::UNIT_KG,
+                'barcode' => null,
+                'images' => [],
+                'categories' => [],
+                'atelier_id' => $good->atelier_id,
+                'note' => $good->note,
+            ];
+        });
     }
 
     /**
