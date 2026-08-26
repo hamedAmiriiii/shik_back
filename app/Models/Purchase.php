@@ -144,7 +144,37 @@ class Purchase extends Model
 
     public function isCheque()
     {
-        return $this->payment_type === 'cheque';
+        return $this->payment_type === 'cheque' || $this->cheque_id !== null;
+    }
+
+    /**
+     * مبلغ بخش چکی فاکتور (مبلغ چک متصل)
+     */
+    public function chequeAmount(): float
+    {
+        if (! $this->isCheque()) {
+            return 0.0;
+        }
+
+        if ($this->relationLoaded('cheque') && $this->cheque) {
+            return round((float) $this->cheque->amount, 2);
+        }
+
+        if ($this->cheque_id) {
+            $amount = $this->cheque()->value('amount');
+
+            return round((float) $amount, 2);
+        }
+
+        return 0.0;
+    }
+
+    /**
+     * مبلغ نقد/کارت پرداخت‌شده در لحظه فروش (بدون چک)
+     */
+    public function immediatePaidAmount(): float
+    {
+        return round((float) $this->card_amount + (float) $this->cash_amount, 2);
     }
 
     public function isChequeSettled(): bool
@@ -166,7 +196,12 @@ class Purchase extends Model
             return 0.0;
         }
 
-        return $this->payableAmount();
+        $chequeAmount = $this->chequeAmount();
+        if ($chequeAmount > 0) {
+            return $chequeAmount;
+        }
+
+        return max(0, round($this->payableAmount() - $this->immediatePaidAmount(), 2));
     }
 
     /**
@@ -249,7 +284,12 @@ class Purchase extends Model
             return 0.0;
         }
         if ($this->isCheque()) {
-            return $this->isChequeSettled() ? $this->payableAmount() : 0.0;
+            $paid = $this->immediatePaidAmount();
+            if ($this->isChequeSettled()) {
+                $paid = round($paid + $this->chequeAmount(), 2);
+            }
+
+            return $paid;
         }
 
         return max(0, round(
@@ -321,7 +361,8 @@ class Purchase extends Model
 
         if ($this->isCheque()) {
             $this->total_amount = $lineTotal;
-            if (! $this->isChequeSettled()) {
+            // نقد/کارت لحظه فروش حفظ می‌شود؛ فقط اگر تسویه نشده و مبلغی ثبت نشده بود صفر می‌کنیم
+            if (! $this->isChequeSettled() && $this->immediatePaidAmount() <= 0) {
                 $this->card_amount = 0;
                 $this->cash_amount = 0;
             }

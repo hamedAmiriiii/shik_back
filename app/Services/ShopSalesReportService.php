@@ -36,6 +36,10 @@ class ShopSalesReportService
         $creditUsedTotal = 0.0;
         $uncollectedFromPeriodSales = 0.0;
         $discountGiven = 0.0;
+        // فروش چکی این دوره که تا پایان بازه هنوز وصول نشده → سود را به اندازه مبلغ فروش منفی می‌کند
+        $chequeUnpaidPenalty = 0.0;
+        // مبلغ «پرداخت چکی» در تسویه (هنوز نقد نشده)
+        $chequePayments = 0.0;
 
         foreach ($purchases as $purchase) {
             $lineSales = $purchase->remainingLineSalesTotal();
@@ -49,16 +53,43 @@ class ShopSalesReportService
 
             if ($purchase->isInstallment()) {
                 $totalSales += (float) $purchase->paid_amount + (float) $purchase->credit_used;
+                $totalPurchase += $lineCost;
             } elseif ($purchase->isDebt()) {
                 $totalSales += $lineSales;
+                $totalPurchase += $lineCost;
             } elseif ($purchase->isCheque()) {
-                // فروش چکی تا وصول در sales نیست؛ اثر منفی از open_cheques و درآمد از incomes
+                $saleAmount = (float) $purchase->total_amount;
+                if ($saleAmount <= 0) {
+                    $saleAmount = $lineSales;
+                }
+                $chequeAmount = $purchase->chequeAmount();
+                if ($chequeAmount <= 0) {
+                    $chequeAmount = max(0, round($saleAmount - $purchase->immediatePaidAmount(), 2));
+                }
+                $immediatePaid = $purchase->immediatePaidAmount();
+                if ($saleAmount <= 0) {
+                    continue;
+                }
+                $paidFraction = min(1, max(0, $immediatePaid / $saleAmount));
+                $chequeFraction = min(1, max(0, $chequeAmount / $saleAmount));
+
+                // فروش واقعی همیشه ثبت می‌شود
+                $totalSales += $saleAmount;
+
+                if (self::isChequeClearedAsOf($purchase, $endString)) {
+                    // بعد از وصول: کل بهای تمام‌شده
+                    $totalPurchase += $lineCost;
+                } else {
+                    // بخش نقد/کارت همان لحظه در سود می‌آید؛ بخش چک تا وصول منفی است
+                    $totalPurchase += round($lineCost * $paidFraction, 2);
+                    $chequeUnpaidPenalty += $chequeAmount;
+                    $chequePayments += $chequeAmount;
+                }
             } else {
-                // همان مبلغ فاکتور (total_amount) — هم‌خوان با card+cash در جدول purchases
                 $totalSales += (float) $purchase->total_amount;
+                $totalPurchase += $lineCost;
             }
 
-            $totalPurchase += $lineCost;
             $creditEarnedFromPurchases += (float) $purchase->credit_earned;
             $creditUsedTotal += (float) $purchase->credit_used;
 
@@ -73,6 +104,12 @@ class ShopSalesReportService
             }
         }
 
+        // وصول چکِ فروش‌های دوره‌های قبل در این بازه:
+        // +مبلغ فروش (برگشت اثر منفی روز فروش) و ثبت بهای تمام‌شده → سود خالص = حاشیه
+        [$priorClearSales, $priorClearCosts] = self::priorChequeClearAmounts($atelierId, $startString, $endString);
+        $totalPurchase += $priorClearCosts;
+        $chequeClearProfit = $priorClearSales;
+
         $openDebts = self::openDebtsAsOf($atelierId, $endDate);
         $openCheques = self::openChequeSalesAsOf($atelierId, $endDate);
 
@@ -80,6 +117,7 @@ class ShopSalesReportService
         $debtsCollected = self::debtsCollectedInRange($atelierId, $startString, $endString);
         $chequesCollected = self::chequesCollectedInRange($atelierId, $startString, $endString);
         $cashAndCardTotal = round($cardAmount + $cashAmount, 2);
+        // تسویه نقدی دوره؛ پرداخت چکیِ وصول‌نشده جزو وصول نیست
         $settlementTotal = round($cashAndCardTotal + $creditUsedTotal + $installmentsCollected + $debtsCollected + $chequesCollected, 2);
         $totalCollected = $cashAndCardTotal + $installmentsCollected + $debtsCollected + $chequesCollected;
 
@@ -100,7 +138,11 @@ class ShopSalesReportService
         );
 
         $totalCreditGranted = $creditEarnedFromPurchases + $manualCreditGranted;
-        $totalProfit = round($netSales - $netPurchase - $creditUsedTotal, 2);
+        // سود: فروش − بهای تمام‌شده − اعتبار − جریمه چک وصول‌نشده + حاشیه وصول چک‌های دوره‌های قبل
+        $totalProfit = round(
+            $netSales - $netPurchase - $creditUsedTotal - $chequeUnpaidPenalty + $chequeClearProfit,
+            2
+        );
 
         return [
             'sales' => (float) $netSales,
@@ -117,6 +159,7 @@ class ShopSalesReportService
             'installments_collected' => (float) $installmentsCollected,
             'debts_collected' => (float) $debtsCollected,
             'cheques_collected' => (float) $chequesCollected,
+            'cheque_payments' => (float) round($chequePayments, 2),
             'total_collected' => (float) round($totalCollected, 2),
             'uncollected_installments' => (float) $uncollectedFromPeriodSales,
             'uncollected_debts' => (float) round($openDebts, 2),
@@ -167,6 +210,7 @@ class ShopSalesReportService
             'installments_collected' => (float) ($metrics['installments_collected'] ?? 0),
             'debts_collected' => (float) ($metrics['debts_collected'] ?? 0),
             'cheques_collected' => (float) ($metrics['cheques_collected'] ?? 0),
+            'cheque_payments' => (float) ($metrics['cheque_payments'] ?? 0),
             'total_collected' => (float) ($metrics['total_collected'] ?? 0),
             'discount_given' => (float) ($metrics['discount_given'] ?? 0),
             'credit_used_total' => (float) ($metrics['credit_used_total'] ?? 0),
@@ -198,7 +242,8 @@ class ShopSalesReportService
         }
 
         if ($purchase->isCheque()) {
-            return [0.0, 0.0];
+            // بخش نقد/کارت فروش ترکیبی در وصول همان روز حساب می‌شود
+            return [(float) $purchase->card_amount, (float) $purchase->cash_amount];
         }
 
         $payable = max(0, round(
@@ -251,6 +296,80 @@ class ShopSalesReportService
     }
 
     /**
+     * آیا چکِ متصل به فروش تا پایان بازه وصول شده است؟
+     */
+    public static function isChequeClearedAsOf(Purchase $purchase, string $endString): bool
+    {
+        if (! $purchase->isCheque()) {
+            return true;
+        }
+
+        $cheque = $purchase->cheque;
+        if (! $cheque) {
+            return false;
+        }
+
+        $status = $cheque->getRawOriginal('status');
+        $clearedAt = $cheque->getRawOriginal('cleared_at');
+        if ($status !== \App\Models\Cheque::STATUS_CLEARED || ! $clearedAt) {
+            return false;
+        }
+
+        return Carbon::parse($clearedAt)->lte(Carbon::parse($endString));
+    }
+
+    /**
+     * فروش‌های چکی قبل از بازه که داخل بازه وصول شده‌اند.
+     * برگشت اثر منفی روز فروش (+مبلغ فروش) و آماده‌سازی ثبت بهای تمام‌شده.
+     *
+     * @return array{0: float, 1: float} [sumSaleAmounts, sumCosts]
+     */
+    public static function priorChequeClearAmounts(int $atelierId, string $start, string $end): array
+    {
+        if (! Schema::hasTable('cheques') || ! Schema::hasColumn('purchases', 'cheque_id')) {
+            return [0.0, 0.0];
+        }
+
+        $purchases = Purchase::query()
+            ->forAtelier($atelierId)
+            ->where(function ($q) {
+                $q->where('payment_type', 'cheque')->orWhereNotNull('cheque_id');
+            })
+            ->where('created_at', '<', $start)
+            ->whereHas('cheque', function ($q) use ($start, $end) {
+                $q->where('status', \App\Models\Cheque::STATUS_CLEARED)
+                    ->whereNotNull('cleared_at')
+                    ->whereBetween('cleared_at', [$start, $end]);
+            })
+            ->with(['purchasedProducts', 'cheque'])
+            ->get();
+
+        $sales = 0.0;
+        $costs = 0.0;
+        foreach ($purchases as $purchase) {
+            $saleAmount = (float) $purchase->total_amount;
+            if ($saleAmount <= 0) {
+                $saleAmount = $purchase->remainingLineSalesTotal();
+            }
+            $chequeAmount = $purchase->chequeAmount();
+            if ($chequeAmount <= 0) {
+                $chequeAmount = max(0, round($saleAmount - $purchase->immediatePaidAmount(), 2));
+            }
+            if ($saleAmount <= 0) {
+                continue;
+            }
+            $chequeFraction = min(1, max(0, $chequeAmount / $saleAmount));
+            $lineCost = $purchase->remainingLinePurchaseCost();
+
+            // فقط بخش چکی: برگشت اثر منفی + بهای تمام‌شده همان سهم
+            $sales += $chequeAmount;
+            $costs += round($lineCost * $chequeFraction, 2);
+        }
+
+        return [round($sales, 2), round($costs, 2)];
+    }
+
+    /**
      * مبلغ چک‌های متصل به فروش که در بازه وصول شده‌اند.
      */
     public static function chequesCollectedInRange(int $atelierId, string $start, string $end): float
@@ -261,7 +380,9 @@ class ShopSalesReportService
 
         return (float) Purchase::query()
             ->forAtelier($atelierId)
-            ->where('payment_type', 'cheque')
+            ->where(function ($q) {
+                $q->where('payment_type', 'cheque')->orWhereNotNull('cheque_id');
+            })
             ->whereNotNull('cheque_id')
             ->whereHas('cheque', function ($q) use ($start, $end) {
                 $q->where('status', \App\Models\Cheque::STATUS_CLEARED)
@@ -271,7 +392,13 @@ class ShopSalesReportService
             ->with(['purchasedProducts', 'cheque'])
             ->get()
             ->sum(function (Purchase $purchase) {
-                return $purchase->payableAmount();
+                $chequeAmount = $purchase->chequeAmount();
+                if ($chequeAmount > 0) {
+                    return $chequeAmount;
+                }
+                $payable = $purchase->payableAmount();
+
+                return $payable > 0 ? $payable : (float) $purchase->total_amount;
             });
     }
 
@@ -298,7 +425,10 @@ class ShopSalesReportService
 
         return (float) Purchase::query()
             ->forAtelier($atelierId)
-            ->where('payment_type', 'cheque')
+            ->where(function ($q) {
+                $q->where('payment_type', 'cheque')
+                    ->orWhereNotNull('cheque_id');
+            })
             ->where('total_amount', '>', 0)
             ->where('created_at', '<=', $endString)
             ->where(function ($q) use ($endString) {
@@ -313,7 +443,16 @@ class ShopSalesReportService
             ->with(['purchasedProducts', 'cheque'])
             ->get()
             ->sum(function (Purchase $purchase) {
-                return $purchase->payableAmount();
+                $chequeAmount = $purchase->chequeAmount();
+                if ($chequeAmount > 0) {
+                    return $chequeAmount;
+                }
+                $payable = $purchase->payableAmount();
+                if ($payable > 0) {
+                    return $payable;
+                }
+
+                return (float) $purchase->total_amount;
             });
     }
 

@@ -129,6 +129,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // چک‌ها (صادره / دریافتی) — وصول دستی: هزینه یا درآمد
     Route::get('cheques/upcoming', [\App\Http\Controllers\ChequeController::class, 'upcoming']);
     Route::post('cheques/{cheque}/clear', [\App\Http\Controllers\ChequeController::class, 'clear']);
+    Route::post('cheques/{cheque}/unclear', [\App\Http\Controllers\ChequeController::class, 'unclear']);
     Route::resource('cheques', \App\Http\Controllers\ChequeController::class)->except(['create', 'edit']);
     Route::get('pos-catalog', [\App\Http\Controllers\PosCatalogController::class, 'index']);
     Route::resource('raw-materials', \App\Http\Controllers\RawMaterialController::class)->except(['create', 'edit']);

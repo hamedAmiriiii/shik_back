@@ -51,7 +51,7 @@ class ShopDashboardService
         $purchases = Purchase::query()
             ->forAtelier($atelierId)
             ->whereBetween('created_at', [$rangeStart, $rangeEnd])
-            ->with(['installments', 'purchasedProducts'])
+            ->with(['installments', 'purchasedProducts', 'cheque'])
             ->get();
 
         foreach ($purchases as $purchase) {
@@ -69,6 +69,19 @@ class ShopDashboardService
                 $buckets[$key]['gross_sales'] += (float) $purchase->paid_amount + (float) $purchase->credit_used;
             } elseif ($purchase->isDebt()) {
                 $buckets[$key]['gross_sales'] += $lineSales;
+            } elseif ($purchase->isCheque()) {
+                $saleAmount = (float) $purchase->total_amount;
+                $buckets[$key]['gross_sales'] += $saleAmount > 0 ? $saleAmount : $lineSales;
+                if (! $purchase->isChequeSettled()) {
+                    $chequeAmount = $purchase->chequeAmount();
+                    if ($chequeAmount <= 0) {
+                        $chequeAmount = max(0, round(
+                            ($saleAmount > 0 ? $saleAmount : $lineSales) - $purchase->immediatePaidAmount(),
+                            2
+                        ));
+                    }
+                    $buckets[$key]['uncollected_cheques'] = ($buckets[$key]['uncollected_cheques'] ?? 0) + $chequeAmount;
+                }
             } else {
                 $buckets[$key]['gross_sales'] += $lineSales;
             }
@@ -138,12 +151,45 @@ class ShopDashboardService
                 + (float) $debtPurchase->debt_settled_cash_amount;
         }
 
+        $clearedChequePurchases = Purchase::query()
+            ->forAtelier($atelierId)
+            ->where(function ($q) {
+                $q->where('payment_type', 'cheque')->orWhereNotNull('cheque_id');
+            })
+            ->whereHas('cheque', function ($q) use ($rangeStart, $rangeEnd) {
+                $q->where('status', \App\Models\Cheque::STATUS_CLEARED)
+                    ->whereNotNull('cleared_at')
+                    ->whereBetween('cleared_at', [$rangeStart, $rangeEnd]);
+            })
+            ->with(['purchasedProducts', 'cheque'])
+            ->get();
+
+        foreach ($clearedChequePurchases as $chequePurchase) {
+            $clearedAt = $chequePurchase->cheque->getRawOriginal('cleared_at')
+                ?? $chequePurchase->cheque->attributes['cleared_at'] ?? null;
+            if (! $clearedAt) {
+                continue;
+            }
+            $key = Carbon::parse($clearedAt)->setTimezone('Asia/Tehran')->format('Y-m-d');
+            if (! isset($buckets[$key])) {
+                continue;
+            }
+            $amount = $chequePurchase->payableAmount();
+            if ($amount <= 0) {
+                $amount = (float) $chequePurchase->total_amount;
+            }
+            $buckets[$key]['cheques_collected'] = ($buckets[$key]['cheques_collected'] ?? 0) + $amount;
+        }
+
         $daily = [];
         $periodTotalSales = 0.0;
         foreach ($buckets as $row) {
             $row['total_sales'] = (float) ($row['gross_sales'] - $row['total_returns']);
             $row['cash_and_card_total'] = (float) ($row['card_amount'] + $row['cash_amount']);
-            $row['total_collected'] = (float) ($row['cash_and_card_total'] + $row['installments_collected'] + ($row['debts_collected'] ?? 0));
+            $row['total_collected'] = (float) ($row['cash_and_card_total'] + $row['installments_collected'] + ($row['debts_collected'] ?? 0) + ($row['cheques_collected'] ?? 0));
+            $row['uncollected_cheques'] = (float) ($row['uncollected_cheques'] ?? 0);
+            // اثر خالص روی موجودی نقدی روز: فروش آمده، ولی چک وصول‌نشده موجودی را منفی می‌کند
+            $row['cash_account_effect'] = (float) ($row['total_sales'] - (2 * $row['uncollected_cheques']));
             $periodTotalSales += $row['total_sales'];
             $daily[] = $row;
         }
@@ -157,6 +203,7 @@ class ShopDashboardService
             'period_total_sales' => (float) $periodTotalSales,
             'total_uncollected_installments' => ShopSalesReportService::totalUncollectedInstallments($atelierId),
             'total_uncollected_debts' => ShopSalesReportService::totalUncollectedDebts($atelierId),
+            'total_uncollected_cheques' => ShopSalesReportService::totalUncollectedCheques($atelierId),
             'daily' => $daily,
         ];
     }
@@ -185,9 +232,13 @@ class ShopDashboardService
             'cash_and_card_total' => $report['cash_and_card_total'],
             'installments_collected' => $report['installments_collected'],
             'debts_collected' => $report['debts_collected'] ?? 0,
+            'cheques_collected' => $report['cheques_collected'] ?? 0,
+            'cheque_payments' => $report['cheque_payments'] ?? 0,
             'total_collected' => $report['total_collected'],
             'uncollected_installments' => $report['uncollected_installments'],
             'uncollected_debts' => $report['uncollected_debts'] ?? 0,
+            'uncollected_cheques' => $report['uncollected_cheques'] ?? 0,
+            'open_cheques' => $report['open_cheques'] ?? 0,
             'credit_used_total' => $report['credit_used_total'],
             'settlement_total' => $report['settlement_total'],
             'purchases_count' => $purchasesCount,
@@ -210,9 +261,12 @@ class ShopDashboardService
             'cash_and_card_total' => 0.0,
             'installments_collected' => 0.0,
             'debts_collected' => 0.0,
+            'cheques_collected' => 0.0,
             'total_collected' => 0.0,
             'uncollected_installments' => 0.0,
             'uncollected_debts' => 0.0,
+            'uncollected_cheques' => 0.0,
+            'cash_account_effect' => 0.0,
             'purchases_count' => 0,
         ];
     }

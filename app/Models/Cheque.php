@@ -235,4 +235,46 @@ class Cheque extends Model
             return $locked->fresh(['expense', 'income', 'purchase']);
         });
     }
+
+    /**
+     * برگشت وصول چک: حذف هزینه/درآمد مرتبط و بازگشت به وضعیت در انتظار
+     */
+    public function unclear(): self
+    {
+        if ($this->status !== self::STATUS_CLEARED) {
+            throw new RuntimeException('فقط چک‌های وصول‌شده قابل برگشت وصول هستند.');
+        }
+
+        return DB::transaction(function () {
+            $locked = static::where('id', $this->id)
+                ->where('status', self::STATUS_CLEARED)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$locked) {
+                throw new RuntimeException('چک برای برگشت وصول در دسترس نیست.');
+            }
+
+            if ($locked->type === self::TYPE_ISSUED) {
+                if ($locked->expense_id) {
+                    Expense::where('id', $locked->expense_id)->delete();
+                }
+            } elseif ($locked->type === self::TYPE_RECEIVED) {
+                if ($locked->income_id) {
+                    Income::where('id', $locked->income_id)->delete();
+                }
+            } else {
+                throw new RuntimeException('نوع چک نامعتبر است.');
+            }
+
+            $locked->update([
+                'status' => self::STATUS_PENDING,
+                'expense_id' => null,
+                'income_id' => null,
+                'cleared_at' => null,
+            ]);
+
+            return $locked->fresh(['expense', 'income', 'purchase']);
+        });
+    }
 }

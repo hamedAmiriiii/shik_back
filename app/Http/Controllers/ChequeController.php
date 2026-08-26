@@ -259,6 +259,30 @@ class ChequeController extends Controller
         ], 200);
     }
 
+    /**
+     * برگشت وصول چک (حذف هزینه/درآمد و بازگشت به در انتظار)
+     * POST /api/cheques/{cheque}/unclear
+     */
+    public function unclear(Request $request, Cheque $cheque)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $cheque);
+
+        try {
+            $reverted = $cheque->unclear();
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $message = $reverted->type === Cheque::TYPE_RECEIVED
+            ? 'وصول چک دریافتی برگشت داده شد و درآمد حذف شد.'
+            : 'وصول چک صادره برگشت داده شد و هزینه حذف شد.';
+
+        return response([
+            'message' => $message,
+            'cheque' => $reverted,
+        ], 200);
+    }
+
     public function update(Request $request, Cheque $cheque)
     {
         $this->assertModelBelongsToStaffAtelier($request, $cheque);

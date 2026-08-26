@@ -350,6 +350,7 @@ class FinancialReportController extends Controller
         }
 
         $incomesForBalance = (float) $totalIncomes - $saleLinkedIncomes;
+        $chequePayments = (float) ($metrics['cheque_payments'] ?? 0);
         $openCheques = (float) ($metrics['open_cheques'] ?? 0);
 
         $totalInvoices = Invoice::where('atelier_id', $atelierId)
@@ -360,9 +361,10 @@ class FinancialReportController extends Controller
         // خالص سود = سود - هزینه‌های جاری
         $netProfit = $totalProfit - $totalExpenses;
 
-        // موجودی: فروش + درآمدها − هزینه‌ها − فاکتورها − اعتبار − فروش‌های چکی وصول‌نشده
+        // موجودی: فروش چکی وصول‌نشده موجودی را به‌اندازه مبلغ فروش منفی می‌کند
+        // (فروش در sales هست؛ دو بار کسر → اثر خالص −مبلغ چک)
         $accountBalance = $netSales + $incomesForBalance - $totalExpenses - $totalInvoices
-            - $metrics['credit_used_total'] - $openCheques;
+            - $metrics['credit_used_total'] - (2 * $chequePayments);
 
         return [
             'year' => $year,
@@ -377,6 +379,7 @@ class FinancialReportController extends Controller
             'net_profit' => round($netProfit, 2),
             'account_balance' => round($accountBalance, 2),
             'open_cheques' => round($openCheques, 2),
+            'cheque_payments' => round($chequePayments, 2),
             'cheques_collected' => round((float) ($metrics['cheques_collected'] ?? 0), 2),
             'credit_earned_from_purchases' => round($metrics['credit_earned_from_purchases'], 2),
             'manual_credit_granted' => round($metrics['manual_credit_granted'], 2),

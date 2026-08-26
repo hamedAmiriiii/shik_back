@@ -113,9 +113,8 @@ class PurchasedProductController extends Controller
                 ? ((float) $purchase->debt_settled_card_amount + (float) $purchase->debt_settled_cash_amount)
                 : $purchase->payableAmount();
         } elseif ($purchase->isCheque()) {
-            $total += $purchase->isChequeSettled()
-                ? $purchase->payableAmount()
-                : 0;
+            $total += $purchase->immediatePaidAmount()
+                + ($purchase->isChequeSettled() ? $purchase->chequeAmount() : 0);
         } else {
             $total += $purchase->total_amount;
         }
@@ -141,7 +140,11 @@ class PurchasedProductController extends Controller
             $purchaseData['payable_amount'] = $purchase->payableAmount();
             $purchaseData['is_cheque_settled'] = $purchase->isChequeSettled();
             $purchaseData['outstanding_cheque_amount'] = $purchase->outstandingChequeAmount();
-            $purchaseData['payment_type_label'] = 'چکی';
+            $purchaseData['cheque_amount'] = $purchase->chequeAmount();
+            $purchaseData['immediate_paid_amount'] = $purchase->immediatePaidAmount();
+            $purchaseData['payment_type_label'] = $purchase->immediatePaidAmount() > 0.02
+                ? 'نقد/کارت + چک'
+                : 'چکی';
             $purchaseData['cheque_id'] = $purchase->cheque_id;
         }
     }
@@ -321,14 +324,18 @@ class PurchasedProductController extends Controller
 
         $amountPaidNow = $paymentType === 'installment'
             ? $this->roundToThreeZeroEnding($finalTotalAmount / 3)
-            : (in_array($paymentType, ['debt', 'cheque'], true) ? 0.0 : (float) $payableAmount);
+            : ($paymentType === 'debt' ? 0.0 : (float) $payableAmount);
 
-        $settlement = in_array($paymentType, ['debt', 'cheque'], true)
+        $settlement = $paymentType === 'debt'
             ? ['card_amount' => 0.0, 'cash_amount' => 0.0]
-            : $this->resolvePurchaseSettlement($request, $amountPaidNow);
+            : ['card_amount' => 0.0, 'cash_amount' => 0.0];
 
         $linkedCheque = null;
         if ($paymentType === 'cheque') {
+            if (! $chequeId) {
+                return response(['error' => 'برای فروش چکی، cheque_id الزامی است.'], 422);
+            }
+
             $linkedCheque = Cheque::find($chequeId);
             if (!$linkedCheque) {
                 return response(['error' => 'چک یافت نشد.'], 404);
@@ -345,13 +352,39 @@ class PurchasedProductController extends Controller
             if ($purchaseAtelierId !== null && (int) $linkedCheque->atelier_id !== (int) $purchaseAtelierId) {
                 return response(['error' => 'چک متعلق به این فروشگاه نیست.'], 422);
             }
-            if (abs((float) $linkedCheque->amount - (float) $payableAmount) > 0.02) {
+
+            $chequeAmount = round((float) $linkedCheque->amount, 2);
+            if ($chequeAmount <= 0) {
+                return response(['error' => 'مبلغ چک نامعتبر است.'], 422);
+            }
+            if ($chequeAmount > $payableAmount + 0.02) {
                 return response([
-                    'error' => 'مبلغ چک با مبلغ قابل پرداخت فروش یکسان نیست.',
-                    'cheque_amount' => (float) $linkedCheque->amount,
+                    'error' => 'مبلغ چک بیشتر از مبلغ قابل پرداخت فروش است.',
+                    'cheque_amount' => $chequeAmount,
                     'payable_amount' => (float) $payableAmount,
                 ], 422);
             }
+
+            // بخش نقد/کارت = باقیمانده بعد از چک (می‌تواند صفر باشد = تمام‌چکی)
+            $immediateDue = round(max(0, (float) $payableAmount - $chequeAmount), 2);
+            if ($immediateDue <= 0.02) {
+                $settlement = ['card_amount' => 0.0, 'cash_amount' => 0.0];
+            } else {
+                // اگر فقط یکی از نقد/کارت ارسال شده یا payment_settlement، باقیمانده را پر می‌کند
+                $settlement = $this->resolvePurchaseSettlement($request, $immediateDue);
+            }
+
+            if (abs($chequeAmount + $settlement['card_amount'] + $settlement['cash_amount'] - (float) $payableAmount) > 0.02) {
+                return response([
+                    'error' => 'جمع نقد + کارت + چک باید برابر مبلغ قابل پرداخت باشد.',
+                    'payable_amount' => (float) $payableAmount,
+                    'cheque_amount' => $chequeAmount,
+                    'card_amount' => $settlement['card_amount'],
+                    'cash_amount' => $settlement['cash_amount'],
+                ], 422);
+            }
+        } elseif ($paymentType !== 'debt') {
+            $settlement = $this->resolvePurchaseSettlement($request, $amountPaidNow);
         }
 
         // ایجاد سبد خرید (Purchase)
@@ -534,7 +567,12 @@ class PurchasedProductController extends Controller
             $purchase->setAttribute('payable_amount', $purchase->payableAmount());
             $purchase->setAttribute('is_cheque_settled', $purchase->isChequeSettled());
             $purchase->setAttribute('outstanding_cheque_amount', $purchase->outstandingChequeAmount());
-            $purchase->setAttribute('payment_type_label', 'چکی');
+            $purchase->setAttribute('cheque_amount', $purchase->chequeAmount());
+            $purchase->setAttribute('immediate_paid_amount', $purchase->immediatePaidAmount());
+            $purchase->setAttribute(
+                'payment_type_label',
+                $purchase->immediatePaidAmount() > 0.02 ? 'نقد/کارت + چک' : 'چکی'
+            );
         }
 
         $payload = $purchase->toArray();
@@ -564,7 +602,12 @@ class PurchasedProductController extends Controller
             $purchase->setAttribute('payable_amount', $purchase->payableAmount());
             $purchase->setAttribute('is_cheque_settled', $purchase->isChequeSettled());
             $purchase->setAttribute('outstanding_cheque_amount', $purchase->outstandingChequeAmount());
-            $purchase->setAttribute('payment_type_label', 'چکی');
+            $purchase->setAttribute('cheque_amount', $purchase->chequeAmount());
+            $purchase->setAttribute('immediate_paid_amount', $purchase->immediatePaidAmount());
+            $purchase->setAttribute(
+                'payment_type_label',
+                $purchase->immediatePaidAmount() > 0.02 ? 'نقد/کارت + چک' : 'چکی'
+            );
         }
         return response($purchase, 200);
     }
