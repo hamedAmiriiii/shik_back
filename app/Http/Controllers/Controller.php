@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Concerns\NormalizesRequestPayload;
+use App\Http\Concerns\ResolvesPaymentAccount;
 use App\Http\Concerns\ResolvesShopAtelierId;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Foundation\Bus\DispatchesJobs;
@@ -11,5 +12,5 @@ use Illuminate\Routing\Controller as BaseController;
 
 class Controller extends BaseController
 {
-    use AuthorizesRequests, DispatchesJobs, NormalizesRequestPayload, ResolvesShopAtelierId, ValidatesRequests;
+    use AuthorizesRequests, DispatchesJobs, NormalizesRequestPayload, ResolvesPaymentAccount, ResolvesShopAtelierId, ValidatesRequests;
 }

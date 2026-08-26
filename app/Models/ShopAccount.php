@@ -14,6 +14,14 @@ class ShopAccount extends Model
 
     public const LEGACY_ACCOUNT_2 = 'account_2';
 
+    /** حساب اصلی فروشگاه — از تطبیق روزانه شارژ می‌شود */
+    public const TYPE_SHOP = 'shop';
+
+    /** تنخواه — فقط از حساب‌های اصلی شارژ می‌شود */
+    public const TYPE_PETTY_CASH = 'petty_cash';
+
+    public const TYPES = [self::TYPE_SHOP, self::TYPE_PETTY_CASH];
+
     public const DEFAULTS = [
         ['name' => 'حساب ۱', 'sort_order' => 1, 'legacy_slot' => self::LEGACY_ACCOUNT_1],
         ['name' => 'حساب ۲', 'sort_order' => 2, 'legacy_slot' => self::LEGACY_ACCOUNT_2],
@@ -25,6 +33,7 @@ class ShopAccount extends Model
     protected $fillable = [
         'atelier_id',
         'name',
+        'type',
         'sort_order',
         'legacy_slot',
         'is_active',
@@ -34,6 +43,24 @@ class ShopAccount extends Model
         'sort_order' => 'integer',
         'is_active' => 'boolean',
     ];
+
+    /**
+     * ستون type در migration تنخواه اضافه می‌شود؛ تا قبل از آن نباید در query بیاید.
+     */
+    public static function supportsTypes(): bool
+    {
+        return Schema::hasTable('shop_accounts') && Schema::hasColumn('shop_accounts', 'type');
+    }
+
+    public function isPettyCash(): bool
+    {
+        return $this->type === self::TYPE_PETTY_CASH;
+    }
+
+    public function typeLabel(): string
+    {
+        return $this->isPettyCash() ? 'تنخواه' : 'حساب فروشگاه';
+    }
 
     public function atelier(): BelongsTo
     {
@@ -45,6 +72,26 @@ class ShopAccount extends Model
         return $this->hasMany(DailyShopReconciliationAccountDeposit::class, 'shop_account_id');
     }
 
+    public function incomingTransfers(): HasMany
+    {
+        return $this->hasMany(ShopAccountTransfer::class, 'to_shop_account_id');
+    }
+
+    public function outgoingTransfers(): HasMany
+    {
+        return $this->hasMany(ShopAccountTransfer::class, 'from_shop_account_id');
+    }
+
+    public function expenses(): HasMany
+    {
+        return $this->hasMany(Expense::class, 'shop_account_id');
+    }
+
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(Invoice::class, 'shop_account_id');
+    }
+
     /**
      * ایجاد حساب‌های پیش‌فرض (حساب ۱ و ۲) و انتقال واریزهای قدیمی.
      */
@@ -54,17 +101,24 @@ class ShopAccount extends Model
             return;
         }
 
+        $supportsTypes = self::supportsTypes();
+
         foreach (self::DEFAULTS as $default) {
+            $values = [
+                'name' => $default['name'],
+                'sort_order' => $default['sort_order'],
+                'is_active' => true,
+            ];
+            if ($supportsTypes) {
+                $values['type'] = self::TYPE_SHOP;
+            }
+
             static::query()->firstOrCreate(
                 [
                     'atelier_id' => $atelierId,
                     'legacy_slot' => $default['legacy_slot'],
                 ],
-                [
-                    'name' => $default['name'],
-                    'sort_order' => $default['sort_order'],
-                    'is_active' => true,
-                ]
+                $values
             );
         }
 
@@ -189,5 +243,24 @@ class ShopAccount extends Model
     public function scopeForAtelier($query, int $atelierId)
     {
         return $query->where('atelier_id', $atelierId);
+    }
+
+    public function scopeOfType($query, string $type)
+    {
+        return $query->where('type', $type);
+    }
+
+    /**
+     * فقط حساب‌های اصلی فروشگاه (تنخواه‌ها در تطبیق روزانه واریز نمی‌گیرند).
+     */
+    public function scopeShopType($query)
+    {
+        if (! self::supportsTypes()) {
+            return $query;
+        }
+
+        return $query->where(function ($q) {
+            $q->where('type', self::TYPE_SHOP)->orWhereNull('type');
+        });
     }
 }

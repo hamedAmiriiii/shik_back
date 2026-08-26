@@ -348,6 +348,8 @@ class DailyShopReconciliationService
     }
 
     /**
+     * حساب‌های اصلی فروشگاه — تنخواه‌ها در تطبیق روزانه واریز نمی‌گیرند.
+     *
      * @return Collection<int, ShopAccount>
      */
     public static function activeAccounts(int $atelierId): Collection
@@ -361,70 +363,33 @@ class DailyShopReconciliationService
         return ShopAccount::query()
             ->forAtelier($atelierId)
             ->active()
+            ->when(
+                Schema::hasColumn('shop_accounts', 'type'),
+                fn ($q) => $q->shopType()
+            )
             ->orderBy('sort_order')
             ->orderBy('id')
             ->get();
     }
 
     /**
+     * موجودی خالص هر حساب (واریز − شارژ تنخواه − هزینه/فاکتور پرداخت‌شده از آن).
+     *
      * @param  array<int>  $accountIds
      * @return array<int, float>
      */
     public static function balancesByAccountId(int $atelierId, array $accountIds): array
     {
-        $balances = array_fill_keys($accountIds, 0.0);
-        if ($accountIds === []) {
-            return [];
-        }
+        return ShopAccountBalanceService::balances($atelierId, $accountIds);
+    }
 
-        if (Schema::hasTable('daily_shop_reconciliation_account_deposits')) {
-            $fromLines = DailyShopReconciliationAccountDeposit::query()
-                ->whereIn('shop_account_id', $accountIds)
-                ->whereHas('shopAccount', fn ($q) => $q->where('atelier_id', $atelierId))
-                ->selectRaw('shop_account_id, SUM(amount) as total')
-                ->groupBy('shop_account_id')
-                ->pluck('total', 'shop_account_id')
-                ->map(fn ($v) => (float) $v)
-                ->all();
-
-            foreach ($fromLines as $id => $total) {
-                $balances[(int) $id] = $total;
-            }
-        }
-
-        // تکمیل از ستون‌های قدیمی برای روزهایی که هنوز ردیف جدید ندارند (یا مبلغ‌شان ۰ است)
-        if (Schema::hasTable('daily_shop_reconciliations') && Schema::hasTable('shop_accounts')) {
-            $legacyAccounts = ShopAccount::query()
-                ->forAtelier($atelierId)
-                ->whereIn('id', $accountIds)
-                ->whereIn('legacy_slot', [ShopAccount::LEGACY_ACCOUNT_1, ShopAccount::LEGACY_ACCOUNT_2])
-                ->get();
-
-            foreach ($legacyAccounts as $account) {
-                $column = $account->legacy_slot === ShopAccount::LEGACY_ACCOUNT_1
-                    ? 'deposit_account_1'
-                    : 'deposit_account_2';
-
-                $legacySum = (float) DB::table('daily_shop_reconciliations as r')
-                    ->where('r.atelier_id', $atelierId)
-                    ->where(function ($q) use ($account) {
-                        $q->whereNotExists(function ($sub) use ($account) {
-                            $sub->select(DB::raw(1))
-                                ->from('daily_shop_reconciliation_account_deposits as d')
-                                ->whereColumn('d.reconciliation_id', 'r.id')
-                                ->where('d.shop_account_id', $account->id)
-                                ->where('d.amount', '>', 0);
-                        });
-                    })
-                    ->sum("r.{$column}");
-
-                if ($legacySum > 0) {
-                    $balances[$account->id] = round(($balances[$account->id] ?? 0) + $legacySum, 2);
-                }
-            }
-        }
-
-        return $balances;
+    /**
+     * @param  array<int>  $accountIds
+     * @return array<int, array<string, float>>
+     */
+    public static function balanceBreakdown(int $atelierId, array $accountIds): array
+    {
+        return ShopAccountBalanceService::breakdown($atelierId, $accountIds);
     }
 
     /**

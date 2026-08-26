@@ -24,6 +24,15 @@ class InvoiceController extends Controller
             })
             ->orderBy('id', 'desc');
 
+        if ($this->supportsPaymentAccount('invoices')) {
+            $query->with('shopAccount');
+
+            // فیلتر بر اساس حساب پرداخت (فروشگاه یا تنخواه)
+            if ($request->filled('shop_account_id')) {
+                $query->where('shop_account_id', (int) $request->input('shop_account_id'));
+            }
+        }
+
         // جستجو بر اساس searchFilterModel
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         if ($searchDataModel) {
@@ -114,11 +123,16 @@ class InvoiceController extends Controller
             ], 422);
         }
 
-        $fields = $request->validate([
+        $fields = $request->validate(array_merge([
             'amount' => 'required|numeric|min:0',
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
-        ]);
+        ], $this->paymentAccountRules('invoices')));
+
+        $accountError = $this->paymentAccountError($atelierId, $fields['shop_account_id'] ?? null);
+        if ($accountError) {
+            return response()->json(['message' => $accountError], 422);
+        }
 
         $user = $this->shopRequestActor($request);
         if (! $user) {
@@ -131,7 +145,7 @@ class InvoiceController extends Controller
 
         $invoice = Invoice::create($fields);
 
-        return response($invoice, 201);
+        return response($this->withAccount($invoice), 201);
     }
 
     /**
@@ -141,7 +155,7 @@ class InvoiceController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $invoice);
 
-        return response($invoice, 200);
+        return response($this->withAccount($invoice), 200);
     }
 
     /**
@@ -151,16 +165,23 @@ class InvoiceController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $invoice);
 
-        $fields = $request->validate([
+        $fields = $request->validate(array_merge([
             'amount' => 'sometimes|required|numeric|min:0',
             'title' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
             'date' => 'sometimes|required|date',
-        ]);
+        ], $this->paymentAccountRules('invoices')));
+
+        if (array_key_exists('shop_account_id', $fields)) {
+            $accountError = $this->paymentAccountError((int) $invoice->atelier_id, $fields['shop_account_id']);
+            if ($accountError) {
+                return response()->json(['message' => $accountError], 422);
+            }
+        }
 
         $invoice->update($fields);
 
-        return response($invoice, 200);
+        return response($this->withAccount($invoice->fresh()), 200);
     }
 
     /**
@@ -173,5 +194,10 @@ class InvoiceController extends Controller
         $invoice->delete();
 
         return response(['message' => 'فاکتور با موفقیت حذف شد'], 200);
+    }
+
+    protected function withAccount(Invoice $invoice): Invoice
+    {
+        return $this->attachPaymentAccount($invoice);
     }
 }

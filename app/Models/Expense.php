@@ -10,12 +10,20 @@ class Expense extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['user_name', 'date', 'amount', 'title', 'type', 'atelier_id'];
+    protected $fillable = ['user_name', 'date', 'amount', 'title', 'type', 'atelier_id', 'shop_account_id'];
 
     protected $casts = [
         'date' => 'date',
         'amount' => 'decimal:2',
     ];
+
+    /**
+     * حسابی (فروشگاه یا تنخواه) که مبلغ از آن برداشت شده است.
+     */
+    public function shopAccount()
+    {
+        return $this->belongsTo(ShopAccount::class, 'shop_account_id');
+    }
 
     public function getDateAttribute($value): string
     {

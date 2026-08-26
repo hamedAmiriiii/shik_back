@@ -184,6 +184,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::put('shop-accounts/{shopAccount}', [\App\Http\Controllers\ShopAccountController::class, 'update']);
     Route::delete('shop-accounts/{shopAccount}', [\App\Http\Controllers\ShopAccountController::class, 'destroy']);
 
+    // شارژ تنخواه از حساب‌های اصلی فروشگاه
+    Route::get('shop-account-transfers', [\App\Http\Controllers\ShopAccountTransferController::class, 'index']);
+    Route::post('shop-account-transfers', [\App\Http\Controllers\ShopAccountTransferController::class, 'store']);
+    Route::delete('shop-account-transfers/{shopAccountTransfer}', [\App\Http\Controllers\ShopAccountTransferController::class, 'destroy']);
+
     Route::prefix('shop-sms-quota')->name('shop-sms-quota.')->group(function () {
         Route::get('/', [\App\Http\Controllers\ShopSmsQuotaController::class, 'show']);
         Route::post('/estimate', [\App\Http\Controllers\ShopSmsQuotaController::class, 'estimate']);

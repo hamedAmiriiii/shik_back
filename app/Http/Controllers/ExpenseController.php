@@ -18,6 +18,15 @@ class ExpenseController extends Controller
         $atelierId = $this->shopAtelierIdOrAbort($request);
         $query = Expense::where('atelier_id', $atelierId)->orderBy('id', 'desc');
 
+        if ($this->supportsPaymentAccount('expenses')) {
+            $query->with('shopAccount');
+
+            // فیلتر بر اساس حساب برداشت (فروشگاه یا تنخواه)
+            if ($request->filled('shop_account_id')) {
+                $query->where('shop_account_id', (int) $request->input('shop_account_id'));
+            }
+        }
+
         // جستجو بر اساس searchFilterModel
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         if ($searchDataModel) {
@@ -116,11 +125,16 @@ class ExpenseController extends Controller
             ], 422);
         }
 
-        $fields = $request->validate([
+        $fields = $request->validate(array_merge([
             'amount' => 'required|numeric|min:0',
             'title' => 'required|string|max:255',
             'type' => 'nullable|in:جاری,سرمایه',
-        ]);
+        ], $this->paymentAccountRules('expenses')));
+
+        $accountError = $this->paymentAccountError($atelierId, $fields['shop_account_id'] ?? null);
+        if ($accountError) {
+            return response()->json(['message' => $accountError], 422);
+        }
 
         $user = $this->shopRequestActor($request);
         if (! $user) {
@@ -141,7 +155,8 @@ class ExpenseController extends Controller
         $fields['atelier_id'] = $atelierId;
 
         $expense = Expense::create($fields);
-        return response($expense, 201);
+
+        return response($this->withAccount($expense), 201);
     }
 
     /**
@@ -151,7 +166,7 @@ class ExpenseController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $expense);
 
-        return response($expense, 200);
+        return response($this->withAccount($expense), 200);
     }
 
     /**
@@ -161,17 +176,25 @@ class ExpenseController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $expense);
 
-        $fields = $request->validate([
+        $fields = $request->validate(array_merge([
             'user_name' => 'sometimes|required|string',
             'amount' => 'sometimes|required|numeric|min:0',
             'title' => 'sometimes|required|string|max:255',
             'type' => 'sometimes|required|in:جاری,سرمایه',
-        ]);
+        ], $this->paymentAccountRules('expenses')));
+
+        if (array_key_exists('shop_account_id', $fields)) {
+            $accountError = $this->paymentAccountError((int) $expense->atelier_id, $fields['shop_account_id']);
+            if ($accountError) {
+                return response()->json(['message' => $accountError], 422);
+            }
+        }
 
         // تاریخ تغییر نمی‌کنه، فقط فیلدهای دیگر آپدیت می‌شن
 
         $expense->update($fields);
-        return response($expense, 200);
+
+        return response($this->withAccount($expense->fresh()), 200);
     }
 
     /**
@@ -183,6 +206,11 @@ class ExpenseController extends Controller
 
         $expense->delete();
         return response(['message' => 'هزینه با موفقیت حذف شد'], 200);
+    }
+
+    protected function withAccount(Expense $expense): Expense
+    {
+        return $this->attachPaymentAccount($expense);
     }
 
     /**

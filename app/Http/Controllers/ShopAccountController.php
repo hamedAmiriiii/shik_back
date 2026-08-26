@@ -3,39 +3,51 @@
 namespace App\Http\Controllers;
 
 use App\Models\ShopAccount;
-use App\Services\DailyShopReconciliationService;
+use App\Services\ShopAccountBalanceService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
 class ShopAccountController extends Controller
 {
     /**
-     * لیست حساب‌های فروشگاه همراه با موجودی (مجموع واریزهای تطبیق روزانه).
+     * لیست حساب‌های فروشگاه و تنخواه‌ها همراه با موجودی.
      * GET /api/shop-accounts
+     * GET /api/shop-accounts?type=petty_cash
      */
     public function index(Request $request)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
         ShopAccount::ensureDefaultsForAtelier($atelierId);
 
+        $request->validate([
+            'type' => ['sometimes', Rule::in(ShopAccount::TYPES)],
+        ]);
+
         $includeInactive = $request->boolean('include_inactive');
         $accounts = ShopAccount::query()
             ->forAtelier($atelierId)
             ->when(! $includeInactive, fn ($q) => $q->active())
+            ->when(
+                $request->filled('type') && ShopAccount::supportsTypes(),
+                fn ($q) => $request->input('type') === ShopAccount::TYPE_SHOP
+                    ? $q->shopType()
+                    : $q->ofType($request->input('type'))
+            )
+            ->when(ShopAccount::supportsTypes(), fn ($q) => $q->orderBy('type'))
             ->orderBy('sort_order')
             ->orderBy('id')
             ->get();
 
-        $balances = DailyShopReconciliationService::balancesByAccountId($atelierId, $accounts->pluck('id')->all());
+        $breakdown = ShopAccountBalanceService::breakdown($atelierId, $accounts->pluck('id')->all());
 
         return response([
-            'data' => $accounts->map(fn (ShopAccount $a) => $this->serialize($a, $balances))->values(),
+            'data' => $accounts->map(fn (ShopAccount $a) => $this->serialize($a, $breakdown))->values(),
         ], 200);
     }
 
     /**
-     * ایجاد حساب جدید برای فروشگاه.
-     * POST /api/shop-accounts
+     * ایجاد حساب فروشگاه یا تنخواه.
+     * POST /api/shop-accounts  { "name": "تنخواه آشپزخانه", "type": "petty_cash" }
      */
     public function store(Request $request)
     {
@@ -55,22 +67,42 @@ class ShopAccountController extends Controller
                 'max:255',
                 Rule::unique('shop_accounts', 'name')->where(fn ($q) => $q->where('atelier_id', $atelierId)->where('is_active', true)),
             ],
+            'type' => ['sometimes', Rule::in(ShopAccount::TYPES)],
             'sort_order' => 'sometimes|integer|min:0|max:9999',
         ]);
 
-        $maxSort = (int) ShopAccount::query()->forAtelier($atelierId)->max('sort_order');
+        $type = $fields['type'] ?? ShopAccount::TYPE_SHOP;
+        $supportsTypes = ShopAccount::supportsTypes();
 
-        $account = ShopAccount::create([
+        if ($type === ShopAccount::TYPE_PETTY_CASH && ! $supportsTypes) {
+            return response()->json([
+                'message' => 'ساختار تنخواه هنوز روی دیتابیس اعمال نشده است. migration یا فایل SQL را اجرا کنید.',
+            ], 422);
+        }
+
+        $maxSort = (int) ShopAccount::query()
+            ->forAtelier($atelierId)
+            ->when($supportsTypes, fn ($q) => $q->where('type', $type))
+            ->max('sort_order');
+
+        $payload = [
             'atelier_id' => $atelierId,
             'name' => trim($fields['name']),
             'sort_order' => $fields['sort_order'] ?? ($maxSort + 1),
             'legacy_slot' => null,
             'is_active' => true,
-        ]);
+        ];
+        if ($supportsTypes) {
+            $payload['type'] = $type;
+        }
+
+        $account = ShopAccount::create($payload);
 
         return response([
-            'message' => 'حساب با موفقیت ایجاد شد.',
-            'data' => $this->serialize($account, [$account->id => 0.0]),
+            'message' => $type === ShopAccount::TYPE_PETTY_CASH
+                ? 'حساب تنخواه ایجاد شد.'
+                : 'حساب فروشگاه ایجاد شد.',
+            'data' => $this->serialize($account, []),
         ], 201);
     }
 
@@ -111,16 +143,16 @@ class ShopAccountController extends Controller
 
         $shopAccount->save();
 
-        $balances = DailyShopReconciliationService::balancesByAccountId($atelierId, [$shopAccount->id]);
+        $breakdown = ShopAccountBalanceService::breakdown($atelierId, [$shopAccount->id]);
 
         return response([
             'message' => 'حساب به‌روزرسانی شد.',
-            'data' => $this->serialize($shopAccount->fresh(), $balances),
+            'data' => $this->serialize($shopAccount->fresh(), $breakdown),
         ], 200);
     }
 
     /**
-     * غیرفعال‌سازی حساب (حذف نرم — دادهٔ واریزها حفظ می‌شود).
+     * غیرفعال‌سازی حساب (حذف نرم — دادهٔ واریزها و هزینه‌ها حفظ می‌شود).
      * DELETE /api/shop-accounts/{shopAccount}
      */
     public function destroy(Request $request, ShopAccount $shopAccount)
@@ -143,24 +175,34 @@ class ShopAccountController extends Controller
             'message' => 'حساب غیرفعال شد.',
             'data' => $this->serialize(
                 $shopAccount,
-                DailyShopReconciliationService::balancesByAccountId($atelierId, [$shopAccount->id])
+                ShopAccountBalanceService::breakdown($atelierId, [$shopAccount->id])
             ),
         ], 200);
     }
 
     /**
-     * @param  array<int, float>  $balances
+     * @param  array<int, array<string, float>>  $breakdown
      * @return array<string, mixed>
      */
-    protected function serialize(ShopAccount $account, array $balances): array
+    protected function serialize(ShopAccount $account, array $breakdown): array
     {
+        $row = $breakdown[$account->id] ?? [];
+
         return [
             'id' => $account->id,
             'name' => $account->name,
+            'type' => $account->type ?: ShopAccount::TYPE_SHOP,
+            'type_label' => $account->typeLabel(),
+            'is_petty_cash' => $account->isPettyCash(),
             'sort_order' => (int) $account->sort_order,
             'legacy_slot' => $account->legacy_slot,
             'is_active' => (bool) $account->is_active,
-            'balance' => round((float) ($balances[$account->id] ?? 0), 2),
+            'balance' => round((float) ($row['balance'] ?? 0), 2),
+            'deposits_total' => round((float) ($row['deposits'] ?? 0), 2),
+            'charged_total' => round((float) ($row['transfers_in'] ?? 0), 2),
+            'transferred_out_total' => round((float) ($row['transfers_out'] ?? 0), 2),
+            'expenses_total' => round((float) ($row['expenses'] ?? 0), 2),
+            'invoices_total' => round((float) ($row['invoices'] ?? 0), 2),
         ];
     }
 }

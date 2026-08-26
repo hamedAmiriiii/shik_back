@@ -10,12 +10,20 @@ class Invoice extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['amount', 'title', 'description', 'date', 'user_name', 'atelier_id'];
+    protected $fillable = ['amount', 'title', 'description', 'date', 'user_name', 'atelier_id', 'shop_account_id'];
 
     protected $casts = [
         'date' => 'date',
         'amount' => 'decimal:2',
     ];
+
+    /**
+     * حسابی (فروشگاه یا تنخواه) که مبلغ از آن پرداخت شده است.
+     */
+    public function shopAccount()
+    {
+        return $this->belongsTo(ShopAccount::class, 'shop_account_id');
+    }
 
     public function getDateAttribute($value): string
     {
