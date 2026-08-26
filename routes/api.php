@@ -179,6 +179,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('daily-reconciliations/{date}', [\App\Http\Controllers\DailyShopReconciliationController::class, 'show'])
         ->where('date', '[0-9]{4}-[0-9]{2}-[0-9]{2}');
 
+    Route::get('shop-accounts', [\App\Http\Controllers\ShopAccountController::class, 'index']);
+    Route::post('shop-accounts', [\App\Http\Controllers\ShopAccountController::class, 'store']);
+    Route::put('shop-accounts/{shopAccount}', [\App\Http\Controllers\ShopAccountController::class, 'update']);
+    Route::delete('shop-accounts/{shopAccount}', [\App\Http\Controllers\ShopAccountController::class, 'destroy']);
+
     Route::prefix('shop-sms-quota')->name('shop-sms-quota.')->group(function () {
         Route::get('/', [\App\Http\Controllers\ShopSmsQuotaController::class, 'show']);
         Route::post('/estimate', [\App\Http\Controllers\ShopSmsQuotaController::class, 'estimate']);

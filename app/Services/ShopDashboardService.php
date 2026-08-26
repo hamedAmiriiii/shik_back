@@ -60,7 +60,7 @@ class ShopDashboardService
                 continue;
             }
 
-            $lineSales = $purchase->remainingLineSalesTotal();
+            $lineSales = ShopSalesReportService::invoiceSalesAmount($purchase);
             if ($lineSales <= 0) {
                 continue;
             }
@@ -212,11 +212,9 @@ class ShopDashboardService
     {
         $report = ShopSalesReportService::salesAndProfitForDate($atelierId, $dateTehran);
 
-        $start = $dateTehran->copy()->startOfDay()->format('Y-m-d H:i:s');
-        $end = $dateTehran->copy()->endOfDay()->format('Y-m-d H:i:s');
         $purchasesCount = Purchase::query()
             ->forAtelier($atelierId)
-            ->whereBetween('created_at', [$start, $end])
+            ->whereDate('created_at', $dateTehran->format('Y-m-d'))
             ->count();
 
         return [

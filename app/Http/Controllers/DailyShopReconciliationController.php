@@ -39,6 +39,7 @@ class DailyShopReconciliationController extends Controller
             'meta' => [
                 'atelier_id' => $atelierId,
                 'reconciliations_table_ready' => \Illuminate\Support\Facades\Schema::hasTable('daily_shop_reconciliations'),
+                'shop_accounts_table_ready' => \Illuminate\Support\Facades\Schema::hasTable('shop_accounts'),
             ],
         ]), 200);
     }
@@ -55,12 +56,50 @@ class DailyShopReconciliationController extends Controller
         $recon = DailyShopReconciliation::query()
             ->where('atelier_id', $atelierId)
             ->whereDate('date', $dateKey)
+            ->with(['accountDeposits.shopAccount'])
             ->first();
 
         $metrics = \App\Services\ShopSalesReportService::salesAndProfitForDate(
             $atelierId,
             Carbon::parse($dateKey, 'Asia/Tehran')
         );
+
+        $shopAccounts = DailyShopReconciliationService::activeAccounts($atelierId);
+        $balances = DailyShopReconciliationService::balancesByAccountId(
+            $atelierId,
+            $shopAccounts->pluck('id')->all()
+        );
+
+        $accountDeposits = [];
+        if ($recon) {
+            $byId = $recon->accountDeposits->keyBy('shop_account_id');
+            foreach ($shopAccounts as $account) {
+                $line = $byId->get($account->id);
+                $amount = $line ? (float) $line->amount : 0.0;
+                if (! $line && $account->legacy_slot === 'account_1') {
+                    $amount = (float) $recon->deposit_account_1;
+                } elseif (! $line && $account->legacy_slot === 'account_2') {
+                    $amount = (float) $recon->deposit_account_2;
+                }
+                $accountDeposits[] = [
+                    'shop_account_id' => $account->id,
+                    'name' => $account->name,
+                    'legacy_slot' => $account->legacy_slot,
+                    'amount' => $amount,
+                    'deposit_record_id' => $line->deposit_record_id ?? null,
+                ];
+            }
+        } else {
+            foreach ($shopAccounts as $account) {
+                $accountDeposits[] = [
+                    'shop_account_id' => $account->id,
+                    'name' => $account->name,
+                    'legacy_slot' => $account->legacy_slot,
+                    'amount' => 0.0,
+                    'deposit_record_id' => null,
+                ];
+            }
+        }
 
         return response([
             'date' => $dateKey,
@@ -83,13 +122,35 @@ class DailyShopReconciliationController extends Controller
                 'open_debt' => (float) ($metrics['open_debt'] ?? $metrics['uncollected_debts'] ?? 0),
             ],
             'accounts' => \App\Services\ShopSalesReportService::accountsBreakdown($metrics),
+            'shop_accounts' => $shopAccounts->map(fn ($a) => [
+                'id' => $a->id,
+                'name' => $a->name,
+                'sort_order' => (int) $a->sort_order,
+                'legacy_slot' => $a->legacy_slot,
+                'balance' => round((float) ($balances[$a->id] ?? 0), 2),
+            ])->values(),
+            'account_deposits' => $accountDeposits,
+            'deposit_cash' => $recon ? (float) $recon->deposit_cash : 0.0,
             'reconciliation' => $recon,
         ], 200);
     }
 
     /**
-     * ثبت / ویرایش واریز روز (تا ۳ روز قبل).
+     * ثبت / ویرایش واریز روز.
      * POST /api/daily-reconciliations
+     *
+     * فرمت جدید:
+     * {
+     *   "date": "2026-08-26",
+     *   "deposit_cash": 0,
+     *   "account_deposits": [
+     *     {"shop_account_id": 1, "amount": 1000000},
+     *     {"shop_account_id": 2, "amount": 500000}
+     *   ]
+     * }
+     *
+     * فرمت قدیمی (سازگار):
+     * { "date", "deposit_account_1", "deposit_account_2", "deposit_cash" }
      */
     public function store(Request $request)
     {
@@ -100,26 +161,43 @@ class DailyShopReconciliationController extends Controller
             ], 422);
         }
 
-        $fields = $request->validate([
+        $hasAccountDeposits = $request->has('account_deposits');
+
+        $rules = [
             'date' => 'required|date',
-            'deposit_account_1' => 'required|numeric|min:0',
-            'deposit_account_2' => 'required|numeric|min:0',
             'deposit_cash' => 'required|numeric|min:0',
             'notes' => 'nullable|string|max:2000',
-        ]);
+        ];
+
+        if ($hasAccountDeposits) {
+            $rules['account_deposits'] = 'required|array|min:1';
+            $rules['account_deposits.*.shop_account_id'] = 'required|integer|exists:shop_accounts,id';
+            $rules['account_deposits.*.amount'] = 'required|numeric|min:0';
+        } else {
+            $rules['deposit_account_1'] = 'required|numeric|min:0';
+            $rules['deposit_account_2'] = 'required|numeric|min:0';
+        }
+
+        $fields = $request->validate($rules);
 
         $user = $this->requireStaffShopUser($request);
         $dateKey = Carbon::parse($fields['date'])->setTimezone('Asia/Tehran')->format('Y-m-d');
+
+        $payload = [
+            'deposit_cash' => $fields['deposit_cash'],
+        ];
+        if ($hasAccountDeposits) {
+            $payload['account_deposits'] = $fields['account_deposits'];
+        } else {
+            $payload['deposit_account_1'] = $fields['deposit_account_1'];
+            $payload['deposit_account_2'] = $fields['deposit_account_2'];
+        }
 
         try {
             $recon = DailyShopReconciliationService::upsert(
                 $atelierId,
                 $dateKey,
-                [
-                    'deposit_account_1' => $fields['deposit_account_1'],
-                    'deposit_account_2' => $fields['deposit_account_2'],
-                    'deposit_cash' => $fields['deposit_cash'],
-                ],
+                $payload,
                 trim($user->name.' '.$user->last_name),
                 $fields['notes'] ?? null
             );
@@ -139,6 +217,7 @@ class DailyShopReconciliationController extends Controller
             'message' => 'تطبیق روز با موفقیت ثبت شد.',
             'reconciliation' => $recon,
             'row' => $row,
+            'shop_accounts' => $grid['shop_accounts'] ?? [],
         ], 201);
     }
 

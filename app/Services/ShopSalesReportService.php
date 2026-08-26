@@ -22,11 +22,20 @@ class ShopSalesReportService
     ): array {
         $startString = $startDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
         $endString = $endDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d H:i:s');
+        $startDay = $startDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d');
+        $endDay = $endDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d');
 
-        $purchases = Purchase::with(['purchasedProducts.product', 'installments', 'cheque'])
-            ->forAtelier($atelierId)
-            ->whereBetween('created_at', [$startString, $endString])
-            ->get();
+        $purchasesQuery = Purchase::with(['purchasedProducts', 'installments', 'cheque'])
+            ->forAtelier($atelierId);
+
+        // برای یک روز تقویمی، whereDate پایدارتر از whereBetween روی datetime است
+        if ($startDay === $endDay) {
+            $purchasesQuery->whereDate('created_at', $startDay);
+        } else {
+            $purchasesQuery->whereBetween('created_at', [$startString, $endString]);
+        }
+
+        $purchases = $purchasesQuery->get();
 
         $totalSales = 0.0;
         $totalPurchase = 0.0;
@@ -42,8 +51,8 @@ class ShopSalesReportService
         $chequePayments = 0.0;
 
         foreach ($purchases as $purchase) {
-            $lineSales = $purchase->remainingLineSalesTotal();
-            if ($lineSales <= 0) {
+            $invoiceSales = self::invoiceSalesAmount($purchase);
+            if ($invoiceSales <= 0) {
                 continue;
             }
 
@@ -55,12 +64,12 @@ class ShopSalesReportService
                 $totalSales += (float) $purchase->paid_amount + (float) $purchase->credit_used;
                 $totalPurchase += $lineCost;
             } elseif ($purchase->isDebt()) {
-                $totalSales += $lineSales;
+                $totalSales += $invoiceSales;
                 $totalPurchase += $lineCost;
             } elseif ($purchase->isCheque()) {
                 $saleAmount = (float) $purchase->total_amount;
                 if ($saleAmount <= 0) {
-                    $saleAmount = $lineSales;
+                    $saleAmount = $invoiceSales;
                 }
                 $chequeAmount = $purchase->chequeAmount();
                 if ($chequeAmount <= 0) {
@@ -71,7 +80,6 @@ class ShopSalesReportService
                     continue;
                 }
                 $paidFraction = min(1, max(0, $immediatePaid / $saleAmount));
-                $chequeFraction = min(1, max(0, $chequeAmount / $saleAmount));
 
                 // فروش واقعی همیشه ثبت می‌شود
                 $totalSales += $saleAmount;
@@ -86,14 +94,18 @@ class ShopSalesReportService
                     $chequePayments += $chequeAmount;
                 }
             } else {
-                $totalSales += (float) $purchase->total_amount;
+                $saleAmount = (float) $purchase->total_amount;
+                if ($saleAmount <= 0) {
+                    $saleAmount = $invoiceSales;
+                }
+                $totalSales += $saleAmount;
                 $totalPurchase += $lineCost;
             }
 
             $creditEarnedFromPurchases += (float) $purchase->credit_earned;
             $creditUsedTotal += (float) $purchase->credit_used;
 
-            [$card, $cash] = self::settlementForPurchase($purchase, $lineSales);
+            [$card, $cash] = self::settlementForPurchase($purchase, $invoiceSales);
             $cardAmount += $card;
             $cashAmount += $cash;
 
@@ -417,7 +429,7 @@ class ShopSalesReportService
      */
     public static function openChequeSalesAsOf(int $atelierId, Carbon $asOfDate): float
     {
-        if (! Schema::hasColumn('purchases', 'cheque_id')) {
+        if (! Schema::hasTable('cheques') || ! Schema::hasColumn('purchases', 'cheque_id')) {
             return 0.0;
         }
 
@@ -499,10 +511,29 @@ class ShopSalesReportService
 
     public static function salesAndProfitForDate(int $atelierId, Carbon $dateTehran): array
     {
-        $start = $dateTehran->copy()->setTimezone('Asia/Tehran')->startOfDay();
-        $end = $dateTehran->copy()->setTimezone('Asia/Tehran')->endOfDay();
+        $day = $dateTehran->copy()->setTimezone('Asia/Tehran');
+        $start = $day->copy()->startOfDay();
+        $end = $day->copy()->endOfDay();
 
         return self::salesAndProfitForRange($atelierId, $start, $end);
+    }
+
+    /**
+     * مبلغ فروش قابل‌اتکای یک فاکتور: اقلام خط، وگرنه total_amount، وگرنه نقد+کارت.
+     */
+    public static function invoiceSalesAmount(\App\Models\Purchase $purchase): float
+    {
+        $lineSales = $purchase->remainingLineSalesTotal();
+        if ($lineSales > 0) {
+            return $lineSales;
+        }
+
+        $total = (float) $purchase->total_amount;
+        if ($total > 0) {
+            return round($total, 2);
+        }
+
+        return round((float) $purchase->card_amount + (float) $purchase->cash_amount, 2);
     }
 
     /**

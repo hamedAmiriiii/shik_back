@@ -18,6 +18,7 @@ class Atelier extends Model
 
         static::created(function (Atelier $atelier) {
             Setting::ensureDefaultsForAtelier((int) $atelier->id);
+            ShopAccount::ensureDefaultsForAtelier((int) $atelier->id);
 
             if ($atelier->shop_access_starts_at === null && $atelier->shop_access_ends_at === null) {
                 $atelier->forceFill(static::trialAccessAttributes())->saveQuietly();

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Morilog\Jalali\Jalalian;
 
 class DailyShopReconciliation extends Model
@@ -71,5 +72,10 @@ class DailyShopReconciliation extends Model
     public function depositRecordCash(): BelongsTo
     {
         return $this->belongsTo(DailyShopReconciliationDeposit::class, 'deposit_record_cash_id');
+    }
+
+    public function accountDeposits(): HasMany
+    {
+        return $this->hasMany(DailyShopReconciliationAccountDeposit::class, 'reconciliation_id');
     }
 }

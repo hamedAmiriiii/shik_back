@@ -10,6 +10,7 @@ class DailyShopReconciliationDeposit extends Model
 {
     protected $fillable = [
         'atelier_id',
+        'shop_account_id',
         'amount',
         'title',
         'description',
@@ -30,5 +31,10 @@ class DailyShopReconciliationDeposit extends Model
     public function atelier(): BelongsTo
     {
         return $this->belongsTo(Atelier::class);
+    }
+
+    public function shopAccount(): BelongsTo
+    {
+        return $this->belongsTo(ShopAccount::class, 'shop_account_id');
     }
 }
