@@ -439,6 +439,9 @@ class RawMaterialFifoService
             $production->cost_per_kg = round($totalCost / $quantityKg, 2);
             $production->save();
 
+            $good->refresh();
+            $good->syncSalePriceFromCost((float) $production->cost_per_kg);
+
             return $production->load(['consumptions.rawMaterial', 'producedGood']);
         });
     }

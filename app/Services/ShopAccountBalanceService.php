@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\DailyShopReconciliationAccountDeposit;
 use App\Models\Expense;
 use App\Models\Invoice;
+use App\Models\ManualTrade;
 use App\Models\ShopAccount;
 use App\Models\ShopAccountTransfer;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +39,8 @@ class ShopAccountBalanceService
                 'transfers_out' => 0.0,
                 'expenses' => 0.0,
                 'invoices' => 0.0,
+                'manual_purchases' => 0.0,
+                'manual_sales' => 0.0,
                 'balance' => 0.0,
             ];
         }
@@ -72,10 +75,22 @@ class ShopAccountBalanceService
             }
         }
 
+        foreach (self::tradeTotals($atelierId, $accountIds, ManualTrade::TYPE_PURCHASE) as $id => $total) {
+            if (isset($result[$id])) {
+                $result[$id]['manual_purchases'] = $total;
+            }
+        }
+
+        foreach (self::tradeTotals($atelierId, $accountIds, ManualTrade::TYPE_SALE) as $id => $total) {
+            if (isset($result[$id])) {
+                $result[$id]['manual_sales'] = $total;
+            }
+        }
+
         foreach ($result as $id => $row) {
             $result[$id]['balance'] = round(
-                $row['deposits'] + $row['transfers_in']
-                    - $row['transfers_out'] - $row['expenses'] - $row['invoices'],
+                $row['deposits'] + $row['transfers_in'] + $row['manual_sales']
+                    - $row['transfers_out'] - $row['expenses'] - $row['invoices'] - $row['manual_purchases'],
                 2
             );
         }
@@ -205,6 +220,27 @@ class ShopAccountBalanceService
 
         return $model::query()
             ->where('atelier_id', $atelierId)
+            ->whereIn('shop_account_id', $accountIds)
+            ->selectRaw('shop_account_id, SUM(amount) as total')
+            ->groupBy('shop_account_id')
+            ->pluck('total', 'shop_account_id')
+            ->mapWithKeys(fn ($v, $k) => [(int) $k => (float) $v])
+            ->all();
+    }
+
+    /**
+     * @param  array<int>  $accountIds
+     * @return array<int, float>
+     */
+    protected static function tradeTotals(int $atelierId, array $accountIds, string $type): array
+    {
+        if (! ManualTrade::tableReady() || ! Schema::hasColumn('manual_trades', 'shop_account_id')) {
+            return [];
+        }
+
+        return ManualTrade::query()
+            ->where('atelier_id', $atelierId)
+            ->where('type', $type)
             ->whereIn('shop_account_id', $accountIds)
             ->selectRaw('shop_account_id, SUM(amount) as total')
             ->groupBy('shop_account_id')

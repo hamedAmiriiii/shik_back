@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS `produced_goods` (
     `atelier_id` BIGINT UNSIGNED NOT NULL,
     `name` VARCHAR(255) NOT NULL,
     `sale_price` DECIMAL(15,2) NOT NULL DEFAULT 0,
+    `markup_percent` DECIMAL(8,2) NULL,
+    `round_sale_price` TINYINT(1) NOT NULL DEFAULT 0,
     `note` TEXT NULL,
     `created_at` TIMESTAMP NULL,
     `updated_at` TIMESTAMP NULL,

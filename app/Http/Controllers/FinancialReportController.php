@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Expense;
 use App\Models\Income;
 use App\Models\Invoice;
+use App\Models\ManualTrade;
 use App\Models\Purchase;
 use App\Services\ShopSalesReportService;
 use Illuminate\Http\Request;
@@ -63,6 +64,9 @@ class FinancialReportController extends Controller
                 $firstExpenseDate = Expense::where('atelier_id', $atelierId)->min('date');
                 $firstInvoiceDate = Invoice::where('atelier_id', $atelierId)->min('date');
                 $firstIncomeDate = Income::where('atelier_id', $atelierId)->min('date');
+                $firstTradeDate = ManualTrade::tableReady()
+                    ? ManualTrade::where('atelier_id', $atelierId)->min('date')
+                    : null;
                 
                 // تبدیل تاریخ‌های expense و invoice به Carbon (اگر وجود داشته باشند)
                 $dates = [];
@@ -77,6 +81,9 @@ class FinancialReportController extends Controller
                 }
                 if ($firstIncomeDate) {
                     $dates[] = Carbon::parse($firstIncomeDate);
+                }
+                if ($firstTradeDate) {
+                    $dates[] = Carbon::parse($firstTradeDate);
                 }
                 
                 // اگر داده‌ای وجود داشت، از اولین تاریخ شروع می‌کنیم
@@ -113,6 +120,8 @@ class FinancialReportController extends Controller
             'total_expenses' => 0,
             'total_incomes' => 0,
             'total_invoices' => 0,
+            'total_manual_purchases' => 0,
+            'total_manual_sales' => 0,
             'total_net_profit' => 0,
             'total_account_balance' => 0,
             'total_credit_granted' => 0,
@@ -145,6 +154,8 @@ class FinancialReportController extends Controller
             $totals['total_expenses'] += $monthData['total_expenses'];
             $totals['total_incomes'] += $monthData['total_incomes'];
             $totals['total_invoices'] += $monthData['total_invoices'];
+            $totals['total_manual_purchases'] += $monthData['total_manual_purchases'];
+            $totals['total_manual_sales'] += $monthData['total_manual_sales'];
             $totals['total_net_profit'] += $monthData['net_profit'];
             $totals['total_account_balance'] += $monthData['account_balance'];
             $totals['total_credit_granted'] += $monthData['total_credit_granted'];
@@ -349,7 +360,15 @@ class FinancialReportController extends Controller
                 ->sum('amount');
         }
 
-        $incomesForBalance = (float) $totalIncomes - $saleLinkedIncomes;
+        $from = $start->format('Y-m-d');
+        $to = $end->format('Y-m-d');
+
+        $manualPurchases = ManualTrade::sumAmount($atelierId, ManualTrade::TYPE_PURCHASE, $from, $to);
+        $manualSales = ManualTrade::sumAmount($atelierId, ManualTrade::TYPE_SALE, $from, $to);
+
+        $incomesForBalance = (float) $totalIncomes - $saleLinkedIncomes + $manualSales;
+        $totalIncomes = (float) $totalIncomes + $manualSales;
+        $totalExpenses = (float) $totalExpenses + $manualPurchases;
         $chequePayments = (float) ($metrics['cheque_payments'] ?? 0);
         $openCheques = (float) ($metrics['open_cheques'] ?? 0);
 
@@ -376,6 +395,8 @@ class FinancialReportController extends Controller
             'total_expenses' => round($totalExpenses, 2),
             'total_incomes' => round($totalIncomes, 2),
             'total_invoices' => round($totalInvoices, 2),
+            'total_manual_purchases' => round($manualPurchases, 2),
+            'total_manual_sales' => round($manualSales, 2),
             'net_profit' => round($netProfit, 2),
             'account_balance' => round($accountBalance, 2),
             'open_cheques' => round($openCheques, 2),

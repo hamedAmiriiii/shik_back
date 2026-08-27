@@ -160,6 +160,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     
     // Invoice routes - require authentication
     Route::resource('invoices', \App\Http\Controllers\InvoiceController::class);
+    Route::resource('manual-trades', \App\Http\Controllers\ManualTradeController::class)->except(['create', 'edit']);
     
     // SMS Logs routes - require authentication
     Route::prefix('sms-logs')->name('sms-logs.')->group(function () {

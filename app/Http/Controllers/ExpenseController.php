@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Expense;
+use App\Models\ManualTrade;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -237,10 +238,15 @@ class ExpenseController extends Controller
         ->orderBy('user_name')
         ->get();
 
+        $totalManualPurchases = ManualTrade::sumAmount($atelierId, ManualTrade::TYPE_PURCHASE);
+        $totalManualSales = ManualTrade::sumAmount($atelierId, ManualTrade::TYPE_SALE);
+
         return response([
-            'total_expenses' => (float) $totalExpenses,
-            'total_current_expenses' => (float) $totalCurrentExpenses,
+            'total_expenses' => (float) $totalExpenses + $totalManualPurchases,
+            'total_current_expenses' => (float) $totalCurrentExpenses + $totalManualPurchases,
             'total_capital_expenses' => (float) $totalCapitalExpenses,
+            'total_manual_purchases' => $totalManualPurchases,
+            'total_manual_sales' => $totalManualSales,
             'expenses_by_user' => $expensesByUser,
             'meta' => ['atelier_id' => $atelierId],
         ], 200);

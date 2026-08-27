@@ -7,6 +7,7 @@ use App\Models\Production;
 use App\Models\RawMaterial;
 use App\Services\ProducedGoodCostService;
 use App\Services\RawMaterialFifoService;
+use App\Tools\PriceTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -72,12 +73,15 @@ class ProducedGoodController extends Controller
 
         $fields = $this->validatedGood($request, $atelierId);
         $this->assertIngredientsBelongToShop($fields['ingredients'] ?? [], $atelierId);
+        $pricing = $this->pricingFromFields($fields);
 
-        $good = DB::transaction(function () use ($atelierId, $fields) {
+        $good = DB::transaction(function () use ($atelierId, $fields, $pricing) {
             $good = ProducedGood::create([
                 'atelier_id' => $atelierId,
                 'name' => $fields['name'],
-                'sale_price' => $fields['sale_price'] ?? 0,
+                'sale_price' => $pricing['sale_price'],
+                'markup_percent' => $pricing['markup_percent'],
+                'round_sale_price' => $this->boolField($fields, 'round_sale_price', false),
                 'note' => $fields['note'] ?? null,
             ]);
             $this->syncIngredients($good, $fields['ingredients'] ?? []);
@@ -85,7 +89,10 @@ class ProducedGoodController extends Controller
             return $good;
         });
 
-        return response($costService->attachCost($good->load('ingredients.rawMaterial')), 201);
+        $good = $costService->attachCost($good->load('ingredients.rawMaterial'));
+        $good->syncSalePriceFromCost((float) $good->cost_per_kg);
+
+        return response($costService->attachCost($good), 201);
     }
 
     public function show(Request $request, ProducedGood $producedGood, ProducedGoodCostService $costService)
@@ -119,11 +126,16 @@ class ProducedGoodController extends Controller
             if (array_key_exists('name', $fields)) {
                 $payload['name'] = $fields['name'];
             }
-            if (array_key_exists('sale_price', $fields)) {
-                $payload['sale_price'] = $fields['sale_price'];
-            }
             if (array_key_exists('note', $fields)) {
                 $payload['note'] = $fields['note'];
+            }
+            if (array_key_exists('round_sale_price', $fields)) {
+                $payload['round_sale_price'] = $this->boolField($fields, 'round_sale_price', false);
+            }
+            if (array_key_exists('markup_percent', $fields) || array_key_exists('sale_price', $fields)) {
+                $pricing = $this->pricingFromFields($fields, $producedGood);
+                $payload['sale_price'] = $pricing['sale_price'];
+                $payload['markup_percent'] = $pricing['markup_percent'];
             }
             if ($payload) {
                 $producedGood->update($payload);
@@ -134,10 +146,17 @@ class ProducedGoodController extends Controller
             }
         });
 
-        return response(
-            $costService->attachCost($producedGood->fresh()->load('ingredients.rawMaterial')),
-            200
-        );
+        $good = $costService->attachCost($producedGood->fresh()->load('ingredients.rawMaterial'));
+        if (array_key_exists('markup_percent', $fields) && $good->usesMarkup()) {
+            $good->syncSalePriceFromCost((float) $good->cost_per_kg);
+            $good = $costService->attachCost($good);
+        } elseif (array_key_exists('round_sale_price', $fields) || array_key_exists('sale_price', $fields)) {
+            if ($good->syncRoundedSalePrice()) {
+                $good = $costService->attachCost($good);
+            }
+        }
+
+        return response($good, 200);
     }
 
     public function destroy(Request $request, ProducedGood $producedGood)
@@ -233,6 +252,12 @@ class ProducedGoodController extends Controller
             'can_reverse' => round((float) $production->remaining_kg, 3) === round((float) $production->quantity_kg, 3),
             'total_cost' => (float) $production->total_cost,
             'cost_per_kg' => (float) $production->cost_per_kg,
+            'sale_price' => (float) optional($production->producedGood)->sale_price,
+            'markup_percent' => optional($production->producedGood)->markup_percent !== null
+                ? (float) $production->producedGood->markup_percent
+                : null,
+            'sale_price_mode' => optional($production->producedGood)->sale_price_mode,
+            'round_sale_price' => (bool) optional($production->producedGood)->round_sale_price,
             'note' => $production->note,
             'created_at' => optional($production->created_at)->toDateTimeString(),
             'consumptions' => $production->consumptions->map(function ($row) {
@@ -265,11 +290,68 @@ class ProducedGoodController extends Controller
         return $request->validate([
             'name' => $nameRule,
             'sale_price' => 'nullable|numeric|min:0',
+            'markup_percent' => 'nullable|numeric|min:0|max:9999',
+            'round_sale_price' => 'sometimes|boolean',
             'note' => 'nullable|string',
             'ingredients' => $ingredientsRule,
             'ingredients.*.raw_material_id' => 'required|integer',
             'ingredients.*.grams_per_kg' => 'required|numeric|min:0.001',
         ]);
+    }
+
+    /**
+     * درصد پر باشد → حالت خودکار. فقط قیمت فروش → حالت دستی.
+     *
+     * @return array{sale_price: float, markup_percent: float|null}
+     */
+    private function pricingFromFields(array $fields, ?ProducedGood $existing = null): array
+    {
+        $hasMarkup = array_key_exists('markup_percent', $fields);
+        $hasSale = array_key_exists('sale_price', $fields);
+        $currentSale = $existing ? (float) $existing->sale_price : 0.0;
+        $currentMarkup = $existing ? $existing->markup_percent : null;
+        $round = $this->boolField(
+            $fields,
+            'round_sale_price',
+            $existing ? (bool) $existing->round_sale_price : false
+        );
+
+        if ($hasMarkup && $fields['markup_percent'] !== null && $fields['markup_percent'] !== '') {
+            $sale = $hasSale ? round((float) $fields['sale_price'], 2) : $currentSale;
+
+            return [
+                'markup_percent' => round((float) $fields['markup_percent'], 2),
+                'sale_price' => $round ? PriceTools::roundSalePrice($sale) : $sale,
+            ];
+        }
+
+        if ($hasMarkup || $hasSale) {
+            $sale = $hasSale ? round((float) $fields['sale_price'], 2) : $currentSale;
+
+            return [
+                'markup_percent' => null,
+                'sale_price' => $round ? PriceTools::roundSalePrice($sale) : $sale,
+            ];
+        }
+
+        return [
+            'markup_percent' => $currentMarkup,
+            'sale_price' => $round ? PriceTools::roundSalePrice($currentSale) : $currentSale,
+        ];
+    }
+
+    private function boolField(array $fields, string $key, bool $default): bool
+    {
+        if (! array_key_exists($key, $fields)) {
+            return $default;
+        }
+
+        $value = $fields[$key];
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 
     private function assertIngredientsBelongToShop(array $ingredients, int $atelierId): void

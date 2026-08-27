@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Atelier;
 use App\Models\Expense;
+use App\Models\ManualTrade;
 use App\Models\Product;
 use App\Services\ShopSalesReportService;
 use Carbon\Carbon;
@@ -140,10 +141,15 @@ class ReportController extends Controller
             ->orderBy('user_name')
             ->get();
 
+        $totalManualPurchases = ManualTrade::sumAmount($atelierId, ManualTrade::TYPE_PURCHASE);
+        $totalManualSales = ManualTrade::sumAmount($atelierId, ManualTrade::TYPE_SALE);
+
         return [
-            'total_expenses' => (float) $totalExpenses,
-            'total_current_expenses' => (float) $totalCurrentExpenses,
+            'total_expenses' => (float) $totalExpenses + $totalManualPurchases,
+            'total_current_expenses' => (float) $totalCurrentExpenses + $totalManualPurchases,
             'total_capital_expenses' => (float) $totalCapitalExpenses,
+            'total_manual_purchases' => $totalManualPurchases,
+            'total_manual_sales' => $totalManualSales,
             'expenses_by_user' => $expensesByUser,
         ];
     }
