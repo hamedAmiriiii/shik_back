@@ -45,7 +45,7 @@ class ProducedGoodController extends Controller
 
         $attach = function ($goods) use ($costService) {
             return $goods->each(function (ProducedGood $good) use ($costService) {
-                $costService->attachCost($good);
+                $costService->attachCost($good, 1.0, true);
             });
         };
 
@@ -177,6 +177,25 @@ class ProducedGoodController extends Controller
         return response($this->serializeProduction($production), 201);
     }
 
+    public function destroyProduction(Request $request, ProducedGood $producedGood, Production $production, RawMaterialFifoService $fifo)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $producedGood);
+        if ((int) $production->produced_good_id !== (int) $producedGood->id
+            || (int) $production->atelier_id !== (int) $producedGood->atelier_id) {
+            return response(['message' => 'یافت نشد'], 404);
+        }
+
+        try {
+            $fifo->reverseProduction($production);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'message' => 'تولید برگشت خورد و موجودی مواد اولیه بازگردانده شد.',
+        ], 200);
+    }
+
     public function productions(Request $request, ProducedGood $producedGood)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
@@ -209,6 +228,9 @@ class ProducedGoodController extends Controller
             'produced_good_id' => $production->produced_good_id,
             'produced_good_name' => optional($production->producedGood)->name,
             'quantity_kg' => (float) $production->quantity_kg,
+            'remaining_kg' => (float) $production->remaining_kg,
+            'sold_kg' => round((float) $production->quantity_kg - (float) $production->remaining_kg, 3),
+            'can_reverse' => round((float) $production->remaining_kg, 3) === round((float) $production->quantity_kg, 3),
             'total_cost' => (float) $production->total_cost,
             'cost_per_kg' => (float) $production->cost_per_kg,
             'note' => $production->note,

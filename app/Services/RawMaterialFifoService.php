@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\ProducedGood;
 use App\Models\Production;
+use App\Models\ProductionConsumption;
+use App\Models\PurchaseStockConsumption;
 use App\Models\RawMaterial;
 use App\Models\RawMaterialLot;
 use Illuminate\Support\Facades\DB;
@@ -102,10 +104,56 @@ class RawMaterialFifoService
         return $material;
     }
 
-    public function attachFifoCost(ProducedGood $good, float $quantityKg = 1.0): ProducedGood
+    public function attachFifoCost(ProducedGood $good, float $quantityKg = 1.0, bool $preferInventoryCost = false): ProducedGood
     {
         $good->loadMissing('ingredients.rawMaterial');
 
+        $preview = $this->recipeCostPreview($good, $quantityKg);
+        $stockKg = round((float) Production::where('produced_good_id', $good->id)->sum('remaining_kg'), 3);
+
+        $total = $preview['total'];
+        $lines = $preview['lines'];
+
+        if ($preferInventoryCost && $stockKg > 0) {
+            $inventory = $this->remainingInventoryCost($good, $quantityKg);
+            if ($inventory['cost_per_kg'] !== null) {
+                $total = $inventory['total'];
+                $lines = $this->overlayInventoryOnRecipeLines(
+                    $preview['lines'],
+                    $inventory['by_material'],
+                    $quantityKg
+                );
+            }
+        }
+
+        $qty = $quantityKg > 0 ? $quantityKg : 1;
+        $costPerKg = round($total / $qty, 2);
+        $salePrice = round((float) $good->sale_price, 2);
+        $profitPerKg = round($salePrice - $costPerKg, 2);
+
+        $good->setAttribute('quantity_kg', $quantityKg);
+        $good->setAttribute('total_cost', round($total, 2));
+        $good->setAttribute('cost_per_kg', $costPerKg);
+        $good->setAttribute('sale_price', $salePrice);
+        $good->setAttribute('profit_per_kg', $profitPerKg);
+        $good->setAttribute(
+            'profit_percent',
+            $costPerKg > 0 ? round(($profitPerKg / $costPerKg) * 100, 2) : null
+        );
+        $good->setAttribute('stock_kg', $stockKg);
+        $good->setAttribute('ingredient_costs', $lines);
+        $good->setAttribute('stock_sufficient', $preview['sufficient']);
+        $good->setAttribute('shortages', $preview['shortages']);
+        $good->makeHidden('ingredients');
+
+        return $good;
+    }
+
+    /**
+     * پیش‌نمایش هزینه فرمول. کمبود موجودی با آخرین قیمت لات برآورد می‌شود، نه صفر.
+     */
+    private function recipeCostPreview(ProducedGood $good, float $quantityKg): array
+    {
         $lines = [];
         $total = 0.0;
         $shortages = [];
@@ -144,40 +192,180 @@ class RawMaterialFifoService
                 ];
             }, $plan['slices']);
 
-            $total += $plan['cost'];
+            $cost = $plan['cost'];
+            if ($plan['shortage_kg'] > 0 && $material) {
+                $lastPrice = $this->lastPricePerKg($material);
+                if ($lastPrice !== null) {
+                    $estimated = round($plan['shortage_kg'] * $lastPrice, 2);
+                    $cost = round($cost + $estimated, 2);
+                    $slicePayload[] = [
+                        'lot_id' => null,
+                        'quantity_kg' => $plan['shortage_kg'],
+                        'price_per_kg' => $lastPrice,
+                        'cost' => $estimated,
+                        'estimated' => true,
+                    ];
+                }
+            }
+
+            $total += $cost;
             $lines[] = [
                 'id' => $line->id,
                 'raw_material_id' => $line->raw_material_id,
                 'name' => $material ? $material->name : null,
                 'grams_per_kg' => $grams,
                 'needed_kg' => $needKg,
-                'cost' => $plan['cost'],
+                'cost' => $cost,
                 'lots' => $slicePayload,
                 'shortage_kg' => $plan['shortage_kg'],
             ];
         }
 
+        return [
+            'lines' => $lines,
+            'total' => round($total, 2),
+            'shortages' => $shortages,
+            'sufficient' => $sufficient,
+        ];
+    }
+
+    /**
+     * آخرین قیمت خرید ماده اولیه، حتی اگر موجودی لات صفر شده باشد.
+     */
+    private function lastPricePerKg(RawMaterial $material): ?float
+    {
+        $lot = RawMaterialLot::query()
+            ->where('raw_material_id', $material->id)
+            ->orderByDesc('purchased_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $lot) {
+            return null;
+        }
+
+        return (float) $lot->price_per_kg;
+    }
+
+    /**
+     * هزینه واقعی موجودی تولیدشده (میانگین وزنی بچ‌های باقی‌مانده).
+     */
+    private function remainingInventoryCost(ProducedGood $good, float $quantityKg): array
+    {
+        $productions = Production::query()
+            ->where('produced_good_id', $good->id)
+            ->where('remaining_kg', '>', 0)
+            ->with(['consumptions.rawMaterial'])
+            ->orderBy('id')
+            ->get();
+
+        $stockKg = round((float) $productions->sum('remaining_kg'), 3);
+        if ($stockKg <= 0) {
+            return [
+                'cost_per_kg' => null,
+                'total' => 0.0,
+                'by_material' => [],
+            ];
+        }
+
+        $weightedCost = 0.0;
+        $byMaterial = [];
+
+        foreach ($productions as $production) {
+            $batchKg = (float) $production->quantity_kg;
+            $remaining = (float) $production->remaining_kg;
+            if ($batchKg <= 0 || $remaining <= 0) {
+                continue;
+            }
+
+            $weightedCost += $remaining * (float) $production->cost_per_kg;
+            $weight = $remaining / $stockKg;
+
+            foreach ($production->consumptions as $consumption) {
+                $mid = (int) $consumption->raw_material_id;
+                if (! isset($byMaterial[$mid])) {
+                    $byMaterial[$mid] = [
+                        'raw_material_id' => $mid,
+                        'name' => optional($consumption->rawMaterial)->name,
+                        'qty_per_kg' => 0.0,
+                        'cost_per_kg' => 0.0,
+                        'lots' => [],
+                    ];
+                }
+
+                $qtyPerKg = ((float) $consumption->quantity_kg) / $batchKg;
+                $costPerKg = ((float) $consumption->cost) / $batchKg;
+
+                $byMaterial[$mid]['qty_per_kg'] += $qtyPerKg * $weight;
+                $byMaterial[$mid]['cost_per_kg'] += $costPerKg * $weight;
+                $byMaterial[$mid]['lots'][] = [
+                    'lot_id' => $consumption->raw_material_lot_id,
+                    'quantity_kg_per_kg' => $qtyPerKg * $weight,
+                    'price_per_kg' => (float) $consumption->price_per_kg,
+                    'cost_per_kg' => $costPerKg * $weight,
+                ];
+            }
+        }
+
+        $costPerKg = round($weightedCost / $stockKg, 2);
         $qty = $quantityKg > 0 ? $quantityKg : 1;
-        $costPerKg = round($total / $qty, 2);
-        $salePrice = round((float) $good->sale_price, 2);
-        $profitPerKg = round($salePrice - $costPerKg, 2);
 
-        $good->setAttribute('quantity_kg', $quantityKg);
-        $good->setAttribute('total_cost', round($total, 2));
-        $good->setAttribute('cost_per_kg', $costPerKg);
-        $good->setAttribute('sale_price', $salePrice);
-        $good->setAttribute('profit_per_kg', $profitPerKg);
-        $good->setAttribute(
-            'profit_percent',
-            $costPerKg > 0 ? round(($profitPerKg / $costPerKg) * 100, 2) : null
-        );
-        $good->setAttribute('stock_kg', round((float) Production::where('produced_good_id', $good->id)->sum('remaining_kg'), 3));
-        $good->setAttribute('ingredient_costs', $lines);
-        $good->setAttribute('stock_sufficient', $sufficient);
-        $good->setAttribute('shortages', $shortages);
-        $good->makeHidden('ingredients');
+        return [
+            'cost_per_kg' => $costPerKg,
+            'total' => round($costPerKg * $qty, 2),
+            'by_material' => $byMaterial,
+        ];
+    }
 
-        return $good;
+    private function overlayInventoryOnRecipeLines(array $recipeLines, array $byMaterial, float $quantityKg): array
+    {
+        $qty = $quantityKg > 0 ? $quantityKg : 1;
+        $used = [];
+
+        $scaleLots = function (array $inv) use ($qty) {
+            return array_map(function ($lot) use ($qty) {
+                return [
+                    'lot_id' => $lot['lot_id'],
+                    'quantity_kg' => round($lot['quantity_kg_per_kg'] * $qty, 3),
+                    'price_per_kg' => $lot['price_per_kg'],
+                    'cost' => round($lot['cost_per_kg'] * $qty, 2),
+                ];
+            }, $inv['lots']);
+        };
+
+        $lines = array_map(function ($line) use ($byMaterial, $qty, $scaleLots, &$used) {
+            $mid = (int) $line['raw_material_id'];
+            $used[$mid] = true;
+            if (! isset($byMaterial[$mid])) {
+                return $line;
+            }
+
+            $inv = $byMaterial[$mid];
+            $line['needed_kg'] = round($inv['qty_per_kg'] * $qty, 3);
+            $line['cost'] = round($inv['cost_per_kg'] * $qty, 2);
+            $line['lots'] = $scaleLots($inv);
+
+            return $line;
+        }, $recipeLines);
+
+        foreach ($byMaterial as $mid => $inv) {
+            if (isset($used[$mid])) {
+                continue;
+            }
+
+            $lines[] = [
+                'id' => null,
+                'raw_material_id' => $mid,
+                'name' => $inv['name'],
+                'grams_per_kg' => round($inv['qty_per_kg'] * 1000, 3),
+                'needed_kg' => round($inv['qty_per_kg'] * $qty, 3),
+                'cost' => round($inv['cost_per_kg'] * $qty, 2),
+                'lots' => $scaleLots($inv),
+                'shortage_kg' => 0,
+            ];
+        }
+
+        return $lines;
     }
 
     /**
@@ -253,5 +441,131 @@ class RawMaterialFifoService
 
             return $production->load(['consumptions.rawMaterial', 'producedGood']);
         });
+    }
+
+    /**
+     * برگشت تولید فروش‌نشده: مواد اولیه به لات‌ها برمی‌گردد و رکورد تولید حذف می‌شود.
+     */
+    public function reverseProduction(Production $production): void
+    {
+        DB::transaction(function () use ($production) {
+            /** @var Production|null $locked */
+            $locked = Production::query()->where('id', $production->id)->lockForUpdate()->first();
+            if (! $locked) {
+                throw new RuntimeException('تولید یافت نشد.');
+            }
+
+            $qty = round((float) $locked->quantity_kg, 3);
+            $remaining = round((float) $locked->remaining_kg, 3);
+            if ($remaining !== $qty) {
+                throw new RuntimeException(
+                    'بخشی از این تولید فروخته شده و قابل برگشت نیست. ابتدا فروش را برگشت بزنید یا قیمت خرید ماده اولیه را اصلاح کنید.'
+                );
+            }
+
+            $activeSale = PurchaseStockConsumption::query()
+                ->where('production_id', $locked->id)
+                ->whereRaw('quantity_kg > restored_kg')
+                ->lockForUpdate()
+                ->exists();
+            if ($activeSale) {
+                throw new RuntimeException(
+                    'این تولید در فروش استفاده شده و قابل برگشت نیست. ابتدا فروش را برگشت بزنید یا قیمت خرید ماده اولیه را اصلاح کنید.'
+                );
+            }
+
+            $locked->load('consumptions');
+            $lotIds = $locked->consumptions->pluck('raw_material_lot_id')->unique()->filter()->values();
+            $lots = RawMaterialLot::query()
+                ->whereIn('id', $lotIds)
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            foreach ($locked->consumptions as $row) {
+                $lot = $lots->get($row->raw_material_lot_id);
+                if (! $lot) {
+                    throw new RuntimeException('لات ماده اولیه یافت نشد.');
+                }
+                $lot->remaining_kg = round((float) $lot->remaining_kg + (float) $row->quantity_kg, 3);
+                $lot->save();
+            }
+
+            $locked->consumptions()->delete();
+            $locked->delete();
+        });
+    }
+
+    /**
+     * اصلاح قیمت/اطلاعات لات. اگر در تولید مصرف شده باشد، هزینه همان تولیدها هم به‌روز می‌شود.
+     */
+    public function updateLot(RawMaterialLot $lot, array $fields): RawMaterialLot
+    {
+        return DB::transaction(function () use ($lot, $fields) {
+            /** @var RawMaterialLot|null $locked */
+            $locked = RawMaterialLot::query()->where('id', $lot->id)->lockForUpdate()->first();
+            if (! $locked) {
+                throw new RuntimeException('لات یافت نشد.');
+            }
+
+            $priceChanged = false;
+            if (array_key_exists('price_per_kg', $fields) && $fields['price_per_kg'] !== null) {
+                $newPrice = round((float) $fields['price_per_kg'], 2);
+                if ($newPrice !== round((float) $locked->price_per_kg, 2)) {
+                    $priceChanged = true;
+                    $locked->price_per_kg = $newPrice;
+                }
+            }
+            if (array_key_exists('note', $fields)) {
+                $locked->note = $fields['note'];
+            }
+            if (array_key_exists('purchased_at', $fields)) {
+                $locked->purchased_at = $fields['purchased_at'];
+            }
+
+            $locked->save();
+
+            if ($priceChanged) {
+                $this->recalculateProductionsForLot($locked);
+            }
+
+            return $locked->fresh();
+        });
+    }
+
+    private function recalculateProductionsForLot(RawMaterialLot $lot): void
+    {
+        $price = (float) $lot->price_per_kg;
+        $consumptions = ProductionConsumption::query()
+            ->where('raw_material_lot_id', $lot->id)
+            ->lockForUpdate()
+            ->get();
+
+        $productionIds = [];
+        foreach ($consumptions as $row) {
+            $row->price_per_kg = $price;
+            $row->cost = round((float) $row->quantity_kg * $price, 2);
+            $row->save();
+            $productionIds[] = (int) $row->production_id;
+        }
+
+        $productionIds = array_values(array_unique($productionIds));
+        if (count($productionIds) === 0) {
+            return;
+        }
+
+        $productions = Production::query()
+            ->whereIn('id', $productionIds)
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($productions as $production) {
+            $production->load('consumptions');
+            $total = round((float) $production->consumptions->sum('cost'), 2);
+            $qty = (float) $production->quantity_kg;
+            $production->total_cost = $total;
+            $production->cost_per_kg = $qty > 0 ? round($total / $qty, 2) : 0;
+            $production->save();
+        }
     }
 }

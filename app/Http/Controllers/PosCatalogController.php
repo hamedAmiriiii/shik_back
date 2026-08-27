@@ -35,7 +35,7 @@ class PosCatalogController extends Controller
                 ->orderBy('name')
                 ->get()
                 ->each(function (ProducedGood $good) use ($costService) {
-                    $costService->attachCost($good);
+                    $costService->attachCost($good, 1.0, true);
                 })
                 ->map(function (ProducedGood $good) {
                     return [

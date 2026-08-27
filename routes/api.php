@@ -141,10 +141,12 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('pos-catalog', [\App\Http\Controllers\PosCatalogController::class, 'index']);
     Route::resource('raw-materials', \App\Http\Controllers\RawMaterialController::class)->except(['create', 'edit']);
     Route::post('raw-materials/{rawMaterial}/lots', [\App\Http\Controllers\RawMaterialController::class, 'storeLot']);
+    Route::put('raw-materials/{rawMaterial}/lots/{lot}', [\App\Http\Controllers\RawMaterialController::class, 'updateLot']);
     Route::delete('raw-materials/{rawMaterial}/lots/{lot}', [\App\Http\Controllers\RawMaterialController::class, 'destroyLot']);
     Route::resource('produced-goods', \App\Http\Controllers\ProducedGoodController::class)->except(['create', 'edit']);
     Route::post('produced-goods/{producedGood}/produce', [\App\Http\Controllers\ProducedGoodController::class, 'produce']);
     Route::get('produced-goods/{producedGood}/productions', [\App\Http\Controllers\ProducedGoodController::class, 'productions']);
+    Route::delete('produced-goods/{producedGood}/productions/{production}', [\App\Http\Controllers\ProducedGoodController::class, 'destroyProduction']);
     Route::resource('shop-employees', \App\Http\Controllers\ShopEmployeeController::class);
     Route::get('employee-payrolls', [\App\Http\Controllers\EmployeePayrollController::class, 'index']);
     Route::post('employee-payrolls', [\App\Http\Controllers\EmployeePayrollController::class, 'store']);

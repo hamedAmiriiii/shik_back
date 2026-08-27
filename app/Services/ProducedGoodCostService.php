@@ -15,9 +15,9 @@ class ProducedGoodCostService
         $this->fifo = $fifo;
     }
 
-    public function attachCost(ProducedGood $good, float $quantityKg = 1.0): ProducedGood
+    public function attachCost(ProducedGood $good, float $quantityKg = 1.0, bool $preferInventoryCost = false): ProducedGood
     {
-        return $this->fifo->attachFifoCost($good, $quantityKg);
+        return $this->fifo->attachFifoCost($good, $quantityKg, $preferInventoryCost);
     }
 
     public function goodsUsingMaterial(RawMaterial $material)

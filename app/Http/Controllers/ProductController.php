@@ -1051,7 +1051,7 @@ class ProductController extends Controller
         $costService = app(ProducedGoodCostService::class);
 
         return $query->get()->map(function (ProducedGood $good) use ($costService) {
-            $costService->attachCost($good);
+            $costService->attachCost($good, 1.0, true);
 
             return [
                 'id' => $good->id,

@@ -11,6 +11,7 @@ use App\Services\RawMaterialFifoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
+use RuntimeException;
 
 class RawMaterialController extends Controller
 {
@@ -195,6 +196,30 @@ class RawMaterialController extends Controller
         }
 
         $lot->delete();
+
+        return response($fifo->attachStock($rawMaterial->load('lots')), 200);
+    }
+
+    public function updateLot(Request $request, RawMaterial $rawMaterial, RawMaterialLot $lot, RawMaterialFifoService $fifo)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $rawMaterial);
+
+        if ((int) $lot->raw_material_id !== (int) $rawMaterial->id
+            || (int) $lot->atelier_id !== (int) $rawMaterial->atelier_id) {
+            return response(['message' => 'یافت نشد'], 404);
+        }
+
+        $fields = $request->validate([
+            'price_per_kg' => 'sometimes|required|numeric|min:0',
+            'purchased_at' => 'nullable|date',
+            'note' => 'nullable|string',
+        ]);
+
+        try {
+            $fifo->updateLot($lot, $fields);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         return response($fifo->attachStock($rawMaterial->load('lots')), 200);
     }
