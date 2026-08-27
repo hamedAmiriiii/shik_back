@@ -35,6 +35,13 @@ Route::name('geo.')->prefix('geo')->group(function (){
     Route::get('states' , [\App\Http\Controllers\StateController::class,'index']);
 });
 
+// درخواست اعطای نمایندگی وبینو - بدون نیاز به لاگین
+Route::prefix('agency-requests')->name('agency-requests.')->group(function () {
+    Route::get('form-options', [\App\Http\Controllers\AgencyRequestController::class, 'formOptions']);
+    Route::post('/', [\App\Http\Controllers\AgencyRequestController::class, 'store'])
+        ->middleware('throttle:10,60');
+});
+
 Route::name('resetPassword.')->prefix('reset-password')->group(function () {
     Route::post('send-code', [\App\Http\Controllers\Auth\AuthController::class, 'sendForgotPasswordCode']);
     Route::post('confirm', [\App\Http\Controllers\Auth\AuthController::class, 'confirmForgotPassword']);
@@ -320,6 +327,12 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
             Route::resource("leave", \App\Http\Controllers\Admin\LeaveController::class)->only(["index", "update", "show"]);
             Route::post("/leave/confirm/{leave}", [\App\Http\Controllers\Admin\LeaveController::class, "confirm"]);
         });
+
+        // گرید درخواست‌های اعطای نمایندگی
+        Route::get('agency-requests', [\App\Http\Controllers\Admin\AgencyRequestController::class, 'index']);
+        Route::get('agency-requests/{agencyRequest}', [\App\Http\Controllers\Admin\AgencyRequestController::class, 'show']);
+        Route::put('agency-requests/{agencyRequest}', [\App\Http\Controllers\Admin\AgencyRequestController::class, 'update']);
+        Route::delete('agency-requests/{agencyRequest}', [\App\Http\Controllers\Admin\AgencyRequestController::class, 'destroy']);
 
         Route::resource("/log-sms", \App\Http\Controllers\Admin\LogSmsController::class)->only("index");
     });
