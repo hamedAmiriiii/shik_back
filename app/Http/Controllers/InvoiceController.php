@@ -3,10 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\Invoice;
+use App\Models\InvoiceItem;
 use App\Services\DocumentPaymentService;
+use App\Tools\ImageTools;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Morilog\Jalali\Jalalian;
 use RuntimeException;
 
@@ -27,10 +31,13 @@ class InvoiceController extends Controller
             })
             ->orderBy('id', 'desc');
 
+        if ($this->supportsInvoiceItems()) {
+            $query->with('items');
+        }
+
         if ($this->supportsPaymentAccount('invoices')) {
             $query->with(['shopAccount', 'cheque']);
 
-            // فیلتر بر اساس حساب پرداخت (فروشگاه یا تنخواه)
             if ($request->filled('shop_account_id')) {
                 $query->where('shop_account_id', (int) $request->input('shop_account_id'));
             }
@@ -43,7 +50,6 @@ class InvoiceController extends Controller
             $query->where('payment_status', $request->input('payment_status'));
         }
 
-        // جستجو بر اساس searchFilterModel
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         if ($searchDataModel) {
             $query->where(function ($q) use ($searchDataModel) {
@@ -65,7 +71,6 @@ class InvoiceController extends Controller
             });
         }
 
-        // فیلتر تاریخ
         if ($request->has('filter')) {
             if ($request->filter === 'today') {
                 $query->whereDate('date', Carbon::today());
@@ -106,7 +111,6 @@ class InvoiceController extends Controller
             }
         }
 
-        // جمع کل مبالغ فاکتورهای فیلترشده (قبل از paginate)
         $totalAmount = (clone $query)->sum('amount');
 
         $perPage = max(1, min(100, (int) $request->input('per_page', 20)));
@@ -133,11 +137,25 @@ class InvoiceController extends Controller
             ], 422);
         }
 
+        $this->prepareInvoiceRequest($request);
+
+        $itemRows = $this->normalizedItemsFromRequest($request);
+        if ($itemRows === null) {
+            return response()->json(['message' => 'فرمت آیتم‌های فاکتور نامعتبر است.'], 422);
+        }
+        $itemsSent = $this->itemsWereSent($request);
+
         $fields = $request->validate(array_merge([
-            'amount' => 'required|numeric|min:0',
+            'amount' => ($itemsSent && $itemRows !== [] ? 'nullable' : 'required').'|numeric|min:0',
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
+            'image' => 'nullable',
+            'image_base64' => 'nullable|string',
         ], $this->paymentAccountRules('invoices'), DocumentPaymentService::requestRules()));
+
+        if ($itemRows !== []) {
+            $fields['amount'] = $this->sumItemTotals($itemRows);
+        }
 
         $accountError = $this->paymentAccountError($atelierId, $fields['shop_account_id'] ?? null);
         if ($accountError) {
@@ -154,7 +172,7 @@ class InvoiceController extends Controller
         $fields['atelier_id'] = $atelierId;
 
         try {
-            $invoice = DB::transaction(function () use ($fields, $atelierId) {
+            $invoice = DB::transaction(function () use ($fields, $atelierId, $itemRows, $request) {
                 $payment = DocumentPaymentService::resolveOnCreate(
                     $atelierId,
                     $fields,
@@ -166,11 +184,13 @@ class InvoiceController extends Controller
                     'cheque_id' => $fields['cheque_id'] ?? null,
                     'payment_method' => $payment['payment_method'] ?? ($fields['payment_method'] ?? null),
                 ];
-                unset($fields['cheque'], $fields['cheque_id'], $fields['payment_method']);
+                unset($fields['cheque'], $fields['cheque_id'], $fields['payment_method'], $fields['image'], $fields['image_base64']);
                 $fields = array_merge($fields, $payment);
 
                 $invoice = Invoice::create($fields);
+                $this->syncInvoiceItems($invoice, $itemRows);
                 DocumentPaymentService::attachChequeFromRequest($invoice, $chequePayload, $fields['user_name']);
+                $this->saveInvoiceImageFromRequest($invoice, $request);
 
                 return $invoice;
             });
@@ -178,7 +198,7 @@ class InvoiceController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        return response($this->withAccount($invoice->fresh(['shopAccount', 'cheque'])), 201);
+        return response($this->withDetails($invoice->fresh()), 201);
     }
 
     /**
@@ -188,7 +208,7 @@ class InvoiceController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $invoice);
 
-        return response($this->withAccount($invoice), 200);
+        return response($this->withDetails($invoice), 200);
     }
 
     /**
@@ -198,12 +218,27 @@ class InvoiceController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $invoice);
 
+        $this->prepareInvoiceRequest($request);
+
+        $itemRows = $this->normalizedItemsFromRequest($request);
+        if ($itemRows === null) {
+            return response()->json(['message' => 'فرمت آیتم‌های فاکتور نامعتبر است.'], 422);
+        }
+        $itemsSent = $this->itemsWereSent($request);
+
         $fields = $request->validate(array_merge([
-            'amount' => 'sometimes|required|numeric|min:0',
+            'amount' => 'sometimes|nullable|numeric|min:0',
             'title' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
             'date' => 'sometimes|required|date',
+            'image' => 'nullable',
+            'image_base64' => 'nullable|string',
+            'remove_image' => 'nullable|boolean',
         ], $this->paymentAccountRules('invoices')));
+
+        if ($itemsSent) {
+            $fields['amount'] = $this->sumItemTotals($itemRows);
+        }
 
         if (array_key_exists('shop_account_id', $fields)) {
             $accountError = $this->paymentAccountError((int) $invoice->atelier_id, $fields['shop_account_id']);
@@ -227,9 +262,25 @@ class InvoiceController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        $invoice->update($fields);
+        try {
+            DB::transaction(function () use ($invoice, $fields, $itemRows, $itemsSent, $request) {
+                unset($fields['image'], $fields['image_base64'], $fields['remove_image']);
+                $invoice->update($fields);
+                if ($itemsSent) {
+                    $this->syncInvoiceItems($invoice, $itemRows);
+                }
+                if ($request->boolean('remove_image') && ! $this->requestHasImage($request)) {
+                    $this->deleteInvoiceImage($invoice);
+                    $invoice->update(['image_path' => null]);
+                } else {
+                    $this->saveInvoiceImageFromRequest($invoice, $request);
+                }
+            });
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
-        return response($this->withAccount($invoice->fresh()), 200);
+        return response($this->withDetails($invoice->fresh()), 200);
     }
 
     /**
@@ -249,6 +300,7 @@ class InvoiceController extends Controller
             $invoice->cheque->update(['status' => \App\Models\Cheque::STATUS_CANCELLED, 'invoice_id' => null]);
         }
 
+        $this->deleteInvoiceImage($invoice);
         $invoice->delete();
 
         return response(['message' => 'فاکتور با موفقیت حذف شد'], 200);
@@ -277,13 +329,260 @@ class InvoiceController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        return response($this->withAccount($invoice), 200);
+        return response($this->withDetails($invoice), 200);
+    }
+
+    /**
+     * آپلود یا جایگزینی عکس فاکتور
+     * POST /api/invoices/{invoice}/image
+     */
+    public function uploadImage(Request $request, Invoice $invoice)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $invoice);
+
+        $request->validate([
+            'image' => 'nullable',
+            'image_base64' => 'nullable|string',
+        ]);
+
+        if (! $this->requestHasImage($request)) {
+            return response()->json(['message' => 'فایل عکس را ارسال کنید.'], 422);
+        }
+
+        try {
+            $this->saveInvoiceImageFromRequest($invoice, $request);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response($this->withDetails($invoice->fresh()), 200);
+    }
+
+    /**
+     * حذف عکس فاکتور
+     * DELETE /api/invoices/{invoice}/image
+     */
+    public function deleteImage(Request $request, Invoice $invoice)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $invoice);
+
+        $this->deleteInvoiceImage($invoice);
+        if (Schema::hasColumn('invoices', 'image_path')) {
+            $invoice->update(['image_path' => null]);
+        }
+
+        return response($this->withDetails($invoice->fresh()), 200);
+    }
+
+    protected function withDetails(Invoice $invoice): Invoice
+    {
+        $relations = [];
+        if ($this->supportsInvoiceItems()) {
+            $relations[] = 'items';
+        }
+        if ($this->supportsPaymentAccount('invoices')) {
+            $relations[] = 'shopAccount';
+            $relations[] = 'cheque';
+        }
+        if ($relations !== []) {
+            $invoice->loadMissing($relations);
+        }
+
+        return $this->attachPaymentAccount($invoice);
     }
 
     protected function withAccount(Invoice $invoice): Invoice
     {
-        $invoice->loadMissing(['shopAccount', 'cheque']);
+        return $this->withDetails($invoice);
+    }
 
-        return $this->attachPaymentAccount($invoice);
+    protected function supportsInvoiceItems(): bool
+    {
+        return Schema::hasTable('invoice_items');
+    }
+
+    protected function prepareInvoiceRequest(Request $request): void
+    {
+        $this->mergeRequestPayload($request, [
+            'amount',
+            'title',
+            'description',
+            'date',
+            'items',
+            'image',
+            'image_base64',
+            'remove_image',
+            'shop_account_id',
+            'payment_method',
+            'cheque',
+            'cheque_id',
+        ]);
+
+        $items = $request->input('items');
+        if (is_string($items) && $items !== '') {
+            $decoded = json_decode($items, true);
+            if (is_array($decoded)) {
+                $request->merge(['items' => $decoded]);
+            }
+        }
+    }
+
+    protected function itemsWereSent(Request $request): bool
+    {
+        return $request->exists('items');
+    }
+
+    /**
+     * @return array<int, array{title: string, unit_price: float, quantity: float, total: float, sort_order: int}>|null
+     */
+    protected function normalizedItemsFromRequest(Request $request): ?array
+    {
+        if (! $request->exists('items') && ! $request->has('items')) {
+            return [];
+        }
+
+        $raw = $request->input('items');
+        if ($raw === null || $raw === '') {
+            return [];
+        }
+        if (! is_array($raw)) {
+            return null;
+        }
+
+        $rows = [];
+        foreach (array_values($raw) as $index => $item) {
+            if (! is_array($item)) {
+                return null;
+            }
+
+            $title = trim((string) ($item['title'] ?? $item['name'] ?? $item['عنوان'] ?? ''));
+            if ($title === '') {
+                return null;
+            }
+
+            $unitPrice = $item['unit_price'] ?? $item['price'] ?? $item['unitPrice'] ?? $item['فی'] ?? null;
+            $quantity = $item['quantity'] ?? $item['qty'] ?? $item['count'] ?? $item['تعداد'] ?? null;
+            if ($unitPrice === null || $quantity === null) {
+                return null;
+            }
+
+            $unitPrice = (float) $unitPrice;
+            $quantity = (float) $quantity;
+            if ($unitPrice < 0 || $quantity <= 0) {
+                return null;
+            }
+
+            $rows[] = [
+                'title' => mb_substr($title, 0, 255),
+                'unit_price' => round($unitPrice, 2),
+                'quantity' => round($quantity, 3),
+                'total' => round($unitPrice * $quantity, 2),
+                'sort_order' => $index,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param  array<int, array{total: float}>  $rows
+     */
+    protected function sumItemTotals(array $rows): float
+    {
+        $sum = 0.0;
+        foreach ($rows as $row) {
+            $sum += (float) $row['total'];
+        }
+
+        return round($sum, 2);
+    }
+
+    /**
+     * @param  array<int, array{title: string, unit_price: float, quantity: float, total: float, sort_order: int}>  $rows
+     */
+    protected function syncInvoiceItems(Invoice $invoice, array $rows): void
+    {
+        if (! $this->supportsInvoiceItems()) {
+            return;
+        }
+
+        $invoice->items()->delete();
+        foreach ($rows as $row) {
+            InvoiceItem::create([
+                'invoice_id' => $invoice->id,
+                'title' => $row['title'],
+                'unit_price' => $row['unit_price'],
+                'quantity' => $row['quantity'],
+                'total' => $row['total'],
+                'sort_order' => $row['sort_order'],
+            ]);
+        }
+    }
+
+    protected function requestHasImage(Request $request): bool
+    {
+        if ($request->hasFile('image')) {
+            return true;
+        }
+
+        $value = $request->input('image_base64', $request->input('image'));
+
+        return is_string($value) && $value !== '' && ! $request->hasFile('image');
+    }
+
+    protected function saveInvoiceImageFromRequest(Invoice $invoice, Request $request): void
+    {
+        if (! Schema::hasColumn('invoices', 'image_path') || ! $this->requestHasImage($request)) {
+            return;
+        }
+
+        $ext = 'jpeg';
+        $content = null;
+
+        if ($request->hasFile('image')) {
+            $file = $request->file('image');
+            $origExt = strtolower((string) $file->getClientOriginalExtension());
+            $ext = in_array($origExt, ['jpg', 'jpeg', 'png', 'webp'], true) ? $origExt : 'jpeg';
+            if (! in_array(strtolower((string) $file->getClientOriginalExtension()), ['jpg', 'jpeg', 'png', 'webp'], true)
+                && ! in_array($file->getMimeType(), ['image/jpeg', 'image/png', 'image/webp'], true)) {
+                throw new RuntimeException('فرمت عکس باید jpg، png یا webp باشد.');
+            }
+            $content = file_get_contents($file->getRealPath());
+        } else {
+            $raw = (string) $request->input('image_base64', $request->input('image'));
+            if (strpos($raw, ',') !== false) {
+                $header = strtolower(strstr($raw, ',', true) ?: '');
+                $raw = substr($raw, strpos($raw, ',') + 1);
+                if (strpos($header, 'png') !== false) {
+                    $ext = 'png';
+                } elseif (strpos($header, 'webp') !== false) {
+                    $ext = 'webp';
+                }
+            }
+            $content = base64_decode($raw);
+        }
+
+        if ($content === false || $content === null || $content === '') {
+            throw new RuntimeException('عکس فاکتور نامعتبر است.');
+        }
+        if (strlen($content) > 5 * 1024 * 1024) {
+            throw new RuntimeException('حجم عکس نباید بیشتر از ۵ مگابایت باشد.');
+        }
+
+        $this->deleteInvoiceImage($invoice);
+
+        $path = ImageTools::saveFile(
+            "/invoices/{$invoice->id}/image_".time().".{$ext}",
+            $content
+        );
+        $invoice->update(['image_path' => $path]);
+    }
+
+    protected function deleteInvoiceImage(Invoice $invoice): void
+    {
+        $path = $invoice->getOriginal('image_path') ?: ($invoice->attributes['image_path'] ?? $invoice->image_path ?? null);
+        if ($path && Storage::exists('public/'.$path)) {
+            Storage::delete('public/'.$path);
+        }
     }
 }

@@ -164,6 +164,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Invoice routes - require authentication
     Route::resource('invoices', \App\Http\Controllers\InvoiceController::class);
     Route::post('invoices/{invoice}/settle', [\App\Http\Controllers\InvoiceController::class, 'settle']);
+    Route::post('invoices/{invoice}/image', [\App\Http\Controllers\InvoiceController::class, 'uploadImage']);
+    Route::delete('invoices/{invoice}/image', [\App\Http\Controllers\InvoiceController::class, 'deleteImage']);
     Route::resource('manual-trades', \App\Http\Controllers\ManualTradeController::class)->except(['create', 'edit']);
     
     // SMS Logs routes - require authentication

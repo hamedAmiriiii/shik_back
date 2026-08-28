@@ -16,6 +16,7 @@ class UserShiksho extends Model
     protected $fillable = [
         'phone',
         'atelier_id',
+        'name',
         'credit',
         'installment_credit',
         'credit_last_updated_at',

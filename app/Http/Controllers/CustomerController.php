@@ -8,6 +8,7 @@ use App\Models\UserShiksho;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class CustomerController extends Controller
 {
@@ -18,19 +19,32 @@ class CustomerController extends Controller
     {
         $validated = $request->validate([
             'phone' => 'required|string|digits:11',
+            'name' => 'nullable|string|max:255',
+            'full_name' => 'nullable|string|max:255',
         ]);
 
         $atelierId = $this->shopAtelierIdOrAbort($request);
+        $name = trim((string) ($validated['name'] ?? $validated['full_name'] ?? ''));
+        $name = $name !== '' ? $name : null;
+
+        $create = [
+            'credit' => 0,
+            'installment_credit' => 0,
+            'credit_last_updated_at' => now(),
+            'last_warning_sent_at' => null,
+        ];
+        if ($name !== null && Schema::hasColumn('user_shiksho', 'name')) {
+            $create['name'] = $name;
+        }
 
         $userShiksho = UserShiksho::firstOrCreate(
             ['phone' => $validated['phone'], 'atelier_id' => $atelierId],
-            [
-                'credit' => 0,
-                'installment_credit' => 0,
-                'credit_last_updated_at' => now(),
-                'last_warning_sent_at' => null,
-            ]
+            $create
         );
+
+        if (! $userShiksho->wasRecentlyCreated && $name !== null && Schema::hasColumn('user_shiksho', 'name')) {
+            $userShiksho->update(['name' => $name]);
+        }
 
         $smsSent = false;
         $smsError = null;
@@ -92,14 +106,29 @@ class CustomerController extends Controller
             ->where('purchases.phone', '!=', '')
             ->groupBy('purchases.phone');
 
+        if (Schema::hasTable('user_shiksho') && Schema::hasColumn('user_shiksho', 'name')) {
+            $query->leftJoin('user_shiksho', function ($join) use ($atelierId) {
+                $join->on('user_shiksho.phone', '=', 'purchases.phone')
+                    ->where('user_shiksho.atelier_id', '=', $atelierId);
+            })->addSelect(DB::raw('MAX(user_shiksho.name) as name'));
+        }
+
         // اعمال جستجو
         if ($searchDataModel) {
             if (is_object($searchDataModel)) {
                 if (isset($searchDataModel->phone)) {
-                    $query->where('purchases.phone', 'like', '%' . $searchDataModel->phone . '%');
+                    $query->where('purchases.phone', 'like', '%'.$searchDataModel->phone.'%');
                 }
-            } else if (is_string($searchDataModel)) {
-                $query->where('purchases.phone', 'like', '%' . $searchDataModel . '%');
+                if (isset($searchDataModel->name) && Schema::hasColumn('user_shiksho', 'name')) {
+                    $query->where('user_shiksho.name', 'like', '%'.$searchDataModel->name.'%');
+                }
+            } elseif (is_string($searchDataModel)) {
+                $query->where(function ($q) use ($searchDataModel) {
+                    $q->where('purchases.phone', 'like', '%'.$searchDataModel.'%');
+                    if (Schema::hasColumn('user_shiksho', 'name')) {
+                        $q->orWhere('user_shiksho.name', 'like', '%'.$searchDataModel.'%');
+                    }
+                });
             }
         }
 
@@ -113,6 +142,9 @@ class CustomerController extends Controller
                 ->where('atelier_id', $atelierId)
                 ->first();
             $customer->current_credit = $userShiksho ? $userShiksho->credit : 0;
+            if (! isset($customer->name) || $customer->name === null) {
+                $customer->name = $userShiksho->name ?? null;
+            }
         }
 
         return response($customers, 200);
@@ -140,6 +172,7 @@ class CustomerController extends Controller
         // آمار کلی
         $stats = [
             'phone' => $phone,
+            'name' => $userShiksho->name ?? null,
             'total_purchases' => $purchases->count(),
             'total_spent' => $purchases->sum('total_amount'),
             'total_credit_earned' => $purchases->sum('credit_earned'),
@@ -161,16 +194,20 @@ class CustomerController extends Controller
         $atelierId = $this->shopAtelierIdOrAbort($request);
 
        // دریافت لیست شماره تلفن‌های مشتریان همان فروشگاه
+       $select = ['user_shiksho.phone'];
+       if (Schema::hasColumn('user_shiksho', 'name')) {
+           $select[] = 'user_shiksho.name';
+       }
+
        $query = DB::table('user_shiksho')
-       ->select(
-           'user_shiksho.phone'
-       )
+       ->select($select)
        ->where('user_shiksho.atelier_id', $atelierId)
       ;
 
    $customers = $query->get()->map(function($item) {
        return [
            'phone' => $item->phone,
+           'name' => $item->name ?? null,
        ];
    })->values();
 

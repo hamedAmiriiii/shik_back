@@ -8,7 +8,9 @@ use App\Models\RawMaterial;
 use App\Models\RawMaterialLot;
 use App\Services\ProducedGoodCostService;
 use App\Services\RawMaterialFifoService;
+use App\Services\RawMaterialInvoiceService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use RuntimeException;
@@ -25,9 +27,16 @@ class RawMaterialController extends Controller
 
         $atelierId = $this->shopAtelierIdOrAbort($request);
 
+        $lotRel = $request->boolean('with_all_lots') ? 'lots' : 'openLots';
+        $with = [$lotRel];
+        if (Schema::hasColumn('raw_material_lots', 'invoice_id')) {
+            $with[] = $lotRel.'.invoice';
+            $with[] = $lotRel.'.invoiceItem';
+        }
+
         $query = RawMaterial::query()
             ->where('atelier_id', $atelierId)
-            ->with($request->boolean('with_all_lots') ? 'lots' : 'openLots')
+            ->with($with)
             ->orderBy('name');
 
         $searchDataModel = json_decode($request->input('searchFilterModel'));
@@ -61,7 +70,7 @@ class RawMaterialController extends Controller
         return response($attach($query->get()), 200);
     }
 
-    public function store(Request $request, RawMaterialFifoService $fifo)
+    public function store(Request $request, RawMaterialFifoService $fifo, RawMaterialInvoiceService $invoices)
     {
         $atelierId = $this->staffShopAtelierId($request);
         if ($atelierId === null) {
@@ -70,7 +79,7 @@ class RawMaterialController extends Controller
             ], 422);
         }
 
-        $fields = $request->validate([
+        $fields = $request->validate(array_merge([
             'name' => [
                 'required',
                 'string',
@@ -82,20 +91,40 @@ class RawMaterialController extends Controller
             'quantity_kg' => 'nullable|numeric|min:0.001',
             'price_per_kg' => 'nullable|numeric|min:0|required_with:quantity_kg',
             'purchased_at' => 'nullable|date',
-        ]);
+        ], $this->paymentAccountRules('invoices'), RawMaterialInvoiceService::requestRules()));
 
-        $material = RawMaterial::create([
-            'atelier_id' => $atelierId,
-            'name' => $fields['name'],
-            'sale_price' => $fields['sale_price'] ?? 0,
-            'note' => $fields['note'] ?? null,
-        ]);
-
-        if (! empty($fields['quantity_kg'])) {
-            $this->createLot($material, $fields);
+        if ($invoices->wantsInvoice($fields) && empty($fields['quantity_kg'])) {
+            return response()->json([
+                'message' => 'برای صدور یا اتصال فاکتور باید مقدار و قیمت خرید را وارد کنید.',
+            ], 422);
         }
 
-        return response($fifo->attachStock($material->load('lots')), 201);
+        $accountError = $this->paymentAccountError($atelierId, $fields['shop_account_id'] ?? null);
+        if ($accountError) {
+            return response()->json(['message' => $accountError], 422);
+        }
+
+        try {
+            $material = DB::transaction(function () use ($atelierId, $fields, $invoices, $request) {
+                $material = RawMaterial::create([
+                    'atelier_id' => $atelierId,
+                    'name' => $fields['name'],
+                    'sale_price' => $fields['sale_price'] ?? 0,
+                    'note' => $fields['note'] ?? null,
+                ]);
+
+                if (! empty($fields['quantity_kg'])) {
+                    $lot = $this->createLot($material, $fields);
+                    $invoices->attach($material, $lot, $fields, $this->shopRequestActor($request));
+                }
+
+                return $material;
+            });
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response($fifo->attachStock($material->load($this->lotRelations())), 201);
     }
 
     public function show(Request $request, RawMaterial $rawMaterial, ProducedGoodCostService $costService, RawMaterialFifoService $fifo)
@@ -105,7 +134,7 @@ class RawMaterialController extends Controller
             return response(['message' => 'یافت نشد'], 404);
         }
 
-        $fifo->attachStock($rawMaterial->load('lots'));
+        $fifo->attachStock($rawMaterial->load($this->lotRelations()));
         $rawMaterial->setAttribute('used_in', $costService->goodsUsingMaterial($rawMaterial)->values());
 
         return response($rawMaterial, 200);
@@ -133,7 +162,7 @@ class RawMaterialController extends Controller
 
         $rawMaterial->update($fields);
 
-        return response($fifo->attachStock($rawMaterial->load('lots')), 200);
+        return response($fifo->attachStock($rawMaterial->load($this->lotRelations())), 200);
     }
 
     public function destroy(Request $request, RawMaterial $rawMaterial)
@@ -164,20 +193,32 @@ class RawMaterialController extends Controller
         return response(['message' => 'ماده اولیه حذف شد'], 200);
     }
 
-    public function storeLot(Request $request, RawMaterial $rawMaterial, RawMaterialFifoService $fifo)
+    public function storeLot(Request $request, RawMaterial $rawMaterial, RawMaterialFifoService $fifo, RawMaterialInvoiceService $invoices)
     {
         $this->assertModelBelongsToStaffAtelier($request, $rawMaterial);
 
-        $fields = $request->validate([
+        $fields = $request->validate(array_merge([
             'quantity_kg' => 'required|numeric|min:0.001',
             'price_per_kg' => 'required|numeric|min:0',
             'purchased_at' => 'nullable|date',
             'note' => 'nullable|string',
-        ]);
+        ], $this->paymentAccountRules('invoices'), RawMaterialInvoiceService::requestRules()));
 
-        $this->createLot($rawMaterial, $fields);
+        $accountError = $this->paymentAccountError((int) $rawMaterial->atelier_id, $fields['shop_account_id'] ?? null);
+        if ($accountError) {
+            return response()->json(['message' => $accountError], 422);
+        }
 
-        return response($fifo->attachStock($rawMaterial->load('lots')), 201);
+        try {
+            DB::transaction(function () use ($rawMaterial, $fields, $invoices, $request) {
+                $lot = $this->createLot($rawMaterial, $fields);
+                $invoices->attach($rawMaterial, $lot, $fields, $this->shopRequestActor($request));
+            });
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response($fifo->attachStock($rawMaterial->load($this->lotRelations())), 201);
     }
 
     public function destroyLot(Request $request, RawMaterial $rawMaterial, RawMaterialLot $lot, RawMaterialFifoService $fifo)
@@ -197,7 +238,7 @@ class RawMaterialController extends Controller
 
         $lot->delete();
 
-        return response($fifo->attachStock($rawMaterial->load('lots')), 200);
+        return response($fifo->attachStock($rawMaterial->load($this->lotRelations())), 200);
     }
 
     public function updateLot(Request $request, RawMaterial $rawMaterial, RawMaterialLot $lot, RawMaterialFifoService $fifo)
@@ -221,7 +262,21 @@ class RawMaterialController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        return response($fifo->attachStock($rawMaterial->load('lots')), 200);
+        return response($fifo->attachStock($rawMaterial->load($this->lotRelations())), 200);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function lotRelations(): array
+    {
+        $with = ['lots'];
+        if (Schema::hasColumn('raw_material_lots', 'invoice_id')) {
+            $with[] = 'lots.invoice';
+            $with[] = 'lots.invoiceItem';
+        }
+
+        return $with;
     }
 
     private function createLot(RawMaterial $material, array $fields): RawMaterialLot

@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use App\Models\Cheque;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Storage;
 use Morilog\Jalali\Jalalian;
 
 class Invoice extends Model
@@ -13,7 +15,7 @@ class Invoice extends Model
 
     protected $fillable = [
         'amount', 'title', 'description', 'date', 'user_name', 'atelier_id', 'shop_account_id',
-        'payment_method', 'payment_status', 'paid_at', 'cheque_id',
+        'payment_method', 'payment_status', 'paid_at', 'cheque_id', 'image_path',
     ];
 
     protected $casts = [
@@ -25,6 +27,7 @@ class Invoice extends Model
     protected $appends = [
         'payment_method_label',
         'payment_status_label',
+        'image_url',
     ];
 
     /**
@@ -38,6 +41,26 @@ class Invoice extends Model
     public function cheque()
     {
         return $this->belongsTo(Cheque::class, 'cheque_id');
+    }
+
+    public function items(): HasMany
+    {
+        return $this->hasMany(InvoiceItem::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    public function rawMaterialLots(): HasMany
+    {
+        return $this->hasMany(RawMaterialLot::class);
+    }
+
+    public function getImageUrlAttribute(): ?string
+    {
+        $path = $this->attributes['image_path'] ?? null;
+        if (! $path) {
+            return null;
+        }
+
+        return Storage::url($path);
     }
 
     public function getPaymentMethodLabelAttribute(): string
