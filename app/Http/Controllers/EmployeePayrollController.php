@@ -76,8 +76,10 @@ class EmployeePayrollController extends Controller
                     ->sum('amount');
                 $row['total_paid'] = round($totalPaid, 2);
                 $row['total_advances'] = round($totalAdvances, 2);
-                $row['remaining'] = round(max(0, (float) $payroll->salary_amount - $totalPaid), 2);
-                $row['overpaid_amount'] = round(max(0, $totalPaid - (float) $payroll->salary_amount), 2);
+                $row['remaining'] = $payroll->remaining();
+                $row['overpaid_amount'] = $payroll->overpaidAmount();
+                $row['salary_calculated'] = $payroll->isSalaryCalculated();
+                $row['can_recalculate'] = $payroll->canRecalculateSalary();
                 $row['payments'] = $payroll->payments->values();
             }
         }

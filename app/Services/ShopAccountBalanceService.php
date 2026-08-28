@@ -120,6 +120,28 @@ class ShopAccountBalanceService
     }
 
     /**
+     * موجودی قابل برداشت. اگر سند پرداخت‌شده همین حساب را ignore کنیم، مبلغش به موجودی برمی‌گردد.
+     */
+    public static function availableBalance(ShopAccount $account, $ignorePaidDocument = null): float
+    {
+        $available = self::balanceFor($account);
+        if (! $ignorePaidDocument || ! $ignorePaidDocument->shop_account_id) {
+            return $available;
+        }
+        if ((int) $ignorePaidDocument->shop_account_id !== (int) $account->id) {
+            return $available;
+        }
+
+        $isPaid = ! Schema::hasColumn($ignorePaidDocument->getTable(), 'payment_status')
+            || ($ignorePaidDocument->payment_status ?? 'paid') === 'paid';
+        if ($isPaid) {
+            $available = round($available + (float) $ignorePaidDocument->amount, 2);
+        }
+
+        return $available;
+    }
+
+    /**
      * واریزهای تطبیق روزانه (با تکمیل از ستون‌های قدیمی deposit_account_1/2).
      *
      * @param  array<int>  $accountIds
@@ -221,6 +243,12 @@ class ShopAccountBalanceService
         return $model::query()
             ->where('atelier_id', $atelierId)
             ->whereIn('shop_account_id', $accountIds)
+            ->when(
+                Schema::hasColumn($table, 'payment_status'),
+                function ($q) {
+                    $q->where('payment_status', 'paid');
+                }
+            )
             ->selectRaw('shop_account_id, SUM(amount) as total')
             ->groupBy('shop_account_id')
             ->pluck('total', 'shop_account_id')

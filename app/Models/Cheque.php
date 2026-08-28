@@ -2,11 +2,18 @@
 
 namespace App\Models;
 
+use App\Models\Expense;
+use App\Models\Income;
+use App\Models\Invoice;
+use App\Models\Purchase;
+use App\Models\ShopAccount;
+use App\Services\DocumentPaymentService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Morilog\Jalali\Jalalian;
 use RuntimeException;
 
@@ -24,6 +31,8 @@ class Cheque extends Model
     protected $fillable = [
         'atelier_id',
         'purchase_id',
+        'invoice_id',
+        'shop_account_id',
         'type',
         'cheque_number',
         'bank_name',
@@ -63,6 +72,16 @@ class Cheque extends Model
     public function income(): BelongsTo
     {
         return $this->belongsTo(Income::class);
+    }
+
+    public function invoice(): BelongsTo
+    {
+        return $this->belongsTo(Invoice::class);
+    }
+
+    public function shopAccount(): BelongsTo
+    {
+        return $this->belongsTo(ShopAccount::class, 'shop_account_id');
     }
 
     public function purchase(): BelongsTo
@@ -187,22 +206,43 @@ class Cheque extends Model
             }
 
             if ($locked->type === self::TYPE_ISSUED) {
-                if ($locked->expense_id) {
-                    throw new RuntimeException('برای این چک قبلاً هزینه ثبت شده است.');
+                $expense = null;
+                $invoice = $locked->invoice_id ? Invoice::find($locked->invoice_id) : null;
+
+                if (! $invoice && $locked->expense_id) {
+                    $expense = Expense::find($locked->expense_id);
+                } elseif (! $invoice) {
+                    $expensePayload = [
+                        'user_name' => $locked->user_name ?: 'سیستم',
+                        'date' => $date,
+                        'amount' => $locked->amount,
+                        'title' => $locked->ledgerTitle(),
+                        'type' => $locked->expense_type ?: 'جاری',
+                        'atelier_id' => (int) $locked->atelier_id,
+                        'shop_account_id' => $locked->shop_account_id,
+                    ];
+                    if (Schema::hasColumn('expenses', 'payment_status')) {
+                        $expensePayload['payment_method'] = 'cheque';
+                        $expensePayload['payment_status'] = 'unpaid';
+                        $expensePayload['cheque_id'] = $locked->id;
+                    }
+                    $expense = Expense::create($expensePayload);
+                    $locked->expense_id = $expense->id;
                 }
 
-                $expense = Expense::create([
-                    'user_name' => $locked->user_name ?: 'سیستم',
-                    'date' => $date,
-                    'amount' => $locked->amount,
-                    'title' => $locked->ledgerTitle(),
-                    'type' => $locked->expense_type ?: 'جاری',
-                    'atelier_id' => (int) $locked->atelier_id,
-                ]);
+                $accountId = $locked->shop_account_id
+                    ?: ($invoice ? $invoice->shop_account_id : null)
+                    ?: ($expense ? $expense->shop_account_id : null);
+
+                if ($invoice) {
+                    DocumentPaymentService::trySettleAfterClear($invoice, $accountId ? (int) $accountId : null);
+                } elseif ($expense) {
+                    DocumentPaymentService::trySettleAfterClear($expense, $accountId ? (int) $accountId : null);
+                }
 
                 $locked->update([
                     'status' => self::STATUS_CLEARED,
-                    'expense_id' => $expense->id,
+                    'expense_id' => $expense ? $expense->id : $locked->expense_id,
                     'cleared_at' => now(),
                 ]);
             } elseif ($locked->type === self::TYPE_RECEIVED) {
@@ -232,7 +272,7 @@ class Cheque extends Model
                 throw new RuntimeException('نوع چک نامعتبر است.');
             }
 
-            return $locked->fresh(['expense', 'income', 'purchase']);
+            return $locked->fresh(['expense', 'income', 'purchase', 'invoice']);
         });
     }
 
@@ -256,8 +296,19 @@ class Cheque extends Model
             }
 
             if ($locked->type === self::TYPE_ISSUED) {
-                if ($locked->expense_id) {
-                    Expense::where('id', $locked->expense_id)->delete();
+                if ($locked->invoice_id) {
+                    $invoice = Invoice::find($locked->invoice_id);
+                    if ($invoice) {
+                        DocumentPaymentService::unpay($invoice);
+                    }
+                } elseif ($locked->expense_id) {
+                    $expense = Expense::find($locked->expense_id);
+                    if ($expense && (($expense->payment_method ?? null) === 'cheque' || $expense->cheque_id == $locked->id)) {
+                        DocumentPaymentService::unpay($expense);
+                    } else {
+                        Expense::where('id', $locked->expense_id)->delete();
+                        $locked->expense_id = null;
+                    }
                 }
             } elseif ($locked->type === self::TYPE_RECEIVED) {
                 if ($locked->income_id) {
@@ -269,12 +320,12 @@ class Cheque extends Model
 
             $locked->update([
                 'status' => self::STATUS_PENDING,
-                'expense_id' => null,
                 'income_id' => null,
                 'cleared_at' => null,
+                'expense_id' => $locked->expense_id,
             ]);
 
-            return $locked->fresh(['expense', 'income', 'purchase']);
+            return $locked->fresh(['expense', 'income', 'purchase', 'invoice']);
         });
     }
 }

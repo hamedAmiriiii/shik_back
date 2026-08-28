@@ -3,10 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\ManualTrade;
+use App\Services\DocumentPaymentService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Morilog\Jalali\Jalalian;
+use RuntimeException;
 
 class ManualTradeController extends Controller
 {
@@ -113,6 +115,14 @@ class ManualTradeController extends Controller
             return response()->json(['message' => $accountError], 422);
         }
 
+        if (($fields['type'] ?? null) === ManualTrade::TYPE_PURCHASE && ! empty($fields['shop_account_id'])) {
+            try {
+                DocumentPaymentService::assertCanDebit($atelierId, (int) $fields['shop_account_id'], (float) $fields['amount']);
+            } catch (RuntimeException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+        }
+
         $user = $this->shopRequestActor($request);
         if (! $user) {
             return response(['error' => 'کاربر احراز هویت نشده است'], 401);
@@ -152,6 +162,22 @@ class ManualTradeController extends Controller
             $accountError = $this->paymentAccountError((int) $manualTrade->atelier_id, $fields['shop_account_id']);
             if ($accountError) {
                 return response()->json(['message' => $accountError], 422);
+            }
+        }
+
+        $type = $fields['type'] ?? $manualTrade->type;
+        $accountId = $fields['shop_account_id'] ?? $manualTrade->shop_account_id;
+        $amount = (float) ($fields['amount'] ?? $manualTrade->amount);
+        if ($type === ManualTrade::TYPE_PURCHASE && $accountId) {
+            try {
+                DocumentPaymentService::assertCanDebit(
+                    (int) $manualTrade->atelier_id,
+                    (int) $accountId,
+                    $amount,
+                    $manualTrade
+                );
+            } catch (RuntimeException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
             }
         }
 

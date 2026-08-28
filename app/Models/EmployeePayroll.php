@@ -103,6 +103,10 @@ class EmployeePayroll extends Model
      */
     public function remaining(): float
     {
+        if (! $this->isSalaryCalculated()) {
+            return 0.0;
+        }
+
         return round(max(0, (float) $this->salary_amount - $this->totalPaid()), 2);
     }
 
@@ -111,7 +115,19 @@ class EmployeePayroll extends Model
      */
     public function overpaidAmount(): float
     {
+        if (! $this->isSalaryCalculated()) {
+            return $this->totalPaid();
+        }
+
         return round(max(0, $this->totalPaid() - (float) $this->salary_amount), 2);
+    }
+
+    /**
+     * آیا ساعت/مبلغ حقوق این ماه محاسبه شده؟ (مساعده به‌تنهایی محاسبه محسوب نمی‌شود)
+     */
+    public function isSalaryCalculated(): bool
+    {
+        return (float) $this->hours_worked > 0.001 || (float) $this->salary_amount > 0.01;
     }
 
     /**
@@ -127,7 +143,10 @@ class EmployeePayroll extends Model
         $paid = $this->totalPaid();
         $salary = (float) $this->salary_amount;
 
-        if ($paid <= 0) {
+        if (! $this->isSalaryCalculated()) {
+            // مساعده قبل از محاسبه حقوق، فیش را تسویه‌شده نشان ندهد
+            $status = $paid > 0 ? self::STATUS_PARTIAL : self::STATUS_PENDING;
+        } elseif ($paid <= 0) {
             $status = self::STATUS_PENDING;
         } elseif ($paid < $salary - 0.01) {
             $status = self::STATUS_PARTIAL;
@@ -141,7 +160,7 @@ class EmployeePayroll extends Model
     /**
      * خلاصه پرداخت برای پاسخ API
      *
-     * @return array<string, float|string>
+     * @return array<string, float|int|bool|string>
      */
     public function paymentSummary(): array
     {
@@ -152,6 +171,8 @@ class EmployeePayroll extends Model
             'remaining' => $this->remaining(),
             'overpaid_amount' => $this->overpaidAmount(),
             'status' => $this->status,
+            'salary_calculated' => $this->isSalaryCalculated(),
+            'can_recalculate' => $this->canRecalculateSalary(),
         ];
     }
 }

@@ -4,10 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\Expense;
 use App\Models\ManualTrade;
+use App\Services\DocumentPaymentService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Morilog\Jalali\Jalalian;
+use RuntimeException;
 
 class ExpenseController extends Controller
 {
@@ -20,12 +22,19 @@ class ExpenseController extends Controller
         $query = Expense::where('atelier_id', $atelierId)->orderBy('id', 'desc');
 
         if ($this->supportsPaymentAccount('expenses')) {
-            $query->with('shopAccount');
+            $query->with(['shopAccount', 'cheque']);
 
             // فیلتر بر اساس حساب برداشت (فروشگاه یا تنخواه)
             if ($request->filled('shop_account_id')) {
                 $query->where('shop_account_id', (int) $request->input('shop_account_id'));
             }
+        }
+
+        if (DocumentPaymentService::supports(new Expense()) && $request->filled('payment_method') && in_array($request->input('payment_method'), DocumentPaymentService::methods(), true)) {
+            $query->where('payment_method', $request->input('payment_method'));
+        }
+        if (DocumentPaymentService::supports(new Expense()) && $request->filled('payment_status') && in_array($request->input('payment_status'), ['paid', 'unpaid'], true)) {
+            $query->where('payment_status', $request->input('payment_status'));
         }
 
         // جستجو بر اساس searchFilterModel
@@ -130,7 +139,7 @@ class ExpenseController extends Controller
             'amount' => 'required|numeric|min:0',
             'title' => 'required|string|max:255',
             'type' => 'nullable|in:جاری,سرمایه',
-        ], $this->paymentAccountRules('expenses')));
+        ], $this->paymentAccountRules('expenses'), DocumentPaymentService::requestRules()));
 
         $accountError = $this->paymentAccountError($atelierId, $fields['shop_account_id'] ?? null);
         if ($accountError) {
@@ -142,22 +151,39 @@ class ExpenseController extends Controller
             return response(['error' => 'کاربر احراز هویت نشده است'], 401);
         }
 
-        // ترکیب name و last_name برای user_name
         $fields['user_name'] = trim($user->name . ' ' . $user->last_name);
-
-        // ثبت خودکار تاریخ امروز
         $fields['date'] = Carbon::now()->format('Y-m-d');
-        
-        // اگر type ارسال نشده باشد، مقدار پیش‌فرض 'جاری' قرار می‌دهیم
         if (!isset($fields['type']) || empty($fields['type'])) {
             $fields['type'] = 'جاری';
         }
-
         $fields['atelier_id'] = $atelierId;
 
-        $expense = Expense::create($fields);
+        try {
+            $expense = DB::transaction(function () use ($fields, $atelierId, $request) {
+                $payment = DocumentPaymentService::resolveOnCreate(
+                    $atelierId,
+                    $fields,
+                    (float) $fields['amount'],
+                    'expenses'
+                );
+                $chequePayload = [
+                    'cheque' => $fields['cheque'] ?? null,
+                    'cheque_id' => $fields['cheque_id'] ?? null,
+                    'payment_method' => $payment['payment_method'] ?? ($fields['payment_method'] ?? null),
+                ];
+                unset($fields['cheque'], $fields['cheque_id'], $fields['payment_method']);
+                $fields = array_merge($fields, $payment);
 
-        return response($this->withAccount($expense), 201);
+                $expense = Expense::create($fields);
+                DocumentPaymentService::attachChequeFromRequest($expense, $chequePayload, $fields['user_name']);
+
+                return $expense;
+            });
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response($this->withAccount($expense->fresh(['shopAccount', 'cheque'])), 201);
     }
 
     /**
@@ -191,7 +217,20 @@ class ExpenseController extends Controller
             }
         }
 
-        // تاریخ تغییر نمی‌کنه، فقط فیلدهای دیگر آپدیت می‌شن
+        try {
+            $newAmount = (float) ($fields['amount'] ?? $expense->amount);
+            $accountId = $fields['shop_account_id'] ?? $expense->shop_account_id;
+            if (DocumentPaymentService::isPaid($expense) && $accountId) {
+                DocumentPaymentService::assertCanDebit(
+                    (int) $expense->atelier_id,
+                    (int) $accountId,
+                    $newAmount,
+                    $expense
+                );
+            }
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         $expense->update($fields);
 
@@ -205,12 +244,50 @@ class ExpenseController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $expense);
 
+        if ($expense->cheque && $expense->cheque->status === \App\Models\Cheque::STATUS_CLEARED) {
+            return response()->json([
+                'message' => 'این هزینه با چک وصول‌شده ثبت شده و قابل حذف نیست.',
+            ], 422);
+        }
+
+        if ($expense->cheque && $expense->cheque->status === \App\Models\Cheque::STATUS_PENDING) {
+            $expense->cheque->update(['status' => \App\Models\Cheque::STATUS_CANCELLED, 'expense_id' => null]);
+        }
+
         $expense->delete();
         return response(['message' => 'هزینه با موفقیت حذف شد'], 200);
     }
 
+    /**
+     * تسویه نسیه/چک از حساب — فقط اگر موجودی کافی باشد.
+     * POST /api/expenses/{expense}/settle  { "shop_account_id": 1 }
+     */
+    public function settle(Request $request, Expense $expense)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $expense);
+
+        $fields = $request->validate([
+            'shop_account_id' => 'required|integer|exists:shop_accounts,id',
+        ]);
+
+        $accountError = $this->paymentAccountError((int) $expense->atelier_id, $fields['shop_account_id']);
+        if ($accountError) {
+            return response()->json(['message' => $accountError], 422);
+        }
+
+        try {
+            $expense = DocumentPaymentService::settle($expense, (int) $fields['shop_account_id']);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response($this->withAccount($expense), 200);
+    }
+
     protected function withAccount(Expense $expense): Expense
     {
+        $expense->loadMissing(['shopAccount', 'cheque']);
+
         return $this->attachPaymentAccount($expense);
     }
 

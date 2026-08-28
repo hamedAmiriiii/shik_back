@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ShopAccount;
 use App\Models\ShopAccountTransfer;
+use App\Services\DocumentPaymentService;
 use App\Services\ShopAccountBalanceService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -96,6 +97,12 @@ class ShopAccountTransferController extends Controller
 
         $user = $this->requireStaffShopUser($request);
         $amount = round((float) $fields['amount'], 2);
+
+        try {
+            DocumentPaymentService::assertCanDebit($atelierId, (int) $from->id, $amount);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
         $date = isset($fields['date'])
             ? Carbon::parse($fields['date'])->setTimezone('Asia/Tehran')->format('Y-m-d')
             : Carbon::now('Asia/Tehran')->format('Y-m-d');

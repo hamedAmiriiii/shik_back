@@ -170,11 +170,19 @@ class ChequeController extends Controller
             'due_date.year' => 'required|integer',
             'due_date.month' => 'required|integer|min:1|max:12',
             'due_date.day' => 'required|integer|min:1|max:31',
+            'shop_account_id' => 'nullable|integer|exists:shop_accounts,id',
         ]);
 
         $user = $this->shopRequestActor($request);
         if (!$user) {
             return response(['error' => 'کاربر احراز هویت نشده است'], 401);
+        }
+
+        if (! empty($fields['shop_account_id'])) {
+            $accountError = $this->paymentAccountError($atelierId, $fields['shop_account_id']);
+            if ($accountError) {
+                return response()->json(['message' => $accountError], 422);
+            }
         }
 
         $dueDate = (new Jalalian(
@@ -206,6 +214,7 @@ class ChequeController extends Controller
             'status' => Cheque::STATUS_PENDING,
             'user_name' => trim($user->name.' '.$user->last_name),
             'note' => $fields['note'] ?? null,
+            'shop_account_id' => $fields['shop_account_id'] ?? null,
         ]);
 
         return response($cheque, 201);
@@ -215,7 +224,7 @@ class ChequeController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $cheque);
 
-        return response($cheque->load(['expense', 'income', 'purchase']), 200);
+        return response($cheque->load(['expense', 'income', 'purchase', 'invoice']), 200);
     }
 
     /**
@@ -251,10 +260,22 @@ class ChequeController extends Controller
 
         $message = $cleared->type === Cheque::TYPE_RECEIVED
             ? 'چک دریافتی وصول و به درآمد اضافه شد.'
-            : 'چک صادره وصول و به هزینه اضافه شد.';
+            : 'چک صادره وصول شد.';
+
+        $doc = $cleared->invoice ?: $cleared->expense;
+        $accountDebited = $doc
+            && \App\Services\DocumentPaymentService::isPaid($doc)
+            && $doc->shop_account_id;
+
+        if ($cleared->type === Cheque::TYPE_ISSUED && ! $accountDebited) {
+            $message .= ' موجودی حساب کافی نبود؛ مبلغ از حساب کسر نشد. بعد از تأمین موجودی تسویه کنید.';
+        } elseif ($cleared->type === Cheque::TYPE_ISSUED && $accountDebited) {
+            $message .= ' مبلغ از حساب کسر شد.';
+        }
 
         return response([
             'message' => $message,
+            'account_debited' => (bool) $accountDebited,
             'cheque' => $cleared,
         ], 200);
     }
@@ -275,7 +296,7 @@ class ChequeController extends Controller
 
         $message = $reverted->type === Cheque::TYPE_RECEIVED
             ? 'وصول چک دریافتی برگشت داده شد و درآمد حذف شد.'
-            : 'وصول چک صادره برگشت داده شد و هزینه حذف شد.';
+            : 'وصول چک صادره برگشت داده شد.';
 
         return response([
             'message' => $message,

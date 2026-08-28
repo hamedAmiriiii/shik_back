@@ -131,6 +131,7 @@ Route::middleware('auth:sanctum')->prefix('table-orders')->name('table-orders.')
 Route::group(['middleware' => ['auth:sanctum']], function () {
     // Store/Shop related routes - require authentication
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
+    Route::post('expenses/{expense}/settle', [\App\Http\Controllers\ExpenseController::class, 'settle']);
     Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);
 
     // چک‌ها (صادره / دریافتی) — وصول دستی: هزینه یا درآمد
@@ -150,6 +151,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::resource('shop-employees', \App\Http\Controllers\ShopEmployeeController::class);
     Route::get('employee-payrolls', [\App\Http\Controllers\EmployeePayrollController::class, 'index']);
     Route::post('employee-payrolls', [\App\Http\Controllers\EmployeePayrollController::class, 'store']);
+    // مساعده قبل از محاسبه حقوق — باید قبل از {employeePayroll} باشد
+    Route::post('employee-payrolls/advances', [\App\Http\Controllers\EmployeePayrollPaymentController::class, 'storeAdvance']);
     Route::get('employee-payrolls/{employeePayroll}', [\App\Http\Controllers\EmployeePayrollController::class, 'show']);
     Route::put('employee-payrolls/{employeePayroll}', [\App\Http\Controllers\EmployeePayrollController::class, 'update']);
     Route::delete('employee-payrolls/{employeePayroll}', [\App\Http\Controllers\EmployeePayrollController::class, 'destroy']);
@@ -160,6 +163,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     
     // Invoice routes - require authentication
     Route::resource('invoices', \App\Http\Controllers\InvoiceController::class);
+    Route::post('invoices/{invoice}/settle', [\App\Http\Controllers\InvoiceController::class, 'settle']);
     Route::resource('manual-trades', \App\Http\Controllers\ManualTradeController::class)->except(['create', 'edit']);
     
     // SMS Logs routes - require authentication
