@@ -13,8 +13,13 @@ class ReturnedProduct extends Model
     protected $fillable = [
         'product_id',
         'atelier_id',
+        'purchase_id',
+        'phone',
+        'quantity',
         'sale_price',
         'purchase_price',
+        'credit_refunded',
+        'credit_earned_reversed',
         'user_name',
         'notes',
     ];

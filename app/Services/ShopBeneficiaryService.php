@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\DocumentPayment;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\UserShiksho;
@@ -178,11 +179,30 @@ class ShopBeneficiaryService
             ];
         }
 
-        $unpaidQuery = (clone $base)->where('payment_status', DocumentPaymentService::STATUS_UNPAID);
+        $unpaidQuery = (clone $base)->whereIn('payment_status', [
+            DocumentPaymentService::STATUS_UNPAID,
+            DocumentPaymentService::STATUS_PARTIAL,
+        ]);
+
+        $unpaid = round((float) (clone $unpaidQuery)->sum('amount'), 2);
+        if (Schema::hasTable('document_payments')) {
+            $fk = $table === 'expenses' ? 'expense_id' : 'invoice_id';
+            $creditUnpaid = (float) DocumentPayment::query()
+                ->where('method', DocumentPaymentService::METHOD_CREDIT)
+                ->where('settled', false)
+                ->whereIn($fk, (clone $base)->select('id'))
+                ->sum('amount');
+            $fullUnpaid = (float) (clone $base)->where('payment_status', DocumentPaymentService::STATUS_UNPAID)
+                ->whereNotIn('id', function ($q) use ($fk) {
+                    $q->select($fk)->from('document_payments')->whereNotNull($fk);
+                })
+                ->sum('amount');
+            $unpaid = round($creditUnpaid + $fullUnpaid, 2);
+        }
 
         return [
             'total' => $total,
-            'unpaid' => round((float) (clone $unpaidQuery)->sum('amount'), 2),
+            'unpaid' => $unpaid,
             'count' => $count,
             'unpaid_count' => (int) (clone $unpaidQuery)->count(),
         ];

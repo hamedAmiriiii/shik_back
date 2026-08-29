@@ -31,6 +31,10 @@ class ExpenseController extends Controller
             }
         }
 
+        if (DocumentPaymentService::supportsSplits()) {
+            $query->with('payments');
+        }
+
         if (ShopBeneficiaryService::supports('expenses')) {
             $query->with(['beneficiary:id,phone,name']);
             $beneficiaryId = $request->input('beneficiary_id');
@@ -45,10 +49,21 @@ class ExpenseController extends Controller
             }
         }
 
-        if (DocumentPaymentService::supports(new Expense()) && $request->filled('payment_method') && in_array($request->input('payment_method'), DocumentPaymentService::methods(), true)) {
-            $query->where('payment_method', $request->input('payment_method'));
+        if (DocumentPaymentService::supports(new Expense()) && $request->filled('payment_method')) {
+            $method = DocumentPaymentService::normalizeMethod($request->input('payment_method'))
+                ?: $request->input('payment_method');
+            if (in_array($method, DocumentPaymentService::methods(), true)) {
+                $query->where(function ($q) use ($method) {
+                    $q->where('payment_method', $method);
+                    if (DocumentPaymentService::supportsSplits() && $method !== DocumentPaymentService::METHOD_MIXED) {
+                        $q->orWhereHas('payments', function ($p) use ($method) {
+                            $p->where('method', $method);
+                        });
+                    }
+                });
+            }
         }
-        if (DocumentPaymentService::supports(new Expense()) && $request->filled('payment_status') && in_array($request->input('payment_status'), ['paid', 'unpaid'], true)) {
+        if (DocumentPaymentService::supports(new Expense()) && $request->filled('payment_status') && in_array($request->input('payment_status'), ['paid', 'unpaid', 'partial'], true)) {
             $query->where('payment_status', $request->input('payment_status'));
         }
 
@@ -150,6 +165,18 @@ class ExpenseController extends Controller
             ], 422);
         }
 
+        $this->mergeRequestPayload($request, [
+            'amount', 'title', 'type', 'shop_account_id', 'payment_method', 'cheque', 'cheque_id',
+            'payments', 'cash_amount', 'cheque_amount', 'credit_amount', 'beneficiary_id', 'user_shiksho_id',
+        ]);
+        $paymentsRaw = $request->input('payments');
+        if (is_string($paymentsRaw) && $paymentsRaw !== '') {
+            $decoded = json_decode($paymentsRaw, true);
+            if (is_array($decoded)) {
+                $request->merge(['payments' => $decoded]);
+            }
+        }
+
         $fields = $request->validate(array_merge([
             'amount' => 'required|numeric|min:0',
             'title' => 'required|string|max:255',
@@ -180,22 +207,18 @@ class ExpenseController extends Controller
 
         try {
             $expense = DB::transaction(function () use ($fields, $atelierId, $request) {
+                $paymentSource = $fields;
                 $payment = DocumentPaymentService::resolveOnCreate(
                     $atelierId,
                     $fields,
                     (float) $fields['amount'],
                     'expenses'
                 );
-                $chequePayload = [
-                    'cheque' => $fields['cheque'] ?? null,
-                    'cheque_id' => $fields['cheque_id'] ?? null,
-                    'payment_method' => $payment['payment_method'] ?? ($fields['payment_method'] ?? null),
-                ];
-                unset($fields['cheque'], $fields['cheque_id'], $fields['payment_method']);
+                DocumentPaymentService::unsetPaymentRequestFields($fields);
                 $fields = array_merge($fields, $payment);
 
                 $expense = Expense::create($fields);
-                DocumentPaymentService::attachChequeFromRequest($expense, $chequePayload, $fields['user_name']);
+                DocumentPaymentService::attachChequeFromRequest($expense, $paymentSource, $fields['user_name']);
 
                 return $expense;
             });
@@ -223,12 +246,24 @@ class ExpenseController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $expense);
 
+        $this->mergeRequestPayload($request, [
+            'user_name', 'amount', 'title', 'type', 'shop_account_id', 'payment_method', 'cheque', 'cheque_id',
+            'payments', 'cash_amount', 'cheque_amount', 'credit_amount', 'beneficiary_id', 'user_shiksho_id',
+        ]);
+        $paymentsRaw = $request->input('payments');
+        if (is_string($paymentsRaw) && $paymentsRaw !== '') {
+            $decoded = json_decode($paymentsRaw, true);
+            if (is_array($decoded)) {
+                $request->merge(['payments' => $decoded]);
+            }
+        }
+
         $fields = $request->validate(array_merge([
             'user_name' => 'sometimes|required|string',
             'amount' => 'sometimes|required|numeric|min:0',
             'title' => 'sometimes|required|string|max:255',
             'type' => 'sometimes|required|in:جاری,سرمایه',
-        ], $this->paymentAccountRules('expenses'), ShopBeneficiaryService::requestRules('expenses')));
+        ], $this->paymentAccountRules('expenses'), ShopBeneficiaryService::requestRules('expenses'), DocumentPaymentService::requestRules()));
 
         $beneficiaryError = ShopBeneficiaryService::applyToFields((int) $expense->atelier_id, $fields, true, 'expenses');
         if ($beneficiaryError) {
@@ -244,20 +279,47 @@ class ExpenseController extends Controller
 
         try {
             $newAmount = (float) ($fields['amount'] ?? $expense->amount);
-            $accountId = $fields['shop_account_id'] ?? $expense->shop_account_id;
-            if (DocumentPaymentService::isPaid($expense) && $accountId) {
-                DocumentPaymentService::assertCanDebit(
-                    (int) $expense->atelier_id,
-                    (int) $accountId,
-                    $newAmount,
-                    $expense
-                );
+            $paymentsSent = DocumentPaymentService::requestHasPaymentSplits($request);
+            if (
+                abs($newAmount - (float) $expense->amount) > 0.01
+                && ($expense->payment_method === DocumentPaymentService::METHOD_MIXED)
+                && ! $paymentsSent
+            ) {
+                throw new RuntimeException('مبلغ هزینه عوض شد؛ سهم نقد، چک و نسیه را دوباره ارسال کنید.');
+            }
+            if ($paymentsSent) {
+                $splits = DocumentPaymentService::splitsFromFields($fields, $newAmount, $expense);
+                DocumentPaymentService::assertAccountSplits((int) $expense->atelier_id, $splits, $expense);
+            } else {
+                $accountId = $fields['shop_account_id'] ?? $expense->shop_account_id;
+                if ($accountId && DocumentPaymentService::settledAmountOnAccount($expense, (int) $accountId) > 0) {
+                    $debit = ($expense->payment_method === DocumentPaymentService::METHOD_MIXED)
+                        ? DocumentPaymentService::settledAmountOnAccount($expense, (int) $accountId)
+                        : $newAmount;
+                    DocumentPaymentService::assertCanDebit(
+                        (int) $expense->atelier_id,
+                        (int) $accountId,
+                        $debit,
+                        $expense
+                    );
+                }
             }
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        $expense->update($fields);
+        try {
+            DB::transaction(function () use ($expense, $fields, $request) {
+                $paymentSource = DocumentPaymentService::requestHasPaymentSplits($request) ? $fields : null;
+                DocumentPaymentService::unsetPaymentRequestFields($fields);
+                $expense->update($fields);
+                if ($paymentSource) {
+                    DocumentPaymentService::replaceSplits($expense->fresh(), $paymentSource, (string) $expense->user_name);
+                }
+            });
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         return response($this->withAccount($expense->fresh()), 200);
     }
@@ -269,14 +331,22 @@ class ExpenseController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $expense);
 
-        if ($expense->cheque && $expense->cheque->status === \App\Models\Cheque::STATUS_CLEARED) {
+        $clearedCheque = \App\Models\Cheque::query()
+            ->where('expense_id', $expense->id)
+            ->where('status', \App\Models\Cheque::STATUS_CLEARED)
+            ->exists();
+        if ($clearedCheque || ($expense->cheque && $expense->cheque->status === \App\Models\Cheque::STATUS_CLEARED)) {
             return response()->json([
                 'message' => 'این هزینه با چک وصول‌شده ثبت شده و قابل حذف نیست.',
             ], 422);
         }
 
-        if ($expense->cheque && $expense->cheque->status === \App\Models\Cheque::STATUS_PENDING) {
-            $expense->cheque->update(['status' => \App\Models\Cheque::STATUS_CANCELLED, 'expense_id' => null]);
+        $pendingCheques = \App\Models\Cheque::query()
+            ->where('expense_id', $expense->id)
+            ->where('status', \App\Models\Cheque::STATUS_PENDING)
+            ->get();
+        foreach ($pendingCheques as $cheque) {
+            $cheque->update(['status' => \App\Models\Cheque::STATUS_CANCELLED, 'expense_id' => null]);
         }
 
         $expense->delete();
@@ -293,6 +363,7 @@ class ExpenseController extends Controller
 
         $fields = $request->validate([
             'shop_account_id' => 'required|integer|exists:shop_accounts,id',
+            'amount' => 'nullable|numeric|min:0.01',
         ]);
 
         $accountError = $this->paymentAccountError((int) $expense->atelier_id, $fields['shop_account_id']);
@@ -301,7 +372,11 @@ class ExpenseController extends Controller
         }
 
         try {
-            $expense = DocumentPaymentService::settle($expense, (int) $fields['shop_account_id']);
+            $expense = DocumentPaymentService::settle(
+                $expense,
+                (int) $fields['shop_account_id'],
+                isset($fields['amount']) ? (float) $fields['amount'] : null
+            );
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -312,8 +387,14 @@ class ExpenseController extends Controller
     protected function withAccount(Expense $expense): Expense
     {
         $expense->loadMissing(['shopAccount', 'cheque']);
+        if (DocumentPaymentService::supportsSplits()) {
+            $expense->loadMissing(['payments.cheque', 'payments.shopAccount']);
+        }
 
-        return ShopBeneficiaryService::attachTo($this->attachPaymentAccount($expense));
+        $expense = ShopBeneficiaryService::attachTo($this->attachPaymentAccount($expense));
+        $expense->setAttribute('payment_breakdown', DocumentPaymentService::breakdown($expense));
+
+        return $expense;
     }
 
     /**

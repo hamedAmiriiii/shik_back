@@ -51,19 +51,28 @@ class Expense extends Model
     public function getPaymentMethodLabelAttribute(): string
     {
         $method = $this->attributes['payment_method'] ?? 'account';
-        if ($method === 'cheque') {
-            return 'چکی';
-        }
-        if ($method === 'credit') {
-            return 'نسیه';
+        if ($method === 'mixed' && $this->relationLoaded('payments')) {
+            return \App\Services\DocumentPaymentService::mixedLabelFromMethods(
+                $this->payments->pluck('method')->all()
+            );
         }
 
-        return 'از حساب';
+        return \App\Services\DocumentPaymentService::methodLabel((string) $method);
     }
 
     public function getPaymentStatusLabelAttribute(): string
     {
-        return (($this->attributes['payment_status'] ?? 'paid') === 'unpaid') ? 'پرداخت‌نشده' : 'پرداخت‌شده';
+        return \App\Services\DocumentPaymentService::statusLabel($this->attributes['payment_status'] ?? 'paid');
+    }
+
+    public function payments()
+    {
+        return $this->hasMany(DocumentPayment::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    public function cheques()
+    {
+        return $this->hasMany(Cheque::class);
     }
 
     public function getDateAttribute($value): string

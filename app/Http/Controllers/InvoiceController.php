@@ -35,6 +35,9 @@ class InvoiceController extends Controller
         if ($this->supportsInvoiceItems()) {
             $query->with('items');
         }
+        if (DocumentPaymentService::supportsSplits()) {
+            $query->with('payments');
+        }
 
         if (ShopBeneficiaryService::supports('invoices')) {
             $query->with(['beneficiary:id,phone,name']);
@@ -58,10 +61,21 @@ class InvoiceController extends Controller
             }
         }
 
-        if (DocumentPaymentService::supports(new Invoice()) && $request->filled('payment_method') && in_array($request->input('payment_method'), DocumentPaymentService::methods(), true)) {
-            $query->where('payment_method', $request->input('payment_method'));
+        if (DocumentPaymentService::supports(new Invoice()) && $request->filled('payment_method')) {
+            $method = DocumentPaymentService::normalizeMethod($request->input('payment_method'))
+                ?: $request->input('payment_method');
+            if (in_array($method, DocumentPaymentService::methods(), true)) {
+                $query->where(function ($q) use ($method) {
+                    $q->where('payment_method', $method);
+                    if (DocumentPaymentService::supportsSplits() && $method !== DocumentPaymentService::METHOD_MIXED) {
+                        $q->orWhereHas('payments', function ($p) use ($method) {
+                            $p->where('method', $method);
+                        });
+                    }
+                });
+            }
         }
-        if (DocumentPaymentService::supports(new Invoice()) && $request->filled('payment_status') && in_array($request->input('payment_status'), ['paid', 'unpaid'], true)) {
+        if (DocumentPaymentService::supports(new Invoice()) && $request->filled('payment_status') && in_array($request->input('payment_status'), ['paid', 'unpaid', 'partial'], true)) {
             $query->where('payment_status', $request->input('payment_status'));
         }
 
@@ -193,28 +207,26 @@ class InvoiceController extends Controller
         }
 
         $fields['user_name'] = trim($user->name.' '.$user->last_name);
-        $fields['date'] = Carbon::now()->format('Y-m-d');
+        $fields['date'] = $this->resolveInvoiceDate($request) ?: Carbon::now()->format('Y-m-d');
         $fields['atelier_id'] = $atelierId;
+        unset($fields['invoice_date']);
 
         try {
             $invoice = DB::transaction(function () use ($fields, $atelierId, $itemRows, $request) {
+                $paymentSource = $fields;
                 $payment = DocumentPaymentService::resolveOnCreate(
                     $atelierId,
                     $fields,
                     (float) $fields['amount'],
                     'invoices'
                 );
-                $chequePayload = [
-                    'cheque' => $fields['cheque'] ?? null,
-                    'cheque_id' => $fields['cheque_id'] ?? null,
-                    'payment_method' => $payment['payment_method'] ?? ($fields['payment_method'] ?? null),
-                ];
-                unset($fields['cheque'], $fields['cheque_id'], $fields['payment_method'], $fields['image'], $fields['image_base64']);
+                DocumentPaymentService::unsetPaymentRequestFields($fields);
+                unset($fields['image'], $fields['image_base64']);
                 $fields = array_merge($fields, $payment);
 
                 $invoice = Invoice::create($fields);
                 $this->syncInvoiceItems($invoice, $itemRows);
-                DocumentPaymentService::attachChequeFromRequest($invoice, $chequePayload, $fields['user_name']);
+                DocumentPaymentService::attachChequeFromRequest($invoice, $paymentSource, $fields['user_name']);
                 $this->saveInvoiceImageFromRequest($invoice, $request);
 
                 return $invoice;
@@ -263,7 +275,7 @@ class InvoiceController extends Controller
             'image' => 'nullable',
             'image_base64' => 'nullable|string',
             'remove_image' => 'nullable|boolean',
-        ], $this->paymentAccountRules('invoices'), ShopBeneficiaryService::requestRules('invoices')));
+        ], $this->paymentAccountRules('invoices'), ShopBeneficiaryService::requestRules('invoices'), DocumentPaymentService::requestRules()));
 
         $beneficiaryError = ShopBeneficiaryService::applyToFields((int) $invoice->atelier_id, $fields, true, 'invoices');
         if ($beneficiaryError) {
@@ -312,14 +324,30 @@ class InvoiceController extends Controller
             } elseif (! $itemsSent && $invoice->hasLineItems()) {
                 $newAmount = $invoice->itemsSum();
             }
-            $accountId = $fields['shop_account_id'] ?? $invoice->shop_account_id;
-            if (DocumentPaymentService::isPaid($invoice) && $accountId) {
-                DocumentPaymentService::assertCanDebit(
-                    (int) $invoice->atelier_id,
-                    (int) $accountId,
-                    $newAmount,
-                    $invoice
-                );
+            $paymentsSent = DocumentPaymentService::requestHasPaymentSplits($request);
+            if (
+                abs($newAmount - (float) $invoice->amount) > 0.01
+                && ($invoice->payment_method === DocumentPaymentService::METHOD_MIXED)
+                && ! $paymentsSent
+            ) {
+                throw new RuntimeException('مبلغ فاکتور عوض شد؛ سهم نقد، چک و نسیه را دوباره ارسال کنید.');
+            }
+            if ($paymentsSent) {
+                $splits = DocumentPaymentService::splitsFromFields($fields, $newAmount, $invoice);
+                DocumentPaymentService::assertAccountSplits((int) $invoice->atelier_id, $splits, $invoice);
+            } else {
+                $accountId = $fields['shop_account_id'] ?? $invoice->shop_account_id;
+                if ($accountId && DocumentPaymentService::settledAmountOnAccount($invoice, (int) $accountId) > 0) {
+                    $debit = ($invoice->payment_method === DocumentPaymentService::METHOD_MIXED)
+                        ? DocumentPaymentService::settledAmountOnAccount($invoice, (int) $accountId)
+                        : $newAmount;
+                    DocumentPaymentService::assertCanDebit(
+                        (int) $invoice->atelier_id,
+                        (int) $accountId,
+                        $debit,
+                        $invoice
+                    );
+                }
             }
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -327,10 +355,15 @@ class InvoiceController extends Controller
 
         try {
             DB::transaction(function () use ($invoice, $fields, $itemRows, $itemsSent, $request) {
+                $paymentSource = DocumentPaymentService::requestHasPaymentSplits($request) ? $fields : null;
+                DocumentPaymentService::unsetPaymentRequestFields($fields);
                 unset($fields['image'], $fields['image_base64'], $fields['remove_image']);
                 $invoice->update($fields);
                 if ($itemsSent) {
                     $this->syncInvoiceItems($invoice, $itemRows);
+                }
+                if ($paymentSource) {
+                    DocumentPaymentService::replaceSplits($invoice->fresh(), $paymentSource, (string) $invoice->user_name);
                 }
                 if ($request->boolean('remove_image') && ! $this->requestHasImage($request)) {
                     $this->deleteInvoiceImage($invoice);
@@ -353,14 +386,22 @@ class InvoiceController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $invoice);
 
-        if ($invoice->cheque && $invoice->cheque->status === \App\Models\Cheque::STATUS_CLEARED) {
+        $clearedCheque = \App\Models\Cheque::query()
+            ->where('invoice_id', $invoice->id)
+            ->where('status', \App\Models\Cheque::STATUS_CLEARED)
+            ->exists();
+        if ($clearedCheque || ($invoice->cheque && $invoice->cheque->status === \App\Models\Cheque::STATUS_CLEARED)) {
             return response()->json([
                 'message' => 'این فاکتور با چک وصول‌شده ثبت شده و قابل حذف نیست.',
             ], 422);
         }
 
-        if ($invoice->cheque && $invoice->cheque->status === \App\Models\Cheque::STATUS_PENDING) {
-            $invoice->cheque->update(['status' => \App\Models\Cheque::STATUS_CANCELLED, 'invoice_id' => null]);
+        $pendingCheques = \App\Models\Cheque::query()
+            ->where('invoice_id', $invoice->id)
+            ->where('status', \App\Models\Cheque::STATUS_PENDING)
+            ->get();
+        foreach ($pendingCheques as $cheque) {
+            $cheque->update(['status' => \App\Models\Cheque::STATUS_CANCELLED, 'invoice_id' => null]);
         }
 
         $this->deleteInvoiceImage($invoice);
@@ -379,6 +420,7 @@ class InvoiceController extends Controller
 
         $fields = $request->validate([
             'shop_account_id' => 'required|integer|exists:shop_accounts,id',
+            'amount' => 'nullable|numeric|min:0.01',
         ]);
 
         $accountError = $this->paymentAccountError((int) $invoice->atelier_id, $fields['shop_account_id']);
@@ -387,7 +429,11 @@ class InvoiceController extends Controller
         }
 
         try {
-            $invoice = DocumentPaymentService::settle($invoice, (int) $fields['shop_account_id']);
+            $invoice = DocumentPaymentService::settle(
+                $invoice,
+                (int) $fields['shop_account_id'],
+                isset($fields['amount']) ? (float) $fields['amount'] : null
+            );
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -447,6 +493,10 @@ class InvoiceController extends Controller
             $relations[] = 'shopAccount';
             $relations[] = 'cheque';
         }
+        if (DocumentPaymentService::supportsSplits()) {
+            $relations[] = 'payments.cheque';
+            $relations[] = 'payments.shopAccount';
+        }
         if (ShopBeneficiaryService::supports('invoices')) {
             $relations[] = 'beneficiary';
         }
@@ -454,7 +504,10 @@ class InvoiceController extends Controller
             $invoice->loadMissing($relations);
         }
 
-        return ShopBeneficiaryService::attachTo($this->attachPaymentAccount($invoice));
+        $invoice = ShopBeneficiaryService::attachTo($this->attachPaymentAccount($invoice));
+        $invoice->setAttribute('payment_breakdown', DocumentPaymentService::breakdown($invoice));
+
+        return $invoice;
     }
 
     protected function withAccount(Invoice $invoice): Invoice
@@ -467,6 +520,35 @@ class InvoiceController extends Controller
         return Schema::hasTable('invoice_items');
     }
 
+    protected function resolveInvoiceDate(Request $request): ?string
+    {
+        $fromParts = DocumentPaymentService::parseJalaliDate($request->input('invoice_date', $request->input('date')));
+        if ($fromParts) {
+            return $fromParts;
+        }
+
+        $raw = $request->input('date');
+        if (! is_string($raw) || trim($raw) === '') {
+            return null;
+        }
+        $raw = str_replace(['\\', '-'], '/', trim($raw));
+        if (! preg_match('/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/', $raw, $m)) {
+            return null;
+        }
+        $year = (int) $m[1];
+        $month = (int) $m[2];
+        $day = (int) $m[3];
+        if ($year > 1600) {
+            return sprintf('%04d-%02d-%02d', $year, $month, $day);
+        }
+
+        try {
+            return (new Jalalian($year, $month, $day))->toCarbon()->format('Y-m-d');
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
     protected function prepareInvoiceRequest(Request $request): void
     {
         $this->mergeRequestPayload($request, [
@@ -474,6 +556,7 @@ class InvoiceController extends Controller
             'title',
             'description',
             'date',
+            'invoice_date',
             'items',
             'image',
             'image_base64',
@@ -482,6 +565,10 @@ class InvoiceController extends Controller
             'payment_method',
             'cheque',
             'cheque_id',
+            'payments',
+            'cash_amount',
+            'cheque_amount',
+            'credit_amount',
             'beneficiary_id',
             'user_shiksho_id',
         ]);
@@ -491,6 +578,14 @@ class InvoiceController extends Controller
             $decoded = json_decode($items, true);
             if (is_array($decoded)) {
                 $request->merge(['items' => $decoded]);
+            }
+        }
+
+        $payments = $request->input('payments');
+        if (is_string($payments) && $payments !== '') {
+            $decoded = json_decode($payments, true);
+            if (is_array($decoded)) {
+                $request->merge(['payments' => $decoded]);
             }
         }
     }

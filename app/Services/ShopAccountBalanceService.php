@@ -3,11 +3,13 @@
 namespace App\Services;
 
 use App\Models\DailyShopReconciliationAccountDeposit;
+use App\Models\DocumentPayment;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\ManualTrade;
 use App\Models\ShopAccount;
 use App\Models\ShopAccountTransfer;
+use App\Services\DocumentPaymentService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -125,20 +127,13 @@ class ShopAccountBalanceService
     public static function availableBalance(ShopAccount $account, $ignorePaidDocument = null): float
     {
         $available = self::balanceFor($account);
-        if (! $ignorePaidDocument || ! $ignorePaidDocument->shop_account_id) {
-            return $available;
-        }
-        if ((int) $ignorePaidDocument->shop_account_id !== (int) $account->id) {
+        if (! $ignorePaidDocument) {
             return $available;
         }
 
-        $isPaid = ! Schema::hasColumn($ignorePaidDocument->getTable(), 'payment_status')
-            || ($ignorePaidDocument->payment_status ?? 'paid') === 'paid';
-        if ($isPaid) {
-            $available = round($available + (float) $ignorePaidDocument->amount, 2);
-        }
+        $addBack = DocumentPaymentService::settledAmountOnAccount($ignorePaidDocument, (int) $account->id);
 
-        return $available;
+        return round($available + $addBack, 2);
     }
 
     /**
@@ -239,8 +234,9 @@ class ShopAccountBalanceService
         }
 
         $model = $table === 'expenses' ? Expense::class : Invoice::class;
+        $fk = $table === 'expenses' ? 'expense_id' : 'invoice_id';
 
-        return $model::query()
+        $legacyQuery = $model::query()
             ->where('atelier_id', $atelierId)
             ->whereIn('shop_account_id', $accountIds)
             ->when(
@@ -248,12 +244,38 @@ class ShopAccountBalanceService
                 function ($q) {
                     $q->where('payment_status', 'paid');
                 }
-            )
+            );
+
+        if (Schema::hasTable('document_payments')) {
+            $legacyQuery->whereNotIn('id', function ($q) use ($fk) {
+                $q->select($fk)->from('document_payments')->whereNotNull($fk);
+            });
+        }
+
+        $totals = $legacyQuery
             ->selectRaw('shop_account_id, SUM(amount) as total')
             ->groupBy('shop_account_id')
             ->pluck('total', 'shop_account_id')
             ->mapWithKeys(fn ($v, $k) => [(int) $k => (float) $v])
             ->all();
+
+        if (Schema::hasTable('document_payments')) {
+            $splitTotals = DocumentPayment::query()
+                ->where('atelier_id', $atelierId)
+                ->where('settled', true)
+                ->whereIn('shop_account_id', $accountIds)
+                ->whereNotNull($fk)
+                ->selectRaw('shop_account_id, SUM(amount) as total')
+                ->groupBy('shop_account_id')
+                ->pluck('total', 'shop_account_id')
+                ->mapWithKeys(fn ($v, $k) => [(int) $k => (float) $v])
+                ->all();
+            foreach ($splitTotals as $id => $total) {
+                $totals[$id] = round(($totals[$id] ?? 0) + $total, 2);
+            }
+        }
+
+        return $totals;
     }
 
     /**

@@ -93,6 +93,7 @@ Route::prefix('purchased-products')->name('purchased-products.')->group(function
     Route::put('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'update']);
     Route::delete('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'destroy']);
     Route::delete('/{purchase}/items/{purchasedProduct}', [\App\Http\Controllers\PurchasedProductController::class, 'returnItem']);
+    Route::post('/{purchase}/return', [\App\Http\Controllers\PurchasedProductController::class, 'returnPurchase']);
 });
 
 Route::prefix('customers')->name('customers.')->group(function () {

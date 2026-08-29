@@ -760,6 +760,7 @@ class PurchasedProductController extends Controller
         $request->validate([
             'quantity' => 'sometimes|numeric|min:0.001',
             'notes' => 'nullable|string|max:2000',
+            'phone' => 'nullable|string|max:20',
         ]);
 
         $product = $purchasedProduct->product;
@@ -794,17 +795,65 @@ class PurchasedProductController extends Controller
                 $purchasedProduct,
                 $returnQty,
                 $userName,
-                $request->input('notes')
+                $request->input('notes'),
+                $request->input('phone')
             );
         } catch (\InvalidArgumentException $e) {
-            return response(['error' => $e->getMessage()], 400);
+            return response(['error' => $e->getMessage(), 'message' => $e->getMessage()], 422);
         }
 
         return response([
-            'message' => 'محصول با موفقیت برگشت داده شد',
+            'message' => 'محصول با موفقیت برگشت داده شد. مبلغ به اعتبار مشتری اضافه شد.',
             'returned_item' => $result['returned_item'],
             'row' => $result['row'],
-            'purchase' => $purchase,
+            'phone' => $result['phone'] ?? $purchase->phone,
+            'customer_credit' => $result['customer_credit'] ?? null,
+            'purchase' => $result['purchase'] ?? $purchase,
+        ], 200);
+    }
+
+    /**
+     * برگشت کامل یک خرید (همه اقلام باقی‌مانده).
+     * POST /api/purchased-products/{purchase}/return
+     */
+    public function returnPurchase(Request $request, Purchase $purchase)
+    {
+        $request->validate([
+            'notes' => 'nullable|string|max:2000',
+            'phone' => 'nullable|string|max:20',
+        ]);
+
+        $userName = null;
+        $staffAtelierId = $this->staffShopAtelierId($request);
+        if ($staffAtelierId !== null) {
+            $user = $this->requireStaffShopUser($request);
+            $userName = trim($user->name.' '.$user->last_name);
+            if ($purchase->atelier_id !== null && (int) $purchase->atelier_id !== (int) $staffAtelierId) {
+                return response(['error' => 'این فاکتور متعلق به فروشگاه شما نیست'], 403);
+            }
+        }
+
+        try {
+            $result = \App\Services\PurchaseItemReturnService::processFullReturn(
+                $purchase,
+                $request->input('phone'),
+                $userName,
+                $request->input('notes')
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response(['error' => $e->getMessage(), 'message' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'message' => 'خرید به‌طور کامل برگشت داده شد. مبلغ به اعتبار مشتری اضافه شد.',
+            'full_return' => true,
+            'returned_items' => $result['returned_items'],
+            'rows' => $result['rows'],
+            'credit_refunded' => $result['credit_refunded'],
+            'credit_earned_reversed' => $result['credit_earned_reversed'],
+            'phone' => $result['phone'],
+            'customer_credit' => $result['customer_credit'],
+            'purchase' => $result['purchase'],
         ], 200);
     }
 

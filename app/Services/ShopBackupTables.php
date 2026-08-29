@@ -194,6 +194,16 @@ class ShopBackupTables
                 ],
             ],
             [
+                'name' => 'document_payments',
+                'scope' => 'atelier',
+                'fks' => [
+                    'invoice_id' => 'invoices',
+                    'expense_id' => 'expenses',
+                    'shop_account_id' => 'shop_accounts',
+                    'cheque_id' => 'cheques',
+                ],
+            ],
+            [
                 'name' => 'raw_material_lots',
                 'scope' => 'atelier',
                 'fks' => [
@@ -284,6 +294,7 @@ class ShopBackupTables
                 'scope' => 'atelier',
                 'fks' => [
                     'product_id' => 'products',
+                    'purchase_id' => 'purchases',
                 ],
             ],
             [

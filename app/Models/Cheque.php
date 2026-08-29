@@ -235,9 +235,9 @@ class Cheque extends Model
                     ?: ($expense ? $expense->shop_account_id : null);
 
                 if ($invoice) {
-                    DocumentPaymentService::trySettleAfterClear($invoice, $accountId ? (int) $accountId : null);
+                    DocumentPaymentService::trySettleAfterClear($invoice, $accountId ? (int) $accountId : null, (int) $locked->id);
                 } elseif ($expense) {
-                    DocumentPaymentService::trySettleAfterClear($expense, $accountId ? (int) $accountId : null);
+                    DocumentPaymentService::trySettleAfterClear($expense, $accountId ? (int) $accountId : null, (int) $locked->id);
                 }
 
                 $locked->update([
@@ -299,11 +299,13 @@ class Cheque extends Model
                 if ($locked->invoice_id) {
                     $invoice = Invoice::find($locked->invoice_id);
                     if ($invoice) {
-                        DocumentPaymentService::unpay($invoice);
+                        DocumentPaymentService::unpayCheque($invoice, (int) $locked->id);
                     }
                 } elseif ($locked->expense_id) {
                     $expense = Expense::find($locked->expense_id);
-                    if ($expense && (($expense->payment_method ?? null) === 'cheque' || $expense->cheque_id == $locked->id)) {
+                    if ($expense && DocumentPaymentService::supportsSplits() && $expense->payments()->where('cheque_id', $locked->id)->exists()) {
+                        DocumentPaymentService::unpayCheque($expense, (int) $locked->id);
+                    } elseif ($expense && (($expense->payment_method ?? null) === 'cheque' || $expense->cheque_id == $locked->id)) {
                         DocumentPaymentService::unpay($expense);
                     } else {
                         Expense::where('id', $locked->expense_id)->delete();
