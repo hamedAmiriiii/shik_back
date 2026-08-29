@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Expense;
 use App\Models\ManualTrade;
+use App\Services\CustomerCreditExpenseService;
 use App\Services\DocumentPaymentService;
 use App\Services\ShopBeneficiaryService;
 use Carbon\Carbon;
@@ -65,6 +66,17 @@ class ExpenseController extends Controller
         }
         if (DocumentPaymentService::supports(new Expense()) && $request->filled('payment_status') && in_array($request->input('payment_status'), ['paid', 'unpaid', 'partial'], true)) {
             $query->where('payment_status', $request->input('payment_status'));
+        }
+
+        if (CustomerCreditExpenseService::supports() && $request->filled('credit_source')) {
+            $source = (string) $request->input('credit_source');
+            if (in_array($source, [
+                CustomerCreditExpenseService::SOURCE_LOYALTY,
+                CustomerCreditExpenseService::SOURCE_RETURN,
+                CustomerCreditExpenseService::SOURCE_MANUAL,
+            ], true)) {
+                $query->where('credit_source', $source);
+            }
         }
 
         // جستجو بر اساس searchFilterModel
@@ -403,7 +415,8 @@ class ExpenseController extends Controller
     public function statistics(Request $request)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
-        $expenseQuery = Expense::where('atelier_id', $atelierId);
+        $allQuery = Expense::where('atelier_id', $atelierId);
+        $expenseQuery = CustomerCreditExpenseService::excludeFromTotals(clone $allQuery);
 
         $totalExpenses = (clone $expenseQuery)->sum('amount');
 
@@ -411,7 +424,7 @@ class ExpenseController extends Controller
 
         $totalCapitalExpenses = (clone $expenseQuery)->where('type', 'سرمایه')->sum('amount');
 
-        $expensesByUser = Expense::where('atelier_id', $atelierId)->select(
+        $expensesByUser = (clone $expenseQuery)->select(
             'user_name',
             DB::raw('SUM(CASE WHEN type = "جاری" THEN amount ELSE 0 END) as total_current'),
             DB::raw('SUM(CASE WHEN type = "سرمایه" THEN amount ELSE 0 END) as total_capital'),
@@ -430,6 +443,19 @@ class ExpenseController extends Controller
             'total_capital_expenses' => (float) $totalCapitalExpenses,
             'total_manual_purchases' => $totalManualPurchases,
             'total_manual_sales' => $totalManualSales,
+            'customer_credit_expenses' => CustomerCreditExpenseService::sumForAtelier($atelierId),
+            'customer_credit_loyalty' => CustomerCreditExpenseService::sumForAtelier(
+                $atelierId,
+                CustomerCreditExpenseService::SOURCE_LOYALTY
+            ),
+            'customer_credit_returns' => CustomerCreditExpenseService::sumForAtelier(
+                $atelierId,
+                CustomerCreditExpenseService::SOURCE_RETURN
+            ),
+            'customer_credit_manual' => CustomerCreditExpenseService::sumForAtelier(
+                $atelierId,
+                CustomerCreditExpenseService::SOURCE_MANUAL
+            ),
             'expenses_by_user' => $expensesByUser,
             'meta' => ['atelier_id' => $atelierId],
         ], 200);

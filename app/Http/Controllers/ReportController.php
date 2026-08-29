@@ -6,6 +6,7 @@ use App\Models\Atelier;
 use App\Models\Expense;
 use App\Models\ManualTrade;
 use App\Models\Product;
+use App\Services\CustomerCreditExpenseService;
 use App\Services\ShopSalesReportService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -125,13 +126,14 @@ class ReportController extends Controller
 
     private function getExpensesStatistics(int $atelierId)
     {
-        $expenseQuery = Expense::where('atelier_id', $atelierId);
+        $allQuery = Expense::where('atelier_id', $atelierId);
+        $expenseQuery = CustomerCreditExpenseService::excludeFromTotals(clone $allQuery);
 
         $totalExpenses = (clone $expenseQuery)->sum('amount');
         $totalCurrentExpenses = (clone $expenseQuery)->where('type', 'جاری')->sum('amount');
         $totalCapitalExpenses = (clone $expenseQuery)->where('type', 'سرمایه')->sum('amount');
 
-        $expensesByUser = Expense::where('atelier_id', $atelierId)->select(
+        $expensesByUser = (clone $expenseQuery)->select(
             'user_name',
             DB::raw('SUM(CASE WHEN type = "جاری" THEN amount ELSE 0 END) as total_current'),
             DB::raw('SUM(CASE WHEN type = "سرمایه" THEN amount ELSE 0 END) as total_capital'),
@@ -150,6 +152,7 @@ class ReportController extends Controller
             'total_capital_expenses' => (float) $totalCapitalExpenses,
             'total_manual_purchases' => $totalManualPurchases,
             'total_manual_sales' => $totalManualSales,
+            'customer_credit_expenses' => CustomerCreditExpenseService::sumForAtelier($atelierId),
             'expenses_by_user' => $expensesByUser,
         ];
     }

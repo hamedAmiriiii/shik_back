@@ -278,6 +278,11 @@ class OrderController extends Controller
                         foreach ($purchase->purchasedProducts as $purchasedProduct) {
                             $purchasedProduct->delete();
                         }
+
+                        \App\Services\CustomerCreditExpenseService::removeLoyaltyForPurchase(
+                            (int) ($purchase->atelier_id ?? $cart->atelier_id ?? 0),
+                            (int) $purchase->id
+                        );
                         
                         // حذف Purchase
                         $purchase->delete();

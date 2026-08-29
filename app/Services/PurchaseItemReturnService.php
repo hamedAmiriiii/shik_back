@@ -8,6 +8,7 @@ use App\Models\PurchasedProduct;
 use App\Models\Product;
 use App\Models\ReturnedProduct;
 use App\Models\UserShiksho;
+use App\Services\CustomerCreditExpenseService;
 use App\Tools\PhoneTools;
 use App\Tools\ProductQuantityTools;
 use Illuminate\Support\Facades\DB;
@@ -200,6 +201,14 @@ class PurchaseItemReturnService
                 $purchase,
                 $creditRefunded,
                 $creditEarnedReversed
+            );
+
+            CustomerCreditExpenseService::recordPurchaseReturn(
+                $purchase,
+                $log,
+                $creditRefunded,
+                $creditEarnedReversed,
+                $userName
             );
 
             $purchase->load('purchasedProducts');

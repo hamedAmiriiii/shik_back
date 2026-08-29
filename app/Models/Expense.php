@@ -12,7 +12,8 @@ class Expense extends Model
     use HasFactory;
 
     protected $fillable = [
-        'user_name', 'date', 'amount', 'title', 'type', 'atelier_id', 'beneficiary_id', 'shop_account_id',
+        'user_name', 'date', 'amount', 'title', 'type', 'credit_source', 'credit_source_id',
+        'atelier_id', 'beneficiary_id', 'shop_account_id',
         'payment_method', 'payment_status', 'paid_at', 'cheque_id',
     ];
 
@@ -25,6 +26,7 @@ class Expense extends Model
     protected $appends = [
         'payment_method_label',
         'payment_status_label',
+        'is_customer_credit',
     ];
 
     /**
@@ -63,6 +65,11 @@ class Expense extends Model
     public function getPaymentStatusLabelAttribute(): string
     {
         return \App\Services\DocumentPaymentService::statusLabel($this->attributes['payment_status'] ?? 'paid');
+    }
+
+    public function getIsCustomerCreditAttribute(): bool
+    {
+        return ! empty($this->attributes['credit_source'] ?? null);
     }
 
     public function payments()

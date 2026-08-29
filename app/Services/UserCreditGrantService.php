@@ -18,13 +18,22 @@ class UserCreditGrantService
             return;
         }
 
-        UserCreditGrant::create([
+        $grant = UserCreditGrant::create([
             'atelier_id' => $atelierId,
             'phone' => $phone,
             'credit_type' => $creditType,
             'amount' => $delta,
             'source' => UserCreditGrant::SOURCE_MANUAL,
         ]);
+
+        if ($delta > 0 && $creditType === UserCreditGrant::TYPE_REGULAR) {
+            CustomerCreditExpenseService::recordManualGrant(
+                $atelierId,
+                $phone,
+                $delta,
+                (int) $grant->id
+            );
+        }
     }
 
     /**

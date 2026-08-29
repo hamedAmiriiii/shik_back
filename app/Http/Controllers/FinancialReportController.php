@@ -7,6 +7,7 @@ use App\Models\Income;
 use App\Models\Invoice;
 use App\Models\ManualTrade;
 use App\Models\Purchase;
+use App\Services\CustomerCreditExpenseService;
 use App\Services\ShopSalesReportService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -330,13 +331,14 @@ class FinancialReportController extends Controller
         $totalProfit = $metrics['profit'];
         $totalCreditGranted = $metrics['total_credit_granted'];
 
-        // کل هزینه‌های جاری: مجموع amount از expenses که type = 'جاری'
-        // توجه: date در expenses به صورت DATE ذخیره می‌شود (میلادی)
-        $totalExpenses = Expense::where('atelier_id', $atelierId)
+        // کل هزینه‌های جاری (بدون هزینهٔ برگشت خرید — فروش برگشتی جدا کم شده)
+        $expenseBase = Expense::where('atelier_id', $atelierId)
             ->where('type', 'جاری')
             ->whereDate('date', '>=', $start->format('Y-m-d'))
-            ->whereDate('date', '<=', $end->format('Y-m-d'))
-            ->sum('amount');
+            ->whereDate('date', '<=', $end->format('Y-m-d'));
+
+        $totalExpenses = CustomerCreditExpenseService::excludeFromTotals(clone $expenseBase)->sum('amount');
+        $expensesForBalance = CustomerCreditExpenseService::excludeAllCustomerCredit(clone $expenseBase)->sum('amount');
 
         $totalIncomes = Income::where('atelier_id', $atelierId)
             ->whereDate('date', '>=', $start->format('Y-m-d'))
@@ -369,6 +371,7 @@ class FinancialReportController extends Controller
         $incomesForBalance = (float) $totalIncomes - $saleLinkedIncomes + $manualSales;
         $totalIncomes = (float) $totalIncomes + $manualSales;
         $totalExpenses = (float) $totalExpenses + $manualPurchases;
+        $expensesForBalance = (float) $expensesForBalance + $manualPurchases;
         $chequePayments = (float) ($metrics['cheque_payments'] ?? 0);
         $openCheques = (float) ($metrics['open_cheques'] ?? 0);
 
@@ -382,7 +385,7 @@ class FinancialReportController extends Controller
 
         // موجودی: فروش چکی وصول‌نشده موجودی را به‌اندازه مبلغ فروش منفی می‌کند
         // (فروش در sales هست؛ دو بار کسر → اثر خالص −مبلغ چک)
-        $accountBalance = $netSales + $incomesForBalance - $totalExpenses - $totalInvoices
+        $accountBalance = $netSales + $incomesForBalance - $expensesForBalance - $totalInvoices
             - $metrics['credit_used_total'] - (2 * $chequePayments);
 
         return [

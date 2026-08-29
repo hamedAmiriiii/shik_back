@@ -10,6 +10,7 @@ use App\Models\PurchasedProduct;
 use App\Models\Setting;
 use App\Models\TableOrder;
 use App\Models\UserShiksho;
+use App\Services\CustomerCreditExpenseService;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -102,6 +103,7 @@ class TableOrderCheckoutService
             if ($phone) {
                 if ($enableLoyaltyCredit && $creditEarned > 0) {
                     UserShiksho::updateCredit($phone, $creditEarned, $atelierId);
+                    CustomerCreditExpenseService::recordLoyaltyForPurchase($purchase);
                     $creditFormatted = number_format($creditEarned, 0);
                     $shopName = SmsTools::shopSmsBrand($atelierId);
                     $text = "{$shopName}\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
