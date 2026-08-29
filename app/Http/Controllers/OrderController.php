@@ -279,7 +279,7 @@ class OrderController extends Controller
                             $purchasedProduct->delete();
                         }
 
-                        \App\Services\CustomerCreditExpenseService::removeLoyaltyForPurchase(
+                        \App\Services\CustomerCreditExpenseService::removeCreditUsedForPurchase(
                             (int) ($purchase->atelier_id ?? $cart->atelier_id ?? 0),
                             (int) $purchase->id
                         );

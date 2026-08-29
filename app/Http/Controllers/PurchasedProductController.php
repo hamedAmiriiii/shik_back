@@ -445,6 +445,11 @@ class PurchasedProductController extends Controller
             }
 
             $posSale->commitStock($preparedLines, $purchasedProducts);
+            if ($creditUsed > 0) {
+                $actor = $this->shopRequestActor($request);
+                $actorName = $actor ? trim($actor->name.' '.($actor->last_name ?? '')) : null;
+                \App\Services\CustomerCreditExpenseService::recordCreditUsed($purchase, $actorName);
+            }
             DB::commit();
         } catch (QueryException $e) {
             DB::rollBack();
@@ -493,9 +498,6 @@ class PurchasedProductController extends Controller
             if ($enableLoyaltyCredit && $creditEarned > 0) {
                 // به‌روزرسانی اعتبار (اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود)
                 UserShiksho::updateCredit($phone, $creditEarned, $purchaseAtelierId);
-                $actor = $this->shopRequestActor($request);
-                $actorName = $actor ? trim($actor->name.' '.($actor->last_name ?? '')) : null;
-                \App\Services\CustomerCreditExpenseService::recordLoyaltyForPurchase($purchase, $actorName);
 
                 // ارسال پیامک بعد از ذخیره خرید (فقط اگر اعتبار کسب شده باشد)
                 $creditFormatted = number_format($creditEarned, 0);

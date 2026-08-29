@@ -23,6 +23,8 @@ class RawMaterialInvoiceService
             'invoice_link' => 'nullable|string|in:whole,item,invoice,line,all',
             'invoice_item_id' => 'nullable|integer',
             'invoice_title' => 'nullable|string|max:255',
+            'date' => 'nullable',
+            'invoice_date' => 'nullable',
         ], DocumentPaymentService::requestRules(), ShopBeneficiaryService::requestRules('invoices'));
     }
 
@@ -37,9 +39,17 @@ class RawMaterialInvoiceService
             return true;
         }
 
-        return ! empty($fields['quantity_kg'])
-            && ! empty($fields['shop_account_id'])
-            && (($fields['payment_method'] ?? 'account') === 'account');
+        if (empty($fields['quantity_kg'])) {
+            return false;
+        }
+
+        foreach (['payments', 'cash_amount', 'cheque_amount', 'credit_amount', 'cheque', 'cheque_id', 'shop_account_id', 'payment_method'] as $key) {
+            if (! empty($fields[$key])) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -198,7 +208,7 @@ class RawMaterialInvoiceService
             'amount' => $amount,
             'title' => $title,
             'description' => $fields['note'] ?? null,
-            'date' => Carbon::now()->format('Y-m-d'),
+            'date' => $this->resolveInvoiceDate($fields) ?: Carbon::now()->format('Y-m-d'),
             'user_name' => $userName,
             'atelier_id' => $atelierId,
         ];
@@ -212,17 +222,45 @@ class RawMaterialInvoiceService
             $payload['beneficiary_id'] = $beneficiaryFields['beneficiary_id'];
         }
 
+        $paymentSource = $fields;
         $payment = DocumentPaymentService::resolveOnCreate($atelierId, $fields, $amount, 'invoices');
-        $chequePayload = [
-            'cheque' => $fields['cheque'] ?? null,
-            'cheque_id' => $fields['cheque_id'] ?? null,
-            'payment_method' => $payment['payment_method'] ?? ($fields['payment_method'] ?? null),
-        ];
         $payload = array_merge($payload, $payment);
 
         $invoice = Invoice::create($payload);
-        DocumentPaymentService::attachChequeFromRequest($invoice, $chequePayload, $userName);
+        DocumentPaymentService::attachChequeFromRequest($invoice, $paymentSource, $userName);
 
-        return $invoice;
+        return $invoice->fresh(['payments', 'shopAccount', 'cheque']);
+    }
+
+    /**
+     * @param  array<string, mixed>  $fields
+     */
+    protected function resolveInvoiceDate(array $fields): ?string
+    {
+        $fromParts = DocumentPaymentService::parseJalaliDate($fields['invoice_date'] ?? $fields['date'] ?? null);
+        if ($fromParts) {
+            return $fromParts;
+        }
+
+        $raw = $fields['date'] ?? null;
+        if (! is_string($raw) || trim($raw) === '') {
+            return null;
+        }
+        $raw = str_replace(['\\', '-'], '/', trim($raw));
+        if (! preg_match('/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/', $raw, $m)) {
+            return null;
+        }
+        $year = (int) $m[1];
+        $month = (int) $m[2];
+        $day = (int) $m[3];
+        if ($year > 1600) {
+            return sprintf('%04d-%02d-%02d', $year, $month, $day);
+        }
+
+        try {
+            return (new \Morilog\Jalali\Jalalian($year, $month, $day))->toCarbon()->format('Y-m-d');
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 }

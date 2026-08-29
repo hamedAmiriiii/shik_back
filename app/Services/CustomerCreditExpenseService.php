@@ -9,7 +9,8 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * ثبت اعطای اعتبار مشتری به‌صورت هزینه، بدون اثر روی موجودی حساب.
+ * ثبت مصرف اعتبار و اعطای دستی به‌صورت هزینه، بدون اثر روی موجودی حساب.
+ * اعتبار وفاداری تا مصرف فقط عدد است؛ هزینه وقتی ثبت می‌شود که از کیف پول کم شود.
  * برگشت خرید در جمع سود/هزینه دوباره شمرده نمی‌شود (فروش از قبل کم شده).
  */
 class CustomerCreditExpenseService
@@ -28,60 +29,38 @@ class CustomerCreditExpenseService
     }
 
     /**
-     * هزینهٔ اعتبار وفاداری همان خرید (یک ردیف به ازای هر فاکتور).
+     * هزینه وقتی مشتری اعتبار را روی فاکتور خرج می‌کند (نه وقتی فقط عدد اعتبار می‌گیرد).
      */
-    public static function recordLoyaltyForPurchase(Purchase $purchase, ?string $userName = null): ?Expense
+    public static function recordCreditUsed(Purchase $purchase, ?string $userName = null): ?Expense
     {
         if (! self::supports()) {
             return null;
         }
 
-        $amount = round((float) $purchase->credit_earned, 2);
+        $amount = round((float) $purchase->credit_used, 2);
         $atelierId = (int) $purchase->atelier_id;
         $phone = (string) ($purchase->phone ?? '');
-        if ($atelierId <= 0 || $amount < 0.01 || $phone === '') {
+        if ($atelierId <= 0) {
+            return null;
+        }
+
+        if ($amount < 0.01 || $phone === '') {
+            self::removeCreditUsedForPurchase($atelierId, (int) $purchase->id);
+
             return null;
         }
 
         return self::upsert(
             $atelierId,
             $amount,
-            self::titleLoyalty((int) $purchase->id, $phone),
+            self::titleLoyaltyUsed((int) $purchase->id, $phone),
             self::SOURCE_LOYALTY,
             (int) $purchase->id,
             $userName
         );
     }
 
-    /**
-     * کم کردن هزینهٔ وفاداری وقتی اعتبار کسب‌شده با برگشت یا لغو پس گرفته می‌شود.
-     */
-    public static function reduceLoyaltyForPurchase(Purchase $purchase, float $reverseAmount, ?string $userName = null): void
-    {
-        if (! self::supports() || $reverseAmount < 0.01) {
-            return;
-        }
-
-        $expense = self::find((int) $purchase->atelier_id, self::SOURCE_LOYALTY, (int) $purchase->id);
-        if (! $expense) {
-            return;
-        }
-
-        $newAmount = round((float) $expense->amount - $reverseAmount, 2);
-        if ($newAmount < 0.01) {
-            $expense->delete();
-
-            return;
-        }
-
-        $expense->amount = $newAmount;
-        if ($userName) {
-            $expense->user_name = $userName;
-        }
-        $expense->save();
-    }
-
-    public static function removeLoyaltyForPurchase(int $atelierId, int $purchaseId): void
+    public static function removeCreditUsedForPurchase(int $atelierId, int $purchaseId): void
     {
         if (! self::supports()) {
             return;
@@ -93,9 +72,14 @@ class CustomerCreditExpenseService
         }
     }
 
+    public static function removeLoyaltyForPurchase(int $atelierId, int $purchaseId): void
+    {
+        self::removeCreditUsedForPurchase($atelierId, $purchaseId);
+    }
+
     /**
      * برگشت خرید: خالص اعتبار اضافه‌شده به کیف پول.
-     * بخش وفاداری همان فاکتور از هزینهٔ قبلی کم می‌شود تا دو بار نیاید.
+     * هزینهٔ مصرف اعتبار همان فاکتور با credit_used باقی‌مانده همگام می‌شود.
      */
     public static function recordPurchaseReturn(
         Purchase $purchase,
@@ -108,7 +92,7 @@ class CustomerCreditExpenseService
             return null;
         }
 
-        self::reduceLoyaltyForPurchase($purchase, $creditEarnedReversed, $userName);
+        self::recordCreditUsed($purchase, $userName);
 
         $net = round(max(0, $creditRefunded - $creditEarnedReversed), 2);
         $atelierId = (int) $purchase->atelier_id;
@@ -149,7 +133,7 @@ class CustomerCreditExpenseService
     }
 
     /**
-     * برگشت خرید در فروش خالص از قبل کم شده؛ این ردیف‌ها فقط برای پیگیری در لیست هزینه‌اند.
+     * برگشت خرید در فروش خالص از قبل کم شده.
      *
      * @param  \Illuminate\Database\Eloquent\Builder  $query
      * @return \Illuminate\Database\Eloquent\Builder
@@ -244,9 +228,9 @@ class CustomerCreditExpenseService
         return Expense::create($payload);
     }
 
-    protected static function titleLoyalty(int $purchaseId, string $phone): string
+    protected static function titleLoyaltyUsed(int $purchaseId, string $phone): string
     {
-        return 'اعتبار مشتری — وفاداری خرید #'.$purchaseId.' — '.$phone;
+        return 'اعتبار مشتری — مصرف اعتبار وفاداری #'.$purchaseId.' — '.$phone;
     }
 
     protected static function titleReturn(int $purchaseId, string $phone): string

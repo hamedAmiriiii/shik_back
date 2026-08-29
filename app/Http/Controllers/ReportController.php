@@ -11,6 +11,7 @@ use App\Services\ShopSalesReportService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Morilog\Jalali\Jalalian;
 
 class ReportController extends Controller
@@ -62,11 +63,14 @@ class ReportController extends Controller
         $yearData = ShopSalesReportService::salesAndProfitForRange($atelierId, $startOfYear, $endOfYear);
         $reports['year'] = $this->formatPeriodReport($yearData);
 
-        $productsInventory = $this->getProductsInventoryValue($atelierId);
+        $warehouse = $this->getWarehouseInventory($atelierId);
         $reports['products_inventory'] = [
-            'total_purchase_value' => $productsInventory['total_purchase_value'],
-            'total_sale_value' => $productsInventory['total_sale_value'],
+            'total_purchase_value' => $warehouse['goods']['total_purchase_value'],
+            'total_sale_value' => $warehouse['goods']['total_sale_value'],
+            'products' => $warehouse['products'],
+            'produced_goods' => $warehouse['produced_goods'],
         ];
+        $reports['raw_materials_inventory'] = $warehouse['raw_materials'];
 
         $reports['expenses'] = $this->getExpensesStatistics($atelierId);
 
@@ -110,17 +114,117 @@ class ReportController extends Controller
         ];
     }
 
-    private function getProductsInventoryValue(int $atelierId)
+    /**
+     * موجودی انبار: فقط کالای باقی‌مانده + کالای تولیدی باقی‌مانده.
+     * مواد اولیه جدا برمی‌گردد.
+     *
+     * @return array{
+     *     products: array{total_purchase_value: float, total_sale_value: float},
+     *     produced_goods: array{total_purchase_value: float, total_sale_value: float, stock_kg: float},
+     *     goods: array{total_purchase_value: float, total_sale_value: float},
+     *     raw_materials: array{total_purchase_value: float, total_sale_value: float, stock_kg: float}
+     * }
+     */
+    private function getWarehouseInventory(int $atelierId): array
     {
-        $products = Product::where('atelier_id', $atelierId)
-            ->select(
-                DB::raw('SUM(purchase_price * quantity) as total_purchase_value'),
-                DB::raw('SUM(sale_price * quantity) as total_sale_value')
-            )->first();
+        $products = $this->catalogProductsStockValue($atelierId);
+        $produced = $this->producedGoodsStockValue($atelierId);
+        $raw = $this->rawMaterialsStockValue($atelierId);
 
         return [
-            'total_purchase_value' => (float) ($products->total_purchase_value ?? 0),
-            'total_sale_value' => (float) ($products->total_sale_value ?? 0),
+            'products' => $products,
+            'produced_goods' => $produced,
+            'goods' => [
+                'total_purchase_value' => round($products['total_purchase_value'] + $produced['total_purchase_value'], 2),
+                'total_sale_value' => round($products['total_sale_value'] + $produced['total_sale_value'], 2),
+            ],
+            'raw_materials' => $raw,
+        ];
+    }
+
+    /**
+     * @return array{total_purchase_value: float, total_sale_value: float}
+     */
+    private function catalogProductsStockValue(int $atelierId): array
+    {
+        $row = Product::query()
+            ->where('atelier_id', $atelierId)
+            ->where('quantity', '>', 0)
+            ->selectRaw('SUM(purchase_price * quantity) as total_purchase_value')
+            ->selectRaw('SUM(sale_price * quantity) as total_sale_value')
+            ->first();
+
+        return [
+            'total_purchase_value' => round((float) ($row->total_purchase_value ?? 0), 2),
+            'total_sale_value' => round((float) ($row->total_sale_value ?? 0), 2),
+        ];
+    }
+
+    /**
+     * @return array{total_purchase_value: float, total_sale_value: float, stock_kg: float}
+     */
+    private function producedGoodsStockValue(int $atelierId): array
+    {
+        $empty = [
+            'total_purchase_value' => 0.0,
+            'total_sale_value' => 0.0,
+            'stock_kg' => 0.0,
+        ];
+        if (! Schema::hasTable('productions') || ! Schema::hasTable('produced_goods')) {
+            return $empty;
+        }
+
+        $row = DB::table('productions')
+            ->join('produced_goods', 'produced_goods.id', '=', 'productions.produced_good_id')
+            ->where('productions.atelier_id', $atelierId)
+            ->where('productions.remaining_kg', '>', 0)
+            ->selectRaw('SUM(productions.remaining_kg * productions.cost_per_kg) as total_purchase_value')
+            ->selectRaw('SUM(productions.remaining_kg * produced_goods.sale_price) as total_sale_value')
+            ->selectRaw('SUM(productions.remaining_kg) as stock_kg')
+            ->first();
+
+        return [
+            'total_purchase_value' => round((float) ($row->total_purchase_value ?? 0), 2),
+            'total_sale_value' => round((float) ($row->total_sale_value ?? 0), 2),
+            'stock_kg' => round((float) ($row->stock_kg ?? 0), 3),
+        ];
+    }
+
+    /**
+     * @return array{total_purchase_value: float, total_sale_value: float, stock_kg: float}
+     */
+    private function rawMaterialsStockValue(int $atelierId): array
+    {
+        $empty = [
+            'total_purchase_value' => 0.0,
+            'total_sale_value' => 0.0,
+            'stock_kg' => 0.0,
+        ];
+        if (! Schema::hasTable('raw_material_lots')) {
+            return $empty;
+        }
+
+        $query = DB::table('raw_material_lots')
+            ->where('raw_material_lots.atelier_id', $atelierId)
+            ->where('raw_material_lots.remaining_kg', '>', 0);
+
+        if (Schema::hasTable('raw_materials')) {
+            $query->leftJoin('raw_materials', 'raw_materials.id', '=', 'raw_material_lots.raw_material_id')
+                ->selectRaw('SUM(raw_material_lots.remaining_kg * raw_material_lots.price_per_kg) as total_purchase_value')
+                ->selectRaw('SUM(raw_material_lots.remaining_kg * COALESCE(raw_materials.sale_price, 0)) as total_sale_value')
+                ->selectRaw('SUM(raw_material_lots.remaining_kg) as stock_kg');
+        } else {
+            $query->selectRaw('SUM(remaining_kg * price_per_kg) as total_purchase_value')
+                ->selectRaw('0 as total_sale_value')
+                ->selectRaw('SUM(remaining_kg) as stock_kg');
+        }
+
+        $row = $query->first();
+
+        return [
+            'total_purchase_value' => round((float) ($row->total_purchase_value ?? 0), 2),
+            'total_sale_value' => round((float) ($row->total_sale_value ?? 0), 2),
+            'stock_kg' => round((float) ($row->stock_kg ?? 0), 3),
         ];
     }
 

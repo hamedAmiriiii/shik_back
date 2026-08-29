@@ -30,7 +30,9 @@ class RawMaterialController extends Controller
         $lotRel = $request->boolean('with_all_lots') ? 'lots' : 'openLots';
         $with = [$lotRel];
         if (Schema::hasColumn('raw_material_lots', 'invoice_id')) {
-            $with[] = $lotRel.'.invoice';
+            $with[] = $lotRel.'.invoice.payments';
+            $with[] = $lotRel.'.invoice.shopAccount';
+            $with[] = $lotRel.'.invoice.cheque';
             $with[] = $lotRel.'.invoiceItem';
         }
 
@@ -78,6 +80,8 @@ class RawMaterialController extends Controller
                 'message' => 'ثبت ماده اولیه فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
             ], 422);
         }
+
+        $this->prepareRawMaterialPurchaseRequest($request);
 
         $fields = $request->validate(
             array_merge([
@@ -202,6 +206,8 @@ class RawMaterialController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $rawMaterial);
 
+        $this->prepareRawMaterialPurchaseRequest($request);
+
         $fields = $request->validate(
             array_merge([
                 'quantity_kg' => 'required|numeric|min:0.001',
@@ -282,7 +288,9 @@ class RawMaterialController extends Controller
     {
         $with = ['lots'];
         if (Schema::hasColumn('raw_material_lots', 'invoice_id')) {
-            $with[] = 'lots.invoice';
+            $with[] = 'lots.invoice.payments';
+            $with[] = 'lots.invoice.shopAccount';
+            $with[] = 'lots.invoice.cheque';
             $with[] = 'lots.invoiceItem';
         }
 
@@ -304,30 +312,35 @@ class RawMaterialController extends Controller
     }
 
     /**
-     * خرید ماده اولیه باید از حساب فروشگاه پرداخت شود (مگر اتصال به فاکتور موجود یا پرداخت چکی/نسیه).
+     * حساب فروشگاه فقط برای پرداخت نقدی الزامی است (چک/نسیه/ترکیبی مثل فاکتور).
      *
      * @return array<string, mixed>
      */
     private function rawMaterialPurchaseAccountRules(bool $quantityAlwaysRequired): array
     {
         $rules = $this->paymentAccountRules('invoices');
-        $needsAccount = function () use ($quantityAlwaysRequired) {
-            $method = request()->input('payment_method', 'account');
-            if (in_array($method, ['cheque', 'credit'], true)) {
-                return false;
-            }
+        $cashNeedsAccount = function () use ($quantityAlwaysRequired) {
             if (request()->filled('invoice_id')) {
                 return false;
             }
-            if ($quantityAlwaysRequired) {
-                return true;
+            $hasQty = $quantityAlwaysRequired || request()->filled('quantity_kg');
+            if (! $hasQty) {
+                return false;
             }
+            if (request()->filled('payments')
+                || request()->filled('cash_amount')
+                || request()->filled('cheque_amount')
+                || request()->filled('credit_amount')) {
+                return false;
+            }
+            $method = \App\Services\DocumentPaymentService::normalizeMethod(request()->input('payment_method'))
+                ?: (string) request()->input('payment_method', 'account');
 
-            return request()->filled('quantity_kg');
+            return $method === \App\Services\DocumentPaymentService::METHOD_ACCOUNT || $method === 'account';
         };
 
         $rules['shop_account_id'] = [
-            Rule::requiredIf($needsAccount),
+            Rule::requiredIf($cashNeedsAccount),
             'nullable',
             'integer',
             'exists:shop_accounts,id',
@@ -342,14 +355,14 @@ class RawMaterialController extends Controller
     private function rawMaterialPurchaseMessages(): array
     {
         return [
-            'shop_account_id.required' => 'برای خرید ماده اولیه باید حساب فروشگاه را انتخاب کنید.',
+            'shop_account_id.required' => 'برای پرداخت نقدی ماده اولیه باید حساب فروشگاه را انتخاب کنید.',
             'shop_account_id.exists' => 'حساب انتخاب‌شده معتبر نیست.',
             'price_per_kg.required_with' => 'برای ثبت مقدار خرید باید قیمت هر کیلو را وارد کنید.',
         ];
     }
 
     /**
-     * خرید نقدی: فاکتور از حساب صادر می‌شود تا مبلغ از موجودی کم شود.
+     * خرید لات بدون فاکتور موجود → فاکتور جدید با همان مدل پرداخت فاکتور (نقد/چک/نسیه/ترکیبی).
      *
      * @param  array<string, mixed>  $fields
      * @return array<string, mixed>
@@ -360,11 +373,38 @@ class RawMaterialController extends Controller
             return $fields;
         }
 
-        $fields['payment_method'] = $fields['payment_method'] ?? 'account';
-        if (empty($fields['invoice_id']) && ($fields['payment_method'] ?? '') === 'account') {
+        if (empty($fields['invoice_id']) && ! array_key_exists('create_invoice', $fields)) {
             $fields['create_invoice'] = true;
         }
 
         return $fields;
+    }
+
+    private function prepareRawMaterialPurchaseRequest(Request $request): void
+    {
+        $this->mergeRequestPayload($request, [
+            'name', 'note', 'sale_price', 'quantity_kg', 'price_per_kg', 'purchased_at',
+            'create_invoice', 'invoice_id', 'invoice_link', 'invoice_item_id', 'invoice_title',
+            'date', 'invoice_date',
+            'shop_account_id', 'payment_method', 'cheque', 'cheque_id',
+            'payments', 'cash_amount', 'cheque_amount', 'credit_amount',
+            'beneficiary_id', 'user_shiksho_id',
+        ]);
+
+        $payments = $request->input('payments');
+        if (is_string($payments) && $payments !== '') {
+            $decoded = json_decode($payments, true);
+            if (is_array($decoded)) {
+                $request->merge(['payments' => $decoded]);
+            }
+        }
+
+        $cheque = $request->input('cheque');
+        if (is_string($cheque) && $cheque !== '') {
+            $decoded = json_decode($cheque, true);
+            if (is_array($decoded)) {
+                $request->merge(['cheque' => $decoded]);
+            }
+        }
     }
 }

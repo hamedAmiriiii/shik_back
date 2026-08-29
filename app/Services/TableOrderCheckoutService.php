@@ -85,6 +85,7 @@ class TableOrderCheckoutService
                 'is_debt_settled' => false,
                 'debt_settlement_note' => $request->input('note', $order->note),
             ]);
+            CustomerCreditExpenseService::recordCreditUsed($purchase);
 
             foreach ($order->items as $line) {
                 PurchasedProduct::create([
@@ -103,7 +104,6 @@ class TableOrderCheckoutService
             if ($phone) {
                 if ($enableLoyaltyCredit && $creditEarned > 0) {
                     UserShiksho::updateCredit($phone, $creditEarned, $atelierId);
-                    CustomerCreditExpenseService::recordLoyaltyForPurchase($purchase);
                     $creditFormatted = number_format($creditEarned, 0);
                     $shopName = SmsTools::shopSmsBrand($atelierId);
                     $text = "{$shopName}\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";

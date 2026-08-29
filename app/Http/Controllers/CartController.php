@@ -402,6 +402,7 @@ class CartController extends Controller
                 'credit_earned' => $creditEarned,
                 'atelier_id' => $atelierId,
             ]);
+            \App\Services\CustomerCreditExpenseService::recordCreditUsed($purchase);
 
             // ذخیره محصولات خریداری شده
             foreach ($cart->items as $item) {
@@ -430,7 +431,6 @@ class CartController extends Controller
                 if ($enableLoyaltyCredit) {
                     // به‌روزرسانی اعتبار
                     UserShiksho::updateCredit($phone, $creditEarned, $atelierId);
-                    \App\Services\CustomerCreditExpenseService::recordLoyaltyForPurchase($purchase);
 
                     // ارسال پیامک
                     $creditFormatted = number_format($creditEarned, 0);
