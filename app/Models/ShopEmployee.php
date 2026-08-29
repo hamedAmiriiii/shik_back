@@ -10,6 +10,7 @@ class ShopEmployee extends Model
 {
     protected $fillable = [
         'atelier_id',
+        'user_id',
         'name',
         'phone',
         'is_active',
@@ -17,6 +18,7 @@ class ShopEmployee extends Model
         'base_work_hours',
         'hourly_wage',
         'note',
+        'permissions',
     ];
 
     protected $casts = [
@@ -24,11 +26,48 @@ class ShopEmployee extends Model
         'base_salary' => 'decimal:2',
         'base_work_hours' => 'decimal:2',
         'hourly_wage' => 'decimal:2',
+        'permissions' => 'array',
+    ];
+
+    protected $appends = [
+        'has_login',
+        'username',
+        'permission_keys',
     ];
 
     public function atelier(): BelongsTo
     {
         return $this->belongsTo(Atelier::class);
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function getHasLoginAttribute(): bool
+    {
+        return ! empty($this->attributes['user_id']);
+    }
+
+    public function getUsernameAttribute(): ?string
+    {
+        $phone = $this->attributes['phone'] ?? null;
+
+        return is_string($phone) && $phone !== '' ? $phone : null;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function getPermissionKeysAttribute(): array
+    {
+        $raw = $this->permissions;
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        return \App\Services\ShopPermissionCatalog::sanitize($raw);
     }
 
     public function payrolls(): HasMany

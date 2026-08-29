@@ -79,19 +79,24 @@ class RawMaterialController extends Controller
             ], 422);
         }
 
-        $fields = $request->validate(array_merge([
-            'name' => [
-                'required',
-                'string',
-                'max:255',
-                Rule::unique('raw_materials', 'name')->where('atelier_id', $atelierId),
-            ],
-            'note' => 'nullable|string',
-            'sale_price' => 'nullable|numeric|min:0',
-            'quantity_kg' => 'nullable|numeric|min:0.001',
-            'price_per_kg' => 'nullable|numeric|min:0|required_with:quantity_kg',
-            'purchased_at' => 'nullable|date',
-        ], $this->paymentAccountRules('invoices'), RawMaterialInvoiceService::requestRules()));
+        $fields = $request->validate(
+            array_merge([
+                'name' => [
+                    'required',
+                    'string',
+                    'max:255',
+                    Rule::unique('raw_materials', 'name')->where('atelier_id', $atelierId),
+                ],
+                'note' => 'nullable|string',
+                'sale_price' => 'nullable|numeric|min:0',
+                'quantity_kg' => 'nullable|numeric|min:0.001',
+                'price_per_kg' => 'nullable|numeric|min:0|required_with:quantity_kg',
+                'purchased_at' => 'nullable|date',
+            ], $this->rawMaterialPurchaseAccountRules(false), RawMaterialInvoiceService::requestRules()),
+            $this->rawMaterialPurchaseMessages()
+        );
+
+        $fields = $this->prepareRawMaterialPurchase($fields);
 
         if ($invoices->wantsInvoice($fields) && empty($fields['quantity_kg'])) {
             return response()->json([
@@ -197,12 +202,17 @@ class RawMaterialController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $rawMaterial);
 
-        $fields = $request->validate(array_merge([
-            'quantity_kg' => 'required|numeric|min:0.001',
-            'price_per_kg' => 'required|numeric|min:0',
-            'purchased_at' => 'nullable|date',
-            'note' => 'nullable|string',
-        ], $this->paymentAccountRules('invoices'), RawMaterialInvoiceService::requestRules()));
+        $fields = $request->validate(
+            array_merge([
+                'quantity_kg' => 'required|numeric|min:0.001',
+                'price_per_kg' => 'required|numeric|min:0',
+                'purchased_at' => 'nullable|date',
+                'note' => 'nullable|string',
+            ], $this->rawMaterialPurchaseAccountRules(true), RawMaterialInvoiceService::requestRules()),
+            $this->rawMaterialPurchaseMessages()
+        );
+
+        $fields = $this->prepareRawMaterialPurchase($fields);
 
         $accountError = $this->paymentAccountError((int) $rawMaterial->atelier_id, $fields['shop_account_id'] ?? null);
         if ($accountError) {
@@ -291,5 +301,70 @@ class RawMaterialController extends Controller
             'purchased_at' => $fields['purchased_at'] ?? now(),
             'note' => $fields['note'] ?? null,
         ]);
+    }
+
+    /**
+     * خرید ماده اولیه باید از حساب فروشگاه پرداخت شود (مگر اتصال به فاکتور موجود یا پرداخت چکی/نسیه).
+     *
+     * @return array<string, mixed>
+     */
+    private function rawMaterialPurchaseAccountRules(bool $quantityAlwaysRequired): array
+    {
+        $rules = $this->paymentAccountRules('invoices');
+        $needsAccount = function () use ($quantityAlwaysRequired) {
+            $method = request()->input('payment_method', 'account');
+            if (in_array($method, ['cheque', 'credit'], true)) {
+                return false;
+            }
+            if (request()->filled('invoice_id')) {
+                return false;
+            }
+            if ($quantityAlwaysRequired) {
+                return true;
+            }
+
+            return request()->filled('quantity_kg');
+        };
+
+        $rules['shop_account_id'] = [
+            Rule::requiredIf($needsAccount),
+            'nullable',
+            'integer',
+            'exists:shop_accounts,id',
+        ];
+
+        return $rules;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function rawMaterialPurchaseMessages(): array
+    {
+        return [
+            'shop_account_id.required' => 'برای خرید ماده اولیه باید حساب فروشگاه را انتخاب کنید.',
+            'shop_account_id.exists' => 'حساب انتخاب‌شده معتبر نیست.',
+            'price_per_kg.required_with' => 'برای ثبت مقدار خرید باید قیمت هر کیلو را وارد کنید.',
+        ];
+    }
+
+    /**
+     * خرید نقدی: فاکتور از حساب صادر می‌شود تا مبلغ از موجودی کم شود.
+     *
+     * @param  array<string, mixed>  $fields
+     * @return array<string, mixed>
+     */
+    private function prepareRawMaterialPurchase(array $fields): array
+    {
+        if (empty($fields['quantity_kg'])) {
+            return $fields;
+        }
+
+        $fields['payment_method'] = $fields['payment_method'] ?? 'account';
+        if (empty($fields['invoice_id']) && ($fields['payment_method'] ?? '') === 'account') {
+            $fields['create_invoice'] = true;
+        }
+
+        return $fields;
     }
 }

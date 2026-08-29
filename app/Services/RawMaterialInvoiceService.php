@@ -23,7 +23,7 @@ class RawMaterialInvoiceService
             'invoice_link' => 'nullable|string|in:whole,item,invoice,line,all',
             'invoice_item_id' => 'nullable|integer',
             'invoice_title' => 'nullable|string|max:255',
-        ], DocumentPaymentService::requestRules());
+        ], DocumentPaymentService::requestRules(), ShopBeneficiaryService::requestRules('invoices'));
     }
 
     public function wantsInvoice(array $fields): bool
@@ -33,8 +33,13 @@ class RawMaterialInvoiceService
         }
 
         $flag = $fields['create_invoice'] ?? false;
+        if (filter_var($flag, FILTER_VALIDATE_BOOLEAN) || $flag === 1 || $flag === '1') {
+            return true;
+        }
 
-        return filter_var($flag, FILTER_VALIDATE_BOOLEAN) || $flag === 1 || $flag === '1';
+        return ! empty($fields['quantity_kg'])
+            && ! empty($fields['shop_account_id'])
+            && (($fields['payment_method'] ?? 'account') === 'account');
     }
 
     /**
@@ -159,7 +164,8 @@ class RawMaterialInvoiceService
             'sort_order' => $sort + 1,
         ]);
 
-        $newAmount = round((float) $invoice->amount + $amount, 2);
+        $invoice->unsetRelation('items');
+        $newAmount = $invoice->itemsSum();
         if (DocumentPaymentService::isPaid($invoice) && $invoice->shop_account_id) {
             DocumentPaymentService::assertCanDebit(
                 (int) $invoice->atelier_id,
@@ -196,6 +202,15 @@ class RawMaterialInvoiceService
             'user_name' => $userName,
             'atelier_id' => $atelierId,
         ];
+
+        $beneficiaryFields = $fields;
+        $beneficiaryError = ShopBeneficiaryService::applyToFields($atelierId, $beneficiaryFields, true, 'invoices');
+        if ($beneficiaryError) {
+            throw new RuntimeException($beneficiaryError);
+        }
+        if (array_key_exists('beneficiary_id', $beneficiaryFields)) {
+            $payload['beneficiary_id'] = $beneficiaryFields['beneficiary_id'];
+        }
 
         $payment = DocumentPaymentService::resolveOnCreate($atelierId, $fields, $amount, 'invoices');
         $chequePayload = [

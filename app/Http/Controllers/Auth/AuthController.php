@@ -291,6 +291,11 @@ class AuthController extends Controller
         }
 
         // وضعیت اعتبار فروشگاه در پاسخ (برای نمایش در فرانت) — ورود مسدود نمی‌شود
+        $loginError = \App\Services\ShopStaffAccess::assertStaffMayLogin($user);
+        if ($loginError !== null) {
+            return response(['message' => $loginError, 'error' => $loginError], 403);
+        }
+
         $shopAccess = null;
         if ($user->atelier_id) {
             $atelier = Atelier::find($user->atelier_id);
@@ -303,10 +308,11 @@ class AuthController extends Controller
 
         $user->load(['roles', 'atelier']);
 
-        $payload = [
-            'user' => $user,
+        $shopFields = \App\Services\ShopStaffAccess::sessionFields($user);
+        $payload = array_merge([
+            'user' => array_merge($user->toArray(), $shopFields),
             'token' => $token,
-        ];
+        ], $shopFields);
         if ($shopAccess !== null) {
             $payload['shop_access'] = $shopAccess;
         }

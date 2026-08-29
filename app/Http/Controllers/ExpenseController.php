@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Expense;
 use App\Models\ManualTrade;
 use App\Services\DocumentPaymentService;
+use App\Services\ShopBeneficiaryService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +28,20 @@ class ExpenseController extends Controller
             // فیلتر بر اساس حساب برداشت (فروشگاه یا تنخواه)
             if ($request->filled('shop_account_id')) {
                 $query->where('shop_account_id', (int) $request->input('shop_account_id'));
+            }
+        }
+
+        if (ShopBeneficiaryService::supports('expenses')) {
+            $query->with(['beneficiary:id,phone,name']);
+            $beneficiaryId = $request->input('beneficiary_id');
+            if ($beneficiaryId === null || $beneficiaryId === '') {
+                $searchModel = json_decode($request->input('searchFilterModel'));
+                if (is_object($searchModel) && isset($searchModel->beneficiary_id)) {
+                    $beneficiaryId = $searchModel->beneficiary_id;
+                }
+            }
+            if ($beneficiaryId !== null && $beneficiaryId !== '') {
+                $query->where('beneficiary_id', (int) $beneficiaryId);
             }
         }
 
@@ -139,7 +154,12 @@ class ExpenseController extends Controller
             'amount' => 'required|numeric|min:0',
             'title' => 'required|string|max:255',
             'type' => 'nullable|in:جاری,سرمایه',
-        ], $this->paymentAccountRules('expenses'), DocumentPaymentService::requestRules()));
+        ], $this->paymentAccountRules('expenses'), DocumentPaymentService::requestRules(), ShopBeneficiaryService::requestRules('expenses')));
+
+        $beneficiaryError = ShopBeneficiaryService::applyToFields($atelierId, $fields, false, 'expenses');
+        if ($beneficiaryError) {
+            return response()->json(['message' => $beneficiaryError], 422);
+        }
 
         $accountError = $this->paymentAccountError($atelierId, $fields['shop_account_id'] ?? null);
         if ($accountError) {
@@ -208,7 +228,12 @@ class ExpenseController extends Controller
             'amount' => 'sometimes|required|numeric|min:0',
             'title' => 'sometimes|required|string|max:255',
             'type' => 'sometimes|required|in:جاری,سرمایه',
-        ], $this->paymentAccountRules('expenses')));
+        ], $this->paymentAccountRules('expenses'), ShopBeneficiaryService::requestRules('expenses')));
+
+        $beneficiaryError = ShopBeneficiaryService::applyToFields((int) $expense->atelier_id, $fields, true, 'expenses');
+        if ($beneficiaryError) {
+            return response()->json(['message' => $beneficiaryError], 422);
+        }
 
         if (array_key_exists('shop_account_id', $fields)) {
             $accountError = $this->paymentAccountError((int) $expense->atelier_id, $fields['shop_account_id']);
@@ -288,7 +313,7 @@ class ExpenseController extends Controller
     {
         $expense->loadMissing(['shopAccount', 'cheque']);
 
-        return $this->attachPaymentAccount($expense);
+        return ShopBeneficiaryService::attachTo($this->attachPaymentAccount($expense));
     }
 
     /**

@@ -12,7 +12,7 @@ class Expense extends Model
     use HasFactory;
 
     protected $fillable = [
-        'user_name', 'date', 'amount', 'title', 'type', 'atelier_id', 'shop_account_id',
+        'user_name', 'date', 'amount', 'title', 'type', 'atelier_id', 'beneficiary_id', 'shop_account_id',
         'payment_method', 'payment_status', 'paid_at', 'cheque_id',
     ];
 
@@ -33,6 +33,14 @@ class Expense extends Model
     public function shopAccount()
     {
         return $this->belongsTo(ShopAccount::class, 'shop_account_id');
+    }
+
+    /**
+     * کاربری که از او خرید شده (باشگاه مشتریان همین فروشگاه).
+     */
+    public function beneficiary()
+    {
+        return $this->belongsTo(UserShiksho::class, 'beneficiary_id');
     }
 
     public function cheque()

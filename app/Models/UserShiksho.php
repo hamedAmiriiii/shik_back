@@ -124,5 +124,15 @@ class UserShiksho extends Model
         $this->installment_credit = PriceTools::roundToThousand((float) $this->installment_credit + (float) $amount);
         $this->save();
     }
+
+    public function invoicesAsBeneficiary()
+    {
+        return $this->hasMany(Invoice::class, 'beneficiary_id');
+    }
+
+    public function expensesAsBeneficiary()
+    {
+        return $this->hasMany(Expense::class, 'beneficiary_id');
+    }
 }
 

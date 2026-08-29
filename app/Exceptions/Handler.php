@@ -52,6 +52,21 @@ class Handler extends ExceptionHandler
             $request->headers->set('Accept', 'application/json');
         }
 
+        if ($request instanceof Request && $request->is('api/*') && $e instanceof \Symfony\Component\HttpKernel\Exception\HttpException && $e->getStatusCode() === 403) {
+            $msg = trim((string) $e->getMessage());
+            if ($msg === '' || $msg === 'This action is unauthorized.' || $msg === 'Unauthorized.') {
+                $msg = 'شما به این بخش دسترسی ندارید.';
+            }
+            if ($msg === 'دسترسی غیرمجاز') {
+                $msg = 'شما به این مورد دسترسی ندارید.';
+            }
+
+            return response()->json([
+                'message' => $msg,
+                'error' => $msg,
+            ], 403);
+        }
+
         return parent::render($request, $e);
     }
 

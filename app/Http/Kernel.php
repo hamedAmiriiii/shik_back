@@ -48,6 +48,7 @@ class Kernel extends HttpKernel
             // \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
             'throttle:api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            'shop.staff.permission',
         ],
     ];
 
@@ -70,5 +71,6 @@ class Kernel extends HttpKernel
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
         'city.access' => \App\Http\Middleware\CheckCityAccess::class,
         'shop.from.route' => \App\Http\Middleware\BindShopFromRoute::class,
+        'shop.staff.permission' => \App\Http\Middleware\EnforceShopStaffPermission::class,
     ];
 }

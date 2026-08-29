@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Services\DocumentPaymentService;
+use App\Services\ShopBeneficiaryService;
 use App\Tools\ImageTools;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -33,6 +34,20 @@ class InvoiceController extends Controller
 
         if ($this->supportsInvoiceItems()) {
             $query->with('items');
+        }
+
+        if (ShopBeneficiaryService::supports('invoices')) {
+            $query->with(['beneficiary:id,phone,name']);
+            $beneficiaryId = $request->input('beneficiary_id');
+            if ($beneficiaryId === null || $beneficiaryId === '') {
+                $searchModel = json_decode($request->input('searchFilterModel'));
+                if (is_object($searchModel) && isset($searchModel->beneficiary_id)) {
+                    $beneficiaryId = $searchModel->beneficiary_id;
+                }
+            }
+            if ($beneficiaryId !== null && $beneficiaryId !== '') {
+                $query->where('beneficiary_id', (int) $beneficiaryId);
+            }
         }
 
         if ($this->supportsPaymentAccount('invoices')) {
@@ -151,10 +166,20 @@ class InvoiceController extends Controller
             'description' => 'nullable|string',
             'image' => 'nullable',
             'image_base64' => 'nullable|string',
-        ], $this->paymentAccountRules('invoices'), DocumentPaymentService::requestRules()));
+        ], $this->paymentAccountRules('invoices'), DocumentPaymentService::requestRules(), ShopBeneficiaryService::requestRules('invoices')));
+
+        $amountConflict = $this->amountConflictWithItems($request, $itemRows);
+        if ($amountConflict !== null) {
+            return response()->json(['message' => $amountConflict], 422);
+        }
 
         if ($itemRows !== []) {
             $fields['amount'] = $this->sumItemTotals($itemRows);
+        }
+
+        $beneficiaryError = ShopBeneficiaryService::applyToFields($atelierId, $fields, false, 'invoices');
+        if ($beneficiaryError) {
+            return response()->json(['message' => $beneficiaryError], 422);
         }
 
         $accountError = $this->paymentAccountError($atelierId, $fields['shop_account_id'] ?? null);
@@ -218,6 +243,10 @@ class InvoiceController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $invoice);
 
+        if ($this->supportsInvoiceItems()) {
+            $invoice->loadMissing('items');
+        }
+
         $this->prepareInvoiceRequest($request);
 
         $itemRows = $this->normalizedItemsFromRequest($request);
@@ -234,10 +263,39 @@ class InvoiceController extends Controller
             'image' => 'nullable',
             'image_base64' => 'nullable|string',
             'remove_image' => 'nullable|boolean',
-        ], $this->paymentAccountRules('invoices')));
+        ], $this->paymentAccountRules('invoices'), ShopBeneficiaryService::requestRules('invoices')));
+
+        $beneficiaryError = ShopBeneficiaryService::applyToFields((int) $invoice->atelier_id, $fields, true, 'invoices');
+        if ($beneficiaryError) {
+            return response()->json(['message' => $beneficiaryError], 422);
+        }
+
+        $existingItemRows = $invoice->hasLineItems()
+            ? $invoice->items->map(function (InvoiceItem $item) {
+                return ['total' => (float) $item->total];
+            })->all()
+            : [];
 
         if ($itemsSent) {
-            $fields['amount'] = $this->sumItemTotals($itemRows);
+            if ($itemRows !== []) {
+                $amountConflict = $this->amountConflictWithItems($request, $itemRows);
+                if ($amountConflict !== null) {
+                    return response()->json(['message' => $amountConflict], 422);
+                }
+                $fields['amount'] = $this->sumItemTotals($itemRows);
+            } elseif (! $this->requestSentAmount($request)) {
+                unset($fields['amount']);
+            }
+        } elseif ($invoice->hasLineItems()) {
+            if ($this->requestSentAmount($request)) {
+                $itemsSum = $this->sumItemTotals($existingItemRows);
+                if (abs(round((float) $request->input('amount'), 2) - $itemsSum) > 0.001) {
+                    return response()->json([
+                        'message' => $this->amountWithItemsMessage($itemsSum, $request->input('amount')),
+                    ], 422);
+                }
+            }
+            unset($fields['amount']);
         }
 
         if (array_key_exists('shop_account_id', $fields)) {
@@ -249,6 +307,11 @@ class InvoiceController extends Controller
 
         try {
             $newAmount = (float) ($fields['amount'] ?? $invoice->amount);
+            if ($itemsSent && $itemRows !== []) {
+                $newAmount = $this->sumItemTotals($itemRows);
+            } elseif (! $itemsSent && $invoice->hasLineItems()) {
+                $newAmount = $invoice->itemsSum();
+            }
             $accountId = $fields['shop_account_id'] ?? $invoice->shop_account_id;
             if (DocumentPaymentService::isPaid($invoice) && $accountId) {
                 DocumentPaymentService::assertCanDebit(
@@ -384,11 +447,14 @@ class InvoiceController extends Controller
             $relations[] = 'shopAccount';
             $relations[] = 'cheque';
         }
+        if (ShopBeneficiaryService::supports('invoices')) {
+            $relations[] = 'beneficiary';
+        }
         if ($relations !== []) {
             $invoice->loadMissing($relations);
         }
 
-        return $this->attachPaymentAccount($invoice);
+        return ShopBeneficiaryService::attachTo($this->attachPaymentAccount($invoice));
     }
 
     protected function withAccount(Invoice $invoice): Invoice
@@ -416,6 +482,8 @@ class InvoiceController extends Controller
             'payment_method',
             'cheque',
             'cheque_id',
+            'beneficiary_id',
+            'user_shiksho_id',
         ]);
 
         $items = $request->input('items');
@@ -495,6 +563,45 @@ class InvoiceController extends Controller
         }
 
         return round($sum, 2);
+    }
+
+    protected function requestSentAmount(Request $request): bool
+    {
+        if (! $request->exists('amount')) {
+            return false;
+        }
+
+        $value = $request->input('amount');
+
+        return $value !== null && $value !== '';
+    }
+
+    /**
+     * فاکتور دارای آیتم نباید مبلغ کلی جدا از مجموع آیتم‌ها داشته باشد.
+     *
+     * @param  array<int, array{total: float}>  $itemRows
+     */
+    protected function amountConflictWithItems(Request $request, array $itemRows): ?string
+    {
+        if ($itemRows === [] || ! $this->requestSentAmount($request)) {
+            return null;
+        }
+
+        $itemsSum = $this->sumItemTotals($itemRows);
+        if (abs(round((float) $request->input('amount'), 2) - $itemsSum) <= 0.001) {
+            return null;
+        }
+
+        return $this->amountWithItemsMessage($itemsSum, $request->input('amount'));
+    }
+
+    protected function amountWithItemsMessage($itemsSum, $sentAmount): string
+    {
+        return 'این فاکتور آیتم دارد و مبلغ کلی جداگانه قبول نیست. مبلغ فاکتور برابر مجموع آیتم‌هاست ('
+            .number_format((float) $itemsSum)
+            .'). مبلغ ارسال‌شده ('
+            .number_format((float) $sentAmount)
+            .') را حذف کنید یا آیتم‌ها را اصلاح کنید.';
     }
 
     /**

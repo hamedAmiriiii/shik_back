@@ -105,6 +105,11 @@ class User extends Authenticatable
         return $this->belongsTo(Atelier::class);
     }
 
+    public function shopEmployee(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(ShopEmployee::class);
+    }
+
     public function city()
     {
         return $this->belongsTo(City::class);

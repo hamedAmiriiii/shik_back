@@ -114,7 +114,12 @@ class ShopTableController extends Controller
     private function authorizeTable(ShopTable $table): void
     {
         if ($table->atelier_id !== $this->atelierId()) {
-            abort(403, 'دسترسی غیرمجاز');
+            abort(response()->json([
+                'message' => 'شما به این میز دسترسی ندارید.',
+                'error' => 'شما به این میز دسترسی ندارید.',
+                'permission' => 'shop_tables',
+                'permission_label' => \App\Services\ShopPermissionCatalog::labelFor('shop_tables'),
+            ], 403));
         }
     }
 }

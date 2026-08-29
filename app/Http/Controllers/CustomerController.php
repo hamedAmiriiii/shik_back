@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\CustomerPhone;
 use App\Models\Purchase;
 use App\Models\UserShiksho;
+use App\Services\ShopBeneficiaryService;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -173,6 +174,7 @@ class CustomerController extends Controller
         $stats = [
             'phone' => $phone,
             'name' => $userShiksho->name ?? null,
+            'id' => $userShiksho->id ?? null,
             'total_purchases' => $purchases->count(),
             'total_spent' => $purchases->sum('total_amount'),
             'total_credit_earned' => $purchases->sum('credit_earned'),
@@ -180,9 +182,24 @@ class CustomerController extends Controller
             'last_purchase_date' => $purchases->first() ? $purchases->first()->created_at : null,
         ];
 
+        $asBeneficiary = $userShiksho ? ShopBeneficiaryService::totalsFor($userShiksho) : [
+            'purchased_total' => 0,
+            'paid_total' => 0,
+            'unpaid_total' => 0,
+            'invoice_total' => 0,
+            'expense_total' => 0,
+            'unpaid_invoice_total' => 0,
+            'unpaid_expense_total' => 0,
+            'invoice_count' => 0,
+            'expense_count' => 0,
+            'unpaid_invoice_count' => 0,
+            'unpaid_expense_count' => 0,
+        ];
+
         return response([
             'stats' => $stats,
-            'purchases' => $purchases
+            'purchases' => $purchases,
+            'as_beneficiary' => $asBeneficiary,
         ], 200);
     }
 

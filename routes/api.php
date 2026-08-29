@@ -162,6 +162,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::delete('employee-payrolls/{employeePayroll}/payments/{payment}', [\App\Http\Controllers\EmployeePayrollPaymentController::class, 'destroy']);
     
     // Invoice routes - require authentication
+    Route::get('beneficiaries', [\App\Http\Controllers\BeneficiaryController::class, 'index']);
+    Route::get('beneficiaries/{id}', [\App\Http\Controllers\BeneficiaryController::class, 'show']);
     Route::resource('invoices', \App\Http\Controllers\InvoiceController::class);
     Route::post('invoices/{invoice}/settle', [\App\Http\Controllers\InvoiceController::class, 'settle']);
     Route::post('invoices/{invoice}/image', [\App\Http\Controllers\InvoiceController::class, 'uploadImage']);
@@ -180,6 +182,13 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     });
 
     Route::get('shop-access', [\App\Http\Controllers\ShopAccessController::class, 'show']);
+    Route::get('shop-permissions', [\App\Http\Controllers\ShopEmployeeController::class, 'permissionOptions']);
+
+    Route::get('shop-backup', [\App\Http\Controllers\ShopBackupController::class, 'show']);
+    Route::get('shop-backup/download', [\App\Http\Controllers\ShopBackupController::class, 'download'])
+        ->middleware('throttle:5,1');
+    Route::post('shop-backup/restore', [\App\Http\Controllers\ShopBackupController::class, 'restore'])
+        ->middleware('throttle:2,1');
 
     Route::get('referral', [\App\Http\Controllers\ReferralController::class, 'show']);
 
@@ -362,7 +371,14 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 });
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
-    return $request->user();
+    $user = $request->user();
+    if (! $user instanceof \App\Models\User) {
+        return $user;
+    }
+    $user->load(['roles', 'atelier']);
+    $shopFields = \App\Services\ShopStaffAccess::sessionFields($user);
+
+    return response(array_merge($user->toArray(), $shopFields), 200);
 });
 
 // Customer logout route - requires authentication
