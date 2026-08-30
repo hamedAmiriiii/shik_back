@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Category;
 use App\Models\ProducedGood;
 use App\Models\Production;
 use App\Models\RawMaterial;
@@ -26,9 +27,14 @@ class ProducedGoodController extends Controller
 
         $atelierId = $this->shopAtelierIdOrAbort($request);
 
+        $with = ['ingredients.rawMaterial'];
+        if (Schema::hasTable('category_produced_good')) {
+            $with[] = 'categories';
+        }
+
         $query = ProducedGood::query()
             ->where('atelier_id', $atelierId)
-            ->with('ingredients.rawMaterial')
+            ->with($with)
             ->orderBy('name');
 
         $searchDataModel = json_decode($request->input('searchFilterModel'));
@@ -85,11 +91,12 @@ class ProducedGoodController extends Controller
                 'note' => $fields['note'] ?? null,
             ]);
             $this->syncIngredients($good, $fields['ingredients'] ?? []);
+            $this->syncCategories($good, $fields['category_ids'] ?? [], $atelierId);
 
             return $good;
         });
 
-        $good = $costService->attachCost($good->load('ingredients.rawMaterial'));
+        $good = $costService->attachCost($this->loadProducedGoodRelations($good));
         $good->syncSalePriceFromCost((float) $good->cost_per_kg);
 
         return response($costService->attachCost($good), 201);
@@ -105,7 +112,7 @@ class ProducedGoodController extends Controller
         $quantityKg = (float) $request->input('quantity_kg', 1);
 
         return response(
-            $costService->attachCost($producedGood->load('ingredients.rawMaterial'), $quantityKg > 0 ? $quantityKg : 1),
+            $costService->attachCost($this->loadProducedGoodRelations($producedGood), $quantityKg > 0 ? $quantityKg : 1),
             200
         );
     }
@@ -144,9 +151,12 @@ class ProducedGoodController extends Controller
             if (array_key_exists('ingredients', $fields)) {
                 $this->syncIngredients($producedGood, $fields['ingredients']);
             }
+            if (array_key_exists('category_ids', $fields)) {
+                $this->syncCategories($producedGood, $fields['category_ids'] ?? [], (int) $producedGood->atelier_id);
+            }
         });
 
-        $good = $costService->attachCost($producedGood->fresh()->load('ingredients.rawMaterial'));
+        $good = $costService->attachCost($this->loadProducedGoodRelations($producedGood->fresh()));
         if (array_key_exists('markup_percent', $fields) && $good->usesMarkup()) {
             $good->syncSalePriceFromCost((float) $good->cost_per_kg);
             $good = $costService->attachCost($good);
@@ -296,6 +306,8 @@ class ProducedGoodController extends Controller
             'ingredients' => $ingredientsRule,
             'ingredients.*.raw_material_id' => 'required|integer',
             'ingredients.*.grams_per_kg' => 'required|numeric|min:0.001',
+            'category_ids' => 'nullable|array',
+            'category_ids.*' => 'integer|exists:categories,id',
         ]);
     }
 
@@ -381,6 +393,16 @@ class ProducedGoodController extends Controller
         }
     }
 
+    private function loadProducedGoodRelations(ProducedGood $good): ProducedGood
+    {
+        $with = ['ingredients.rawMaterial'];
+        if (Schema::hasTable('category_produced_good')) {
+            $with[] = 'categories';
+        }
+
+        return $good->load($with);
+    }
+
     private function syncIngredients(ProducedGood $good, array $ingredients): void
     {
         $good->ingredients()->delete();
@@ -391,5 +413,33 @@ class ProducedGoodController extends Controller
                 'grams_per_kg' => $row['grams_per_kg'],
             ]);
         }
+    }
+
+    private function syncCategories(ProducedGood $good, array $categoryIds, int $atelierId): void
+    {
+        if (! Schema::hasTable('category_produced_good')) {
+            return;
+        }
+
+        $ids = array_values(array_unique(array_filter(array_map('intval', $categoryIds))));
+        if ($ids === []) {
+            $good->categories()->sync([]);
+
+            return;
+        }
+
+        $valid = Category::query()
+            ->where('atelier_id', $atelierId)
+            ->whereIn('id', $ids)
+            ->pluck('id')
+            ->all();
+
+        if (count($valid) !== count($ids)) {
+            abort(response()->json([
+                'message' => 'یک یا چند دسته متعلق به این فروشگاه نیست.',
+            ], 422));
+        }
+
+        $good->categories()->sync($valid);
     }
 }

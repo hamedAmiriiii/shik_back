@@ -92,6 +92,16 @@ class ShopBackupTables
                 'fks' => [],
             ],
             [
+                'name' => 'category_produced_good',
+                'scope' => 'parent',
+                'parent' => 'produced_goods',
+                'parent_key' => 'produced_good_id',
+                'fks' => [
+                    'category_id' => 'categories',
+                    'produced_good_id' => 'produced_goods',
+                ],
+            ],
+            [
                 'name' => 'produced_good_ingredients',
                 'scope' => 'parent',
                 'parent' => 'produced_goods',

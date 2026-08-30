@@ -13,6 +13,7 @@ class ProducedGood extends Model
         'atelier_id',
         'name',
         'sale_price',
+        'original_sale_price',
         'markup_percent',
         'round_sale_price',
         'note',
@@ -20,6 +21,7 @@ class ProducedGood extends Model
 
     protected $casts = [
         'sale_price' => 'decimal:2',
+        'original_sale_price' => 'decimal:2',
         'markup_percent' => 'decimal:2',
         'round_sale_price' => 'boolean',
     ];
@@ -121,5 +123,10 @@ class ProducedGood extends Model
     public function productions(): HasMany
     {
         return $this->hasMany(Production::class);
+    }
+
+    public function categories()
+    {
+        return $this->belongsToMany(Category::class, 'category_produced_good')->withTimestamps();
     }
 }

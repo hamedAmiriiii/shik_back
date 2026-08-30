@@ -4,8 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\Category;
 use App\Models\Product;
+use App\Models\ProducedGood;
+use App\Services\ProducedGoodCostService;
 use App\Tools\ImageTools;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -380,38 +384,101 @@ class CategoryController extends Controller
             });
         }
         
-        // دریافت تعداد آیتم در هر صفحه از request (پیش‌فرض 10)
-        $perPage = $request->input('per_page', 10);
-        
-        $products = $query->with(['images', 'categories'])->orderBy('id', 'desc')->paginate($perPage);
-        
-        // اضافه کردن اطلاعات تخفیف به هر محصول
-        $products->getCollection()->transform(function ($product) {
-            // اگر original_sale_price null باشد، آن را برابر sale_price قرار بده
+        $perPage = max(1, (int) $request->input('per_page', 10));
+
+        $products = $query->with(['images', 'categories'])->orderBy('id', 'desc')->get()->map(function ($product) {
+            $product->item_type = 'product';
+            $product->product_id = $product->id;
+            $product->produced_good_id = null;
             if ($product->original_sale_price === null) {
                 $product->original_sale_price = $product->sale_price;
             }
-            
-            // محاسبه درصد تخفیف
             $discountPercent = 0;
             $discountAmount = 0;
             if ($product->original_sale_price > 0 && $product->sale_price < $product->original_sale_price) {
                 $discountAmount = $product->original_sale_price - $product->sale_price;
                 $discountPercent = ($discountAmount / $product->original_sale_price) * 100;
             }
-            
-            // اضافه کردن فیلدهای محاسبه شده
             $product->discount_percent = round($discountPercent, 2);
             $product->discount_amount = $discountAmount;
             $product->has_discount = $discountPercent > 0;
-            
+
             return $product;
         });
-        
-        // حفظ مسیر URL برای pagination
-        $products->withPath(url()->current());
-        
-        return response($products);
+
+        $produced = $this->producedGoodsForCategory($atelierId, $categoryIds, $searchDataModel);
+        $merged = $produced->concat($products)->values();
+        $page = max(1, (int) $request->input('page', 1));
+        $paginator = new LengthAwarePaginator(
+            $merged->forPage($page, $perPage)->values(),
+            $merged->count(),
+            $perPage,
+            $page,
+            ['path' => url()->current(), 'query' => $request->query()]
+        );
+
+        return response($paginator);
+    }
+
+    /**
+     * @param  array<int, int>  $categoryIds
+     * @param  mixed  $searchDataModel
+     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
+     */
+    private function producedGoodsForCategory(int $atelierId, array $categoryIds, $searchDataModel)
+    {
+        if (! Schema::hasTable('produced_goods') || ! Schema::hasTable('category_produced_good')) {
+            return collect();
+        }
+
+        $query = ProducedGood::query()
+            ->where('atelier_id', $atelierId)
+            ->whereHas('categories', function ($q) use ($categoryIds) {
+                $q->whereIn('categories.id', $categoryIds);
+            })
+            ->with(['ingredients.rawMaterial', 'categories'])
+            ->orderBy('name');
+
+        if ($searchDataModel) {
+            $query->where(function ($q) use ($searchDataModel) {
+                if (is_object($searchDataModel) && isset($searchDataModel->name) && $searchDataModel->name !== '') {
+                    $q->where('name', 'like', '%'.$searchDataModel->name.'%');
+                } elseif (is_string($searchDataModel) && $searchDataModel !== '') {
+                    $q->where('name', 'like', '%'.$searchDataModel.'%');
+                }
+            });
+        }
+
+        $costService = app(ProducedGoodCostService::class);
+
+        return $query->get()->map(function (ProducedGood $good) use ($costService) {
+            $costService->attachCost($good, 1.0, true);
+            $salePrice = (float) $good->sale_price;
+            $original = Schema::hasColumn('produced_goods', 'original_sale_price')
+                ? (float) ($good->original_sale_price ?? $salePrice)
+                : $salePrice;
+            $discountAmount = max(0, $original - $salePrice);
+            $discountPercent = $original > 0 ? ($discountAmount / $original) * 100 : 0;
+
+            return [
+                'id' => $good->id,
+                'item_type' => 'produced_good',
+                'produced_good_id' => $good->id,
+                'product_id' => null,
+                'name' => $good->name,
+                'sale_price' => $salePrice,
+                'original_sale_price' => $original,
+                'purchase_price' => (float) $good->cost_per_kg,
+                'quantity' => (float) $good->stock_kg,
+                'unit_type' => 'kg',
+                'discount_percent' => round($discountPercent, 2),
+                'discount_amount' => round($discountAmount, 2),
+                'has_discount' => $discountPercent > 0,
+                'images' => [],
+                'categories' => $good->categories,
+                'atelier_id' => $good->atelier_id,
+            ];
+        })->values();
     }
 
     private function saveCategoryImage(Category $category, string $imageData): void

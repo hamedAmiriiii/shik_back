@@ -59,6 +59,11 @@ class Category extends Model
         return $this->belongsToMany(Product::class);
     }
 
+    public function producedGoods()
+    {
+        return $this->belongsToMany(ProducedGood::class, 'category_produced_good')->withTimestamps();
+    }
+
     /**
      * بررسی اینکه آیا کتگوری والد است یا نه
      */

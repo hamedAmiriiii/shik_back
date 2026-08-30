@@ -52,6 +52,19 @@ class Handler extends ExceptionHandler
             $request->headers->set('Accept', 'application/json');
         }
 
+        if ($request instanceof Request && ($request->is('api/*') || $request->segment(1) === 'api')) {
+            $notFound = $e instanceof \Illuminate\Database\Eloquent\ModelNotFoundException
+                ? $e
+                : (($e instanceof \Symfony\Component\HttpKernel\Exception\NotFoundHttpException && $e->getPrevious() instanceof \Illuminate\Database\Eloquent\ModelNotFoundException)
+                    ? $e->getPrevious()
+                    : null);
+            if ($notFound) {
+                return response()->json([
+                    'message' => 'مورد درخواستی یافت نشد.',
+                ], 404);
+            }
+        }
+
         if ($request instanceof Request && $request->is('api/*') && $e instanceof \Symfony\Component\HttpKernel\Exception\HttpException && $e->getStatusCode() === 403) {
             $msg = trim((string) $e->getMessage());
             if ($msg === '' || $msg === 'This action is unauthorized.' || $msg === 'Unauthorized.') {

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductImage;
 use App\Models\ProducedGood;
@@ -10,6 +11,7 @@ use App\Tools\ImageTools;
 use App\Tools\PriceTools;
 use App\Tools\ProductQuantityTools;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
@@ -53,21 +55,32 @@ class ProductController extends Controller
             });
         }
 
+        $categoryId = $request->filled('category_id') ? (int) $request->input('category_id') : null;
+        if ($categoryId) {
+            $query->whereHas('categories', function ($q) use ($categoryId) {
+                $q->where('categories.id', $categoryId);
+            });
+        }
+
         $sort = $this->resolveProductListSort($request);
         $this->applyProductListSort($query, $sort);
 
-        $perPage = $request->input('per_page', 10);
+        $perPage = max(1, (int) $request->input('per_page', 10));
 
-        $products = $query->with(['images', 'categories', 'manufacturer'])->paginate($perPage);
+        $products = $query->with(['images', 'categories', 'manufacturer'])->get()->map(function ($product) {
+            $product->item_type = 'product';
+            $product->product_id = $product->id;
+            $product->produced_good_id = null;
 
-        $products->getCollection()->transform(function ($product) {
             return $this->appendProductPricingMeta($product);
         });
 
-        $products->withPath(url()->current());
-        $products->appends($request->only(['sort', 'order_by', 'search', 'searchFilterModel', 'per_page']));
+        $producedGoods = $this->producedGoodsForProductAll($request, $atelierId, $searchDataModel, $categoryId);
+        $merged = $producedGoods->concat($products)->values();
+        $paginator = $this->paginateMergedCatalog($merged, $request, $perPage);
+        $paginator->appends($request->only(['sort', 'order_by', 'search', 'searchFilterModel', 'per_page', 'category_id']));
 
-        return response($products)->header('X-Applied-Sort', $sort !== '' ? $sort : 'id_desc');
+        return response($paginator)->header('X-Applied-Sort', $sort !== '' ? $sort : 'id_desc');
     }
 
     /**
@@ -318,35 +331,26 @@ class ProductController extends Controller
             });
         }
         
+        $categoryId = $request->filled('category_id') ? (int) $request->input('category_id') : null;
+        if ($categoryId) {
+            $query->whereHas('categories', function ($q) use ($categoryId) {
+                $q->where('categories.id', $categoryId);
+            });
+        }
+
         $products = $query->with(['images', 'categories', 'manufacturer'])->orderBy('id', 'desc')->get();
-        
-        // اضافه کردن اطلاعات تخفیف به هر محصول
+
         $products->transform(function ($product) {
             $product->item_type = 'product';
-            // اگر original_sale_price null باشد، آن را برابر sale_price قرار بده
-            if ($product->original_sale_price === null) {
-                $product->original_sale_price = $product->sale_price;
-            }
-            
-            // محاسبه درصد تخفیف
-            $discountPercent = 0;
-            $discountAmount = 0;
-            if ($product->original_sale_price > 0 && $product->sale_price < $product->original_sale_price) {
-                $discountAmount = $product->original_sale_price - $product->sale_price;
-                $discountPercent = ($discountAmount / $product->original_sale_price) * 100;
-            }
-            
-            // اضافه کردن فیلدهای محاسبه شده
-            $product->discount_percent = round($discountPercent, 2);
-            $product->discount_amount = $discountAmount;
-            $product->has_discount = $discountPercent > 0;
-            
-            return $product;
+            $product->product_id = $product->id;
+            $product->produced_good_id = null;
+
+            return $this->appendProductPricingMeta($product);
         });
 
-        $producedGoods = $this->producedGoodsForProductAll($request, $atelierId, $searchDataModel);
-        
-        return response($products->concat($producedGoods)->values());
+        $producedGoods = $this->producedGoodsForProductAll($request, $atelierId, $searchDataModel, $categoryId);
+
+        return response($producedGoods->concat($products)->values());
     }
 
     /**
@@ -373,10 +377,33 @@ class ProductController extends Controller
      */
     public function show(Request $request, $product, string $shop = '')
     {
-        $product = $this->resolveShopProduct($request, $product);
-        $product->load(['images', 'categories', 'manufacturer']);
+        if ($request->input('item_type') === 'produced_good' || $request->boolean('produced_good')) {
+            $good = $this->resolveShopProducedGood($request, $product);
+            if ($good) {
+                return response($this->formatProducedGoodCatalogItem($good));
+            }
+        }
 
-        return response($this->appendProductPricingMeta($product));
+        $model = Product::query()->where('id', $product)->first();
+        if ($model) {
+            $atelierId = $this->shopAtelierIdOrAbort($request);
+            if ($model->atelier_id !== null && (int) $model->atelier_id !== $atelierId) {
+                abort(response()->json(['message' => 'محصول یافت نشد'], 404));
+            }
+            $model->load(['images', 'categories', 'manufacturer']);
+            $model->item_type = 'product';
+            $model->product_id = $model->id;
+            $model->produced_good_id = null;
+
+            return response($this->appendProductPricingMeta($model));
+        }
+
+        $good = $this->resolveShopProducedGood($request, $product);
+        if ($good) {
+            return response($this->formatProducedGoodCatalogItem($good));
+        }
+
+        abort(response()->json(['message' => 'محصول یافت نشد'], 404));
     }
 
     /**
@@ -459,9 +486,9 @@ class ProductController extends Controller
     }
 
     /**
-     * ویرایش اطلاعات محصول
+     * ویرایش اطلاعات محصول (یا کالای تولیدی اگر همان شناسه محصول نباشد)
      */
-    public function update(Request $request, Product $product)
+    public function update(Request $request, $product)
     {
         $atelierId = $this->staffShopAtelierId($request);
         if ($atelierId === null) {
@@ -469,10 +496,26 @@ class ProductController extends Controller
                 'message' => 'ویرایش محصول فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
             ], 422));
         }
-        if ((int) $product->atelier_id !== $atelierId) {
-            return response(['message' => 'محصول یافت نشد'], 404);
+
+        $preferProduced = $request->input('item_type') === 'produced_good' || $request->boolean('produced_good');
+
+        if (! $preferProduced) {
+            $model = Product::query()->where('id', $product)->where('atelier_id', $atelierId)->first();
+            if ($model) {
+                return $this->updateCatalogProduct($request, $model, $atelierId);
+            }
         }
 
+        $good = $this->resolveShopProducedGood($request, $product);
+        if ($good) {
+            return $this->updateProducedGoodAsCatalogItem($request, $good, $atelierId);
+        }
+
+        return response(['message' => 'محصول یافت نشد'], 404);
+    }
+
+    private function updateCatalogProduct(Request $request, Product $product, int $atelierId)
+    {
         if ($request->has('barcode')) {
             $request->merge(['barcode' => trim((string) $request->input('barcode'))]);
         }
@@ -491,8 +534,120 @@ class ProductController extends Controller
         $this->syncProductRelations($product, $request->all());
 
         $product->load(['images', 'categories']);
+        $product->item_type = 'product';
+        $product->product_id = $product->id;
+        $product->produced_good_id = null;
 
         return response($this->appendProductPricingMeta($product));
+    }
+
+    private function updateProducedGoodAsCatalogItem(Request $request, ProducedGood $good, int $atelierId)
+    {
+        $fields = $request->validate([
+            'name' => 'sometimes|required|string|max:255',
+            'sale_price' => 'nullable|numeric|min:0',
+            'original_sale_price' => 'nullable|numeric|min:0',
+            'discount_percent' => 'nullable|numeric|min:0|max:100',
+            'markup_percent' => 'nullable|numeric|min:0|max:9999',
+            'round_sale_price' => 'sometimes|boolean',
+            'note' => 'nullable|string',
+            'category_ids' => 'nullable|array',
+            'category_ids.*' => 'integer|exists:categories,id',
+            'purchase_price' => 'nullable',
+            'quantity' => 'nullable',
+            'barcode' => 'nullable',
+            'unit_type' => 'nullable',
+            'images' => 'nullable',
+            'manufacturer_id' => 'nullable',
+            'sizes' => 'nullable',
+            'colors' => 'nullable',
+            'item_type' => 'nullable|string',
+            'produced_good_id' => 'nullable',
+            'product_id' => 'nullable',
+        ]);
+
+        $payload = [];
+        if (array_key_exists('name', $fields)) {
+            $payload['name'] = $fields['name'];
+        }
+        if (array_key_exists('note', $fields)) {
+            $payload['note'] = $fields['note'];
+        }
+        if (array_key_exists('round_sale_price', $fields)) {
+            $payload['round_sale_price'] = filter_var($fields['round_sale_price'], FILTER_VALIDATE_BOOLEAN);
+        }
+
+        $hasOriginalColumn = Schema::hasColumn('produced_goods', 'original_sale_price');
+        $currentSale = (float) $good->sale_price;
+        $currentOriginal = $hasOriginalColumn
+            ? (float) ($good->original_sale_price ?? $currentSale)
+            : $currentSale;
+
+        if (array_key_exists('discount_percent', $fields) && $fields['discount_percent'] !== null) {
+            $basePrice = array_key_exists('sale_price', $fields) && $fields['sale_price'] !== null
+                ? (float) $fields['sale_price']
+                : $currentOriginal;
+            $discountAmount = ($basePrice * (float) $fields['discount_percent']) / 100;
+            $payload['sale_price'] = PriceTools::roundSalePrice((float) max(0, $basePrice - $discountAmount));
+            if ($hasOriginalColumn) {
+                $payload['original_sale_price'] = PriceTools::roundSalePrice($basePrice);
+            }
+            $payload['markup_percent'] = null;
+        } elseif (array_key_exists('sale_price', $fields) && $fields['sale_price'] !== null) {
+            $payload['sale_price'] = PriceTools::roundSalePrice((float) $fields['sale_price']);
+            $payload['markup_percent'] = null;
+            if ($hasOriginalColumn && array_key_exists('original_sale_price', $fields) && $fields['original_sale_price'] !== null) {
+                $payload['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price']);
+            }
+        } elseif ($hasOriginalColumn && array_key_exists('original_sale_price', $fields) && $fields['original_sale_price'] !== null) {
+            $payload['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price']);
+        }
+
+        if (array_key_exists('markup_percent', $fields) && $fields['markup_percent'] !== null && $fields['markup_percent'] !== '') {
+            $payload['markup_percent'] = round((float) $fields['markup_percent'], 2);
+        }
+
+        DB::transaction(function () use ($good, $payload, $fields, $atelierId) {
+            if ($payload !== []) {
+                $good->update($payload);
+            }
+            if (array_key_exists('category_ids', $fields)) {
+                $this->syncProducedGoodCatalogCategories($good, $fields['category_ids'] ?? [], $atelierId);
+            }
+        });
+
+        $good = $good->fresh();
+        app(ProducedGoodCostService::class)->attachCost($good, 1.0, true);
+
+        return response($this->formatProducedGoodCatalogItem($good));
+    }
+
+    private function syncProducedGoodCatalogCategories(ProducedGood $good, array $categoryIds, int $atelierId): void
+    {
+        if (! Schema::hasTable('category_produced_good')) {
+            return;
+        }
+
+        $ids = array_values(array_unique(array_filter(array_map('intval', $categoryIds))));
+        if ($ids === []) {
+            $good->categories()->sync([]);
+
+            return;
+        }
+
+        $valid = Category::query()
+            ->where('atelier_id', $atelierId)
+            ->whereIn('id', $ids)
+            ->pluck('id')
+            ->all();
+
+        if (count($valid) !== count($ids)) {
+            abort(response()->json([
+                'message' => 'یک یا چند دسته متعلق به این فروشگاه نیست.',
+            ], 422));
+        }
+
+        $good->categories()->sync($valid);
     }
 
     /**
@@ -723,7 +878,7 @@ class ProductController extends Controller
     /**
      * حذف از لیست (soft delete) — رکورد و سابقه خرید در دیتابیس می‌ماند.
      */
-    public function destroy(Request $request, Product $product)
+    public function destroy(Request $request, $product)
     {
         $atelierId = $this->staffShopAtelierId($request);
         if ($atelierId === null) {
@@ -731,13 +886,31 @@ class ProductController extends Controller
                 'message' => 'حذف محصول فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
             ], 422));
         }
-        if ((int) $product->atelier_id !== $atelierId) {
-            return response(['message' => 'محصول یافت نشد'], 404);
+
+        $preferProduced = $request->input('item_type') === 'produced_good' || $request->boolean('produced_good');
+
+        if (! $preferProduced) {
+            $model = Product::query()->where('id', $product)->where('atelier_id', $atelierId)->first();
+            if ($model) {
+                $model->delete();
+
+                return response(['message' => 'محصول از لیست حذف شد. سابقه فروش حفظ شده است.']);
+            }
         }
 
-        $product->delete();
+        $good = $this->resolveShopProducedGood($request, $product);
+        if ($good) {
+            if ($good->productions()->exists()) {
+                return response()->json([
+                    'message' => 'برای این کالا تولید ثبت شده و قابل حذف نیست.',
+                ], 422);
+            }
+            $good->delete();
 
-        return response(['message' => 'محصول از لیست حذف شد. سابقه فروش حفظ شده است.']);
+            return response(['message' => 'کالای تولیدی حذف شد'], 200);
+        }
+
+        return response(['message' => 'محصول یافت نشد'], 404);
     }
 
     /**
@@ -753,47 +926,89 @@ class ProductController extends Controller
         }
 
         $request->validate([
-            'product_ids' => 'required|array|min:1',
-            'product_ids.*' => 'required|exists:products,id',
+            'product_ids' => 'nullable|array',
+            'product_ids.*' => 'required|integer',
+            'produced_good_ids' => 'nullable|array',
+            'produced_good_ids.*' => 'required|integer',
             'discount_percent' => 'required|numeric|min:0|max:100',
         ]);
 
-        $productIds = $request->input('product_ids');
+        $productIds = array_values(array_unique(array_map('intval', $request->input('product_ids', []))));
+        $producedGoodIds = array_values(array_unique(array_map('intval', $request->input('produced_good_ids', []))));
         $discountPercent = $request->input('discount_percent');
 
-        // دریافت همه محصولات همین فروشگاه
-        $products = Product::whereIn('id', $productIds)->where('atelier_id', $atelierId)->get();
-
-        if ($products->isEmpty()) {
-            return response(['error' => 'محصولی یافت نشد'], 404);
+        if ($productIds === [] && $producedGoodIds === []) {
+            return response(['error' => 'حداقل یک کالا یا کالای تولیدی را انتخاب کنید'], 422);
         }
 
-        if ($products->count() !== count(array_unique($productIds))) {
-            return response(['error' => 'برخی شناسه‌ها متعلق به این فروشگاه نیستند'], 422);
+        $products = $productIds === []
+            ? collect()
+            : Product::whereIn('id', $productIds)->where('atelier_id', $atelierId)->get();
+
+        if ($productIds !== [] && $products->count() !== count($productIds)) {
+            return response(['error' => 'برخی شناسه‌های کالا متعلق به این فروشگاه نیستند'], 422);
+        }
+
+        $producedGoods = collect();
+        if ($producedGoodIds !== []) {
+            if (! Schema::hasTable('produced_goods')) {
+                return response(['error' => 'جدول کالای تولیدی وجود ندارد'], 422);
+            }
+            $producedGoods = ProducedGood::whereIn('id', $producedGoodIds)->where('atelier_id', $atelierId)->get();
+            if ($producedGoods->count() !== count($producedGoodIds)) {
+                return response(['error' => 'برخی شناسه‌های کالای تولیدی متعلق به این فروشگاه نیستند'], 422);
+            }
         }
 
         $updatedProducts = [];
         foreach ($products as $product) {
-            // استفاده از original_sale_price اگر وجود داشته باشد، در غیر این صورت از sale_price
             $baseSalePrice = $product->original_sale_price ?? $product->sale_price;
-            
-            // ذخیره original_sale_price اگر null باشد
+
             if ($product->original_sale_price === null) {
                 $product->original_sale_price = $product->sale_price;
             }
-            
-            // محاسبه تخفیف بر اساس original_sale_price
+
             $discountAmount = ($baseSalePrice * $discountPercent) / 100;
             $priceAfterDiscount = max(0, $baseSalePrice - $discountAmount);
             $newSalePrice = PriceTools::roundSalePrice((float) $priceAfterDiscount);
 
-            // به‌روزرسانی sale_price (قیمت با تخفیف)
             $product->sale_price = $newSalePrice;
             $product->save();
 
             $updatedProducts[] = [
                 'id' => $product->id,
+                'item_type' => 'product',
                 'name' => $product->name,
+                'original_sale_price' => $baseSalePrice,
+                'sale_price' => $newSalePrice,
+                'discount_percent' => $discountPercent,
+                'discount_amount' => $discountAmount,
+            ];
+        }
+
+        foreach ($producedGoods as $good) {
+            $hasOriginal = Schema::hasColumn('produced_goods', 'original_sale_price');
+            $baseSalePrice = $hasOriginal
+                ? ((float) ($good->original_sale_price ?? $good->sale_price))
+                : (float) $good->sale_price;
+
+            if ($hasOriginal && $good->original_sale_price === null) {
+                $good->original_sale_price = $good->sale_price;
+            }
+
+            $discountAmount = ($baseSalePrice * $discountPercent) / 100;
+            $priceAfterDiscount = max(0, $baseSalePrice - $discountAmount);
+            $newSalePrice = PriceTools::roundSalePrice((float) $priceAfterDiscount);
+
+            $good->sale_price = $newSalePrice;
+            $good->markup_percent = null;
+            $good->save();
+
+            $updatedProducts[] = [
+                'id' => $good->id,
+                'item_type' => 'produced_good',
+                'produced_good_id' => $good->id,
+                'name' => $good->name,
                 'original_sale_price' => $baseSalePrice,
                 'sale_price' => $newSalePrice,
                 'discount_percent' => $discountPercent,
@@ -856,7 +1071,7 @@ class ProductController extends Controller
     /**
      * حذف یک عکس خاص از محصول
      */
-    public function deleteImage(Request $request, Product $product, $imageId)
+    public function deleteImage(Request $request, $product, $imageId)
     {
         $atelierId = $this->staffShopAtelierId($request);
         if ($atelierId === null) {
@@ -864,9 +1079,12 @@ class ProductController extends Controller
                 'message' => 'حذف تصویر فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
             ], 422));
         }
-        if ((int) $product->atelier_id !== $atelierId) {
+
+        $model = Product::query()->where('id', $product)->where('atelier_id', $atelierId)->first();
+        if (! $model) {
             return response(['message' => 'محصول یافت نشد'], 404);
         }
+        $product = $model;
 
         // پیدا کردن عکس
         $productImage = ProductImage::where('id', $imageId)
@@ -1025,9 +1243,12 @@ class ProductController extends Controller
     }
 
     /**
-     * کالاهای تولیدی همین فروشگاه برای لیست product-all.
+     * کالاهای تولیدی همین فروشگاه برای لیست product و product-all.
+     *
+     * @param  mixed  $searchDataModel
+     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
      */
-    private function producedGoodsForProductAll(Request $request, int $atelierId, $searchDataModel)
+    private function producedGoodsForProductAll(Request $request, int $atelierId, $searchDataModel, ?int $categoryId = null)
     {
         if (! Schema::hasTable('produced_goods')) {
             return collect();
@@ -1037,6 +1258,17 @@ class ProductController extends Controller
             ->where('atelier_id', $atelierId)
             ->with('ingredients.rawMaterial')
             ->orderBy('name');
+
+        if (Schema::hasTable('category_produced_good')) {
+            $query->with('categories');
+            if ($categoryId) {
+                $query->whereHas('categories', function ($q) use ($categoryId) {
+                    $q->where('categories.id', $categoryId);
+                });
+            }
+        } elseif ($categoryId) {
+            return collect();
+        }
 
         if ($searchDataModel) {
             $query->where(function ($q) use ($searchDataModel) {
@@ -1053,26 +1285,96 @@ class ProductController extends Controller
         return $query->get()->map(function (ProducedGood $good) use ($costService) {
             $costService->attachCost($good, 1.0, true);
 
-            return [
-                'id' => $good->id,
-                'item_type' => 'produced_good',
-                'produced_good_id' => $good->id,
-                'product_id' => null,
-                'name' => $good->name,
-                'sale_price' => (float) $good->sale_price,
-                'purchase_price' => (float) $good->cost_per_kg,
-                'cost_per_kg' => (float) $good->cost_per_kg,
-                'profit_per_kg' => (float) $good->profit_per_kg,
-                'profit_percent' => $good->profit_percent,
-                'quantity' => (float) $good->stock_kg,
-                'unit_type' => Product::UNIT_KG,
-                'barcode' => null,
-                'images' => [],
-                'categories' => [],
-                'atelier_id' => $good->atelier_id,
-                'note' => $good->note,
-            ];
-        });
+            return $this->formatProducedGoodCatalogItem($good);
+        })->values();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function formatProducedGoodCatalogItem(ProducedGood $good): array
+    {
+        $good->loadMissing('ingredients.rawMaterial');
+        if (Schema::hasTable('category_produced_good')) {
+            $good->loadMissing('categories');
+        }
+
+        $salePrice = (float) $good->sale_price;
+        $original = Schema::hasColumn('produced_goods', 'original_sale_price')
+            ? (float) ($good->original_sale_price ?? $salePrice)
+            : $salePrice;
+        if ($original <= 0) {
+            $original = $salePrice;
+        }
+        $discountAmount = max(0, $original - $salePrice);
+        $discountPercent = $original > 0 ? ($discountAmount / $original) * 100 : 0;
+        $purchasePrice = (float) ($good->cost_per_kg ?? 0);
+        $unitProfit = $salePrice - $purchasePrice;
+
+        return [
+            'id' => $good->id,
+            'item_type' => 'produced_good',
+            'produced_good_id' => $good->id,
+            'product_id' => null,
+            'name' => $good->name,
+            'sale_price' => $salePrice,
+            'original_sale_price' => $original,
+            'purchase_price' => $purchasePrice,
+            'cost_per_kg' => $purchasePrice,
+            'profit_per_kg' => (float) ($good->profit_per_kg ?? $unitProfit),
+            'profit_percent' => $good->profit_percent,
+            'unit_profit' => round($unitProfit, 2),
+            'discount_percent' => round($discountPercent, 2),
+            'discount_amount' => round($discountAmount, 2),
+            'has_discount' => $discountPercent > 0,
+            'quantity' => (float) ($good->stock_kg ?? 0),
+            'unit_type' => Product::UNIT_KG,
+            'unit_label' => ProductQuantityTools::unitLabel(Product::UNIT_KG),
+            'price_unit_label' => ProductQuantityTools::priceUnitLabel(Product::UNIT_KG),
+            'barcode' => null,
+            'images' => [],
+            'categories' => Schema::hasTable('category_produced_good') ? ($good->categories ?? []) : [],
+            'atelier_id' => $good->atelier_id,
+            'note' => $good->note,
+        ];
+    }
+
+    private function resolveShopProducedGood(Request $request, $id): ?ProducedGood
+    {
+        if (! Schema::hasTable('produced_goods')) {
+            return null;
+        }
+
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $query = ProducedGood::query()
+            ->where('id', $id)
+            ->where('atelier_id', $atelierId)
+            ->with(['ingredients.rawMaterial']);
+        if (Schema::hasTable('category_produced_good')) {
+            $query->with('categories');
+        }
+        $good = $query->first();
+        if (! $good) {
+            return null;
+        }
+        app(ProducedGoodCostService::class)->attachCost($good, 1.0, true);
+
+        return $good;
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection  $items
+     */
+    private function paginateMergedCatalog($items, Request $request, int $perPage): LengthAwarePaginator
+    {
+        $page = max(1, (int) $request->input('page', 1));
+        $total = $items->count();
+        $slice = $items->forPage($page, $perPage)->values();
+
+        return new LengthAwarePaginator($slice, $total, $perPage, $page, [
+            'path' => url()->current(),
+            'query' => $request->query(),
+        ]);
     }
 
     /**
