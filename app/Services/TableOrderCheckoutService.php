@@ -122,6 +122,9 @@ class TableOrderCheckoutService
                 'use_credit' => $useCredit,
             ]);
 
+            $purchase->load(['purchasedProducts', 'cheque']);
+            AccountingSalePoster::post($purchase);
+
             return $purchase;
         });
     }

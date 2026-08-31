@@ -66,7 +66,7 @@ class ShopDashboardService
             }
 
             if ($purchase->isInstallment()) {
-                $buckets[$key]['gross_sales'] += (float) $purchase->paid_amount + (float) $purchase->credit_used;
+                $buckets[$key]['gross_sales'] += $lineSales;
             } elseif ($purchase->isDebt()) {
                 $buckets[$key]['gross_sales'] += $lineSales;
             } elseif ($purchase->isCheque()) {

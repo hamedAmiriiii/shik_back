@@ -576,7 +576,7 @@ class DailyShopReconciliationService
                     );
 
                     if (Schema::hasTable('daily_shop_reconciliation_account_deposits')) {
-                        DailyShopReconciliationAccountDeposit::query()->updateOrCreate(
+                        $depositRow = DailyShopReconciliationAccountDeposit::query()->updateOrCreate(
                             [
                                 'reconciliation_id' => $recon->id,
                                 'shop_account_id' => $account->id,
@@ -586,12 +586,14 @@ class DailyShopReconciliationService
                                 'deposit_record_id' => $depositRecordId,
                             ]
                         );
+                        AccountingTreasuryPoster::syncReconDeposit($depositRow, $atelierId, $dateGregorian);
                     }
                 } else {
                     if ($depositRecordId) {
                         DailyShopReconciliationDeposit::where('id', $depositRecordId)->delete();
                     }
                     if ($line) {
+                        AccountingTreasuryPoster::voidReconDeposit($atelierId, (int) $line->id);
                         $line->delete();
                     }
                     $depositRecordId = null;

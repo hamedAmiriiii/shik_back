@@ -398,13 +398,14 @@ class DocumentPaymentService
         );
     }
 
-    public static function settle(Model $model, int $shopAccountId, ?float $amount = null): Model
+    public static function settle(Model $model, int $shopAccountId, ?float $amount = null, bool $postAccounting = true): Model
     {
         if (! $model instanceof Expense && ! $model instanceof Invoice) {
             throw new RuntimeException('این سند قابل تسویه از حساب نیست.');
         }
 
         $atelierId = (int) $model->atelier_id;
+        $toPost = [];
 
         if (self::supportsSplits() && $model->payments()->exists()) {
             $creditQuery = $model->payments()->where('method', self::METHOD_CREDIT)->where('settled', false);
@@ -429,10 +430,11 @@ class DocumentPaymentService
                         'settled' => true,
                         'shop_account_id' => $shopAccountId,
                     ]);
+                    $toPost[] = (int) $row->id;
                     $left = round($left - $rowAmount, 2);
                 } else {
                     $row->update(['amount' => round($rowAmount - $left, 2)]);
-                    DocumentPayment::create([
+                    $created = DocumentPayment::create([
                         'atelier_id' => $atelierId,
                         'invoice_id' => $model instanceof Invoice ? $model->id : null,
                         'expense_id' => $model instanceof Expense ? $model->id : null,
@@ -442,12 +444,17 @@ class DocumentPaymentService
                         'settled' => true,
                         'sort_order' => (int) $model->payments()->max('sort_order') + 1,
                     ]);
+                    $toPost[] = (int) $created->id;
                     $left = 0;
                 }
             }
             self::refreshDocumentSummary($model);
+            $fresh = $model->fresh();
+            if ($postAccounting) {
+                self::postSettledPayments($toPost, $fresh);
+            }
 
-            return $model->fresh();
+            return $fresh;
         }
 
         if (self::supports($model) && self::isPaid($model) && $model->shop_account_id) {
@@ -469,9 +476,33 @@ class DocumentPaymentService
         $model->update($payload);
         if (self::supportsSplits()) {
             self::ensureLegacySplit($model);
+            $legacy = $model->payments()->orderByDesc('id')->first();
+            if ($legacy) {
+                $toPost[] = (int) $legacy->id;
+            }
+        }
+        $fresh = $model->fresh();
+        if ($postAccounting) {
+            self::postSettledPayments($toPost, $fresh);
         }
 
-        return $model->fresh();
+        return $fresh;
+    }
+
+    /**
+     * @param  array<int, int>  $paymentIds
+     */
+    protected static function postSettledPayments(array $paymentIds, Model $document): void
+    {
+        foreach (array_unique($paymentIds) as $id) {
+            if ($id <= 0) {
+                continue;
+            }
+            $payment = DocumentPayment::query()->find($id);
+            if ($payment) {
+                AccountingDocumentPoster::postPaymentSettle($payment, $document);
+            }
+        }
     }
 
     /**
@@ -516,7 +547,7 @@ class DocumentPaymentService
         }
 
         try {
-            self::settle($model, $shopAccountId);
+            self::settle($model, $shopAccountId, null, false);
 
             return true;
         } catch (RuntimeException $e) {

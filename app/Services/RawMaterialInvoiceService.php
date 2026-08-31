@@ -94,6 +94,8 @@ class RawMaterialInvoiceService
                 'invoice_item_id' => $itemId,
             ]);
 
+            AccountingDocumentPoster::syncInvoice($invoice->fresh(['payments', 'rawMaterialLots']));
+
             return $lot->fresh(['invoice', 'invoiceItem']);
         }
 
@@ -114,6 +116,8 @@ class RawMaterialInvoiceService
             'invoice_id' => $invoice->id,
             'invoice_item_id' => $item?->id,
         ]);
+
+        AccountingDocumentPoster::syncInvoice($invoice->fresh(['payments', 'rawMaterialLots']));
 
         return $lot->fresh(['invoice', 'invoiceItem']);
     }

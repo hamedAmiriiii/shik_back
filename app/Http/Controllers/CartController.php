@@ -448,6 +448,9 @@ class CartController extends Controller
                 CustomerPhone::createNewPhone($phone);
             }
 
+            $purchase->load(['purchasedProducts', 'cheque']);
+            \App\Services\AccountingSalePoster::post($purchase);
+
             DB::commit();
 
             // بارگذاری روابط بعد از commit - استفاده از find برای اطمینان از دریافت آخرین وضعیت

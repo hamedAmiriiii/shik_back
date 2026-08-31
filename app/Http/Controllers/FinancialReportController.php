@@ -383,10 +383,9 @@ class FinancialReportController extends Controller
         // خالص سود = سود - هزینه‌های جاری
         $netProfit = $totalProfit - $totalExpenses;
 
-        // موجودی: فروش چکی وصول‌نشده موجودی را به‌اندازه مبلغ فروش منفی می‌کند
-        // (فروش در sales هست؛ دو بار کسر → اثر خالص −مبلغ چک)
+        // فروش چکی در sales هست ولی نقد نشده؛ یک‌بار کم می‌شود تا موجودی نقدی بماند
         $accountBalance = $netSales + $incomesForBalance - $expensesForBalance - $totalInvoices
-            - $metrics['credit_used_total'] - (2 * $chequePayments);
+            - $metrics['credit_used_total'] - $chequePayments;
 
         return [
             'year' => $year,

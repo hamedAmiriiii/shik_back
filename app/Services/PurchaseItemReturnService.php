@@ -211,6 +211,8 @@ class PurchaseItemReturnService
                 $userName
             );
 
+            AccountingReturnPoster::post($log);
+
             $purchase->load('purchasedProducts');
             $purchase->syncAmountsFromRemainingLines();
             $purchase->save();

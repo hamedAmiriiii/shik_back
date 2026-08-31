@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\ChartOfAccountsSeeder;
 use App\Tools\QueryTools;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -19,6 +20,7 @@ class Atelier extends Model
         static::created(function (Atelier $atelier) {
             Setting::ensureDefaultsForAtelier((int) $atelier->id);
             ShopAccount::ensureDefaultsForAtelier((int) $atelier->id);
+            ChartOfAccountsSeeder::ensureForAtelier((int) $atelier->id);
 
             if ($atelier->shop_access_starts_at === null && $atelier->shop_access_ends_at === null) {
                 $atelier->forceFill(static::trialAccessAttributes())->saveQuietly();

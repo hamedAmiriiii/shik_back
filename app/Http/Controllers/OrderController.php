@@ -356,6 +356,11 @@ class OrderController extends Controller
                                 ]);
                             }
                         }
+
+                        if (isset($purchase)) {
+                            $purchase->load(['purchasedProducts', 'cheque']);
+                            \App\Services\AccountingSalePoster::post($purchase);
+                        }
                         
                         DB::commit();
                     } catch (\Exception $e) {

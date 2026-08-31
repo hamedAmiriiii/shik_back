@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ShopAccount;
+use App\Services\ChartOfAccountsSeeder;
 use App\Services\ShopAccountBalanceService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -97,6 +98,7 @@ class ShopAccountController extends Controller
         }
 
         $account = ShopAccount::create($payload);
+        ChartOfAccountsSeeder::syncShopAccount($account);
 
         return response([
             'message' => $type === ShopAccount::TYPE_PETTY_CASH
@@ -142,6 +144,7 @@ class ShopAccountController extends Controller
         }
 
         $shopAccount->save();
+        ChartOfAccountsSeeder::syncShopAccount($shopAccount);
 
         $breakdown = ShopAccountBalanceService::breakdown($atelierId, [$shopAccount->id]);
 
@@ -170,6 +173,7 @@ class ShopAccountController extends Controller
 
         $shopAccount->is_active = false;
         $shopAccount->save();
+        ChartOfAccountsSeeder::syncShopAccount($shopAccount);
 
         return response([
             'message' => 'حساب غیرفعال شد.',

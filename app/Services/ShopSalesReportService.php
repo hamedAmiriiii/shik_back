@@ -45,9 +45,7 @@ class ShopSalesReportService
         $creditUsedTotal = 0.0;
         $uncollectedFromPeriodSales = 0.0;
         $discountGiven = 0.0;
-        // فروش چکی این دوره که تا پایان بازه هنوز وصول نشده → سود را به اندازه مبلغ فروش منفی می‌کند
-        $chequeUnpaidPenalty = 0.0;
-        // مبلغ «پرداخت چکی» در تسویه (هنوز نقد نشده)
+        // مبلغ «پرداخت چکی» در تسویه (هنوز نقد نشده) — فقط برای موجودی عملیاتی
         $chequePayments = 0.0;
 
         foreach ($purchases as $purchase) {
@@ -61,7 +59,7 @@ class ShopSalesReportService
             $lineCost = $purchase->remainingLinePurchaseCost();
 
             if ($purchase->isInstallment()) {
-                $totalSales += (float) $purchase->paid_amount + (float) $purchase->credit_used;
+                $totalSales += $invoiceSales;
                 $totalPurchase += $lineCost;
             } elseif ($purchase->isDebt()) {
                 $totalSales += $invoiceSales;
@@ -75,22 +73,13 @@ class ShopSalesReportService
                 if ($chequeAmount <= 0) {
                     $chequeAmount = max(0, round($saleAmount - $purchase->immediatePaidAmount(), 2));
                 }
-                $immediatePaid = $purchase->immediatePaidAmount();
                 if ($saleAmount <= 0) {
                     continue;
                 }
-                $paidFraction = min(1, max(0, $immediatePaid / $saleAmount));
 
-                // فروش واقعی همیشه ثبت می‌شود
                 $totalSales += $saleAmount;
-
-                if (self::isChequeClearedAsOf($purchase, $endString)) {
-                    // بعد از وصول: کل بهای تمام‌شده
-                    $totalPurchase += $lineCost;
-                } else {
-                    // بخش نقد/کارت همان لحظه در سود می‌آید؛ بخش چک تا وصول منفی است
-                    $totalPurchase += round($lineCost * $paidFraction, 2);
-                    $chequeUnpaidPenalty += $chequeAmount;
+                $totalPurchase += $lineCost;
+                if (! self::isChequeClearedAsOf($purchase, $endString)) {
                     $chequePayments += $chequeAmount;
                 }
             } else {
@@ -115,12 +104,6 @@ class ShopSalesReportService
                     ->sum('amount');
             }
         }
-
-        // وصول چکِ فروش‌های دوره‌های قبل در این بازه:
-        // +مبلغ فروش (برگشت اثر منفی روز فروش) و ثبت بهای تمام‌شده → سود خالص = حاشیه
-        [$priorClearSales, $priorClearCosts] = self::priorChequeClearAmounts($atelierId, $startString, $endString);
-        $totalPurchase += $priorClearCosts;
-        $chequeClearProfit = $priorClearSales;
 
         $openDebts = self::openDebtsAsOf($atelierId, $endDate);
         $openCheques = self::openChequeSalesAsOf($atelierId, $endDate);
@@ -150,11 +133,8 @@ class ShopSalesReportService
         );
 
         $totalCreditGranted = $creditEarnedFromPurchases + $manualCreditGranted;
-        // سود: فروش − بهای تمام‌شده − اعتبار − جریمه چک وصول‌نشده + حاشیه وصول چک‌های دوره‌های قبل
-        $totalProfit = round(
-            $netSales - $netPurchase - $creditUsedTotal - $chequeUnpaidPenalty + $chequeClearProfit,
-            2
-        );
+        // سود تعهدی: فروش روز فاکتور − بها − اعتبار مصرف‌شده (وصول چک/قسط بعدی سود نمی‌سازد)
+        $totalProfit = round($netSales - $netPurchase - $creditUsedTotal, 2);
 
         return [
             'sales' => (float) $netSales,
@@ -332,7 +312,7 @@ class ShopSalesReportService
 
     /**
      * فروش‌های چکی قبل از بازه که داخل بازه وصول شده‌اند.
-     * برگشت اثر منفی روز فروش (+مبلغ فروش) و آماده‌سازی ثبت بهای تمام‌شده.
+     * مبنای تعهدی دیگر این مبالغ را به سود دوره اضافه نمی‌کند (وصول = جابه‌جایی دارایی).
      *
      * @return array{0: float, 1: float} [sumSaleAmounts, sumCosts]
      */

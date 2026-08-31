@@ -252,7 +252,14 @@ class RawMaterialController extends Controller
             ], 422);
         }
 
+        $invoiceId = $lot->invoice_id;
         $lot->delete();
+        if ($invoiceId) {
+            $invoice = \App\Models\Invoice::find($invoiceId);
+            if ($invoice) {
+                \App\Services\AccountingDocumentPoster::syncInvoice($invoice->fresh(['payments', 'rawMaterialLots']));
+            }
+        }
 
         return response($fifo->attachStock($rawMaterial->load($this->lotRelations())), 200);
     }

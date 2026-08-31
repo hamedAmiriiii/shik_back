@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use App\Services\AccountingDocumentPoster;
 use App\Services\DocumentPaymentService;
 use App\Services\ShopBeneficiaryService;
 use App\Tools\ImageTools;
@@ -228,6 +229,7 @@ class InvoiceController extends Controller
                 $this->syncInvoiceItems($invoice, $itemRows);
                 DocumentPaymentService::attachChequeFromRequest($invoice, $paymentSource, $fields['user_name']);
                 $this->saveInvoiceImageFromRequest($invoice, $request);
+                AccountingDocumentPoster::syncInvoice($invoice->fresh(['payments', 'rawMaterialLots']));
 
                 return $invoice;
             });
@@ -358,6 +360,9 @@ class InvoiceController extends Controller
                 $paymentSource = DocumentPaymentService::requestHasPaymentSplits($request) ? $fields : null;
                 DocumentPaymentService::unsetPaymentRequestFields($fields);
                 unset($fields['image'], $fields['image_base64'], $fields['remove_image']);
+                if ($paymentSource) {
+                    AccountingDocumentPoster::reverseInvoice($invoice);
+                }
                 $invoice->update($fields);
                 if ($itemsSent) {
                     $this->syncInvoiceItems($invoice, $itemRows);
@@ -371,6 +376,7 @@ class InvoiceController extends Controller
                 } else {
                     $this->saveInvoiceImageFromRequest($invoice, $request);
                 }
+                AccountingDocumentPoster::syncInvoice($invoice->fresh(['payments', 'rawMaterialLots']));
             });
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -405,6 +411,7 @@ class InvoiceController extends Controller
         }
 
         $this->deleteInvoiceImage($invoice);
+        AccountingDocumentPoster::reverseInvoice($invoice);
         $invoice->delete();
 
         return response(['message' => 'فاکتور با موفقیت حذف شد'], 200);

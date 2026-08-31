@@ -217,6 +217,10 @@ class ChequeController extends Controller
             'shop_account_id' => $fields['shop_account_id'] ?? null,
         ]);
 
+        if ($cheque->type === Cheque::TYPE_RECEIVED) {
+            \App\Services\AccountingMiscPoster::postReceivedCheque($cheque);
+        }
+
         return response($cheque, 201);
     }
 
@@ -383,6 +387,7 @@ class ChequeController extends Controller
             ], 422);
         }
 
+        \App\Services\AccountingMiscPoster::reverseReceivedCheque($cheque);
         $cheque->delete();
 
         return response(['message' => 'چک با موفقیت حذف شد'], 200);

@@ -450,6 +450,11 @@ class PurchasedProductController extends Controller
                 $actorName = $actor ? trim($actor->name.' '.($actor->last_name ?? '')) : null;
                 \App\Services\CustomerCreditExpenseService::recordCreditUsed($purchase, $actorName);
             }
+            $purchase->load(['purchasedProducts', 'cheque']);
+            if ($paymentType === 'cheque' && $linkedCheque) {
+                \App\Services\AccountingMiscPoster::reverseReceivedCheque($linkedCheque);
+            }
+            \App\Services\AccountingSalePoster::post($purchase);
             DB::commit();
         } catch (QueryException $e) {
             DB::rollBack();
@@ -637,7 +642,10 @@ class PurchasedProductController extends Controller
 
     public function destroy(Purchase $purchase)
     {
-        $purchase->delete();
+        DB::transaction(function () use ($purchase) {
+            \App\Services\AccountingSalePoster::reversePurchase($purchase);
+            $purchase->delete();
+        });
         return response(['message' => 'سبد خرید حذف شد'], 200);
     }
 

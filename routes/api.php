@@ -210,6 +210,22 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::put('shop-accounts/{shopAccount}', [\App\Http\Controllers\ShopAccountController::class, 'update']);
     Route::delete('shop-accounts/{shopAccount}', [\App\Http\Controllers\ShopAccountController::class, 'destroy']);
 
+    Route::get('accounting/accounts', [\App\Http\Controllers\AccountingAccountController::class, 'index']);
+    Route::post('accounting/accounts', [\App\Http\Controllers\AccountingAccountController::class, 'store']);
+    Route::put('accounting/accounts/{accountingAccount}', [\App\Http\Controllers\AccountingAccountController::class, 'update']);
+
+    Route::get('accounting/vouchers', [\App\Http\Controllers\AccountingVoucherController::class, 'index']);
+    Route::post('accounting/vouchers/self-test', [\App\Http\Controllers\AccountingVoucherController::class, 'selfTest']);
+    Route::post('accounting/vouchers', [\App\Http\Controllers\AccountingVoucherController::class, 'store']);
+    Route::get('accounting/vouchers/{accountingVoucher}', [\App\Http\Controllers\AccountingVoucherController::class, 'show']);
+    Route::post('accounting/vouchers/{accountingVoucher}/reverse', [\App\Http\Controllers\AccountingVoucherController::class, 'reverse']);
+    Route::post('accounting/opening', [\App\Http\Controllers\AccountingVoucherController::class, 'opening']);
+
+    Route::get('accounting/trial-balance', [\App\Http\Controllers\AccountingReportController::class, 'trialBalance']);
+    Route::get('accounting/ledger', [\App\Http\Controllers\AccountingReportController::class, 'ledger']);
+    Route::get('accounting/profit-loss', [\App\Http\Controllers\AccountingReportController::class, 'profitLoss']);
+    Route::get('accounting/balance-sheet', [\App\Http\Controllers\AccountingReportController::class, 'balanceSheet']);
+
     // شارژ تنخواه از حساب‌های اصلی فروشگاه
     Route::get('shop-account-transfers', [\App\Http\Controllers\ShopAccountTransferController::class, 'index']);
     Route::post('shop-account-transfers', [\App\Http\Controllers\ShopAccountTransferController::class, 'store']);

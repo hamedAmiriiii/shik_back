@@ -52,6 +52,8 @@ class InstallmentController extends Controller
                 'notes' => $request->input('notes'),
             ]);
 
+            \App\Services\AccountingSalePoster::postInstallmentPay($installment->fresh());
+
             if ($purchase->phone) {
                 $atelierId = $purchase->atelier_id;
                 $userQuery = UserShiksho::where('phone', $purchase->phone);

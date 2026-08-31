@@ -10,7 +10,7 @@ class ShopBackupTables
 {
     public const FORMAT = 'atelier-shop-backup';
 
-    public const VERSION = 1;
+    public const VERSION = 2;
 
     /**
      * تنظیماتی که متعلق به پلتفرم است و با بازگردانی عوض نمی‌شود.
@@ -29,6 +29,32 @@ class ShopBackupTables
                 'name' => 'shop_accounts',
                 'scope' => 'atelier',
                 'fks' => [],
+            ],
+            [
+                'name' => 'accounting_accounts',
+                'scope' => 'atelier',
+                'fks' => [
+                    'parent_id' => 'accounting_accounts',
+                    'linked_id' => 'shop_accounts',
+                ],
+            ],
+            [
+                'name' => 'accounting_vouchers',
+                'scope' => 'atelier',
+                'fks' => [
+                    'reverses_voucher_id' => 'accounting_vouchers',
+                ],
+                'skip_columns' => ['created_by'],
+            ],
+            [
+                'name' => 'accounting_lines',
+                'scope' => 'parent',
+                'parent' => 'accounting_vouchers',
+                'parent_key' => 'voucher_id',
+                'fks' => [
+                    'voucher_id' => 'accounting_vouchers',
+                    'account_id' => 'accounting_accounts',
+                ],
             ],
             [
                 'name' => 'settings',

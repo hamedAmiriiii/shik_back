@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Expense;
 use App\Models\ManualTrade;
+use App\Services\AccountingDocumentPoster;
 use App\Services\CustomerCreditExpenseService;
 use App\Services\DocumentPaymentService;
 use App\Services\ShopBeneficiaryService;
@@ -231,6 +232,7 @@ class ExpenseController extends Controller
 
                 $expense = Expense::create($fields);
                 DocumentPaymentService::attachChequeFromRequest($expense, $paymentSource, $fields['user_name']);
+                AccountingDocumentPoster::syncExpense($expense->fresh(['payments']));
 
                 return $expense;
             });
@@ -324,10 +326,14 @@ class ExpenseController extends Controller
             DB::transaction(function () use ($expense, $fields, $request) {
                 $paymentSource = DocumentPaymentService::requestHasPaymentSplits($request) ? $fields : null;
                 DocumentPaymentService::unsetPaymentRequestFields($fields);
+                if ($paymentSource) {
+                    AccountingDocumentPoster::reverseExpense($expense);
+                }
                 $expense->update($fields);
                 if ($paymentSource) {
                     DocumentPaymentService::replaceSplits($expense->fresh(), $paymentSource, (string) $expense->user_name);
                 }
+                AccountingDocumentPoster::syncExpense($expense->fresh(['payments']));
             });
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -361,6 +367,8 @@ class ExpenseController extends Controller
             $cheque->update(['status' => \App\Models\Cheque::STATUS_CANCELLED, 'expense_id' => null]);
         }
 
+        $expense->loadMissing('payments');
+        AccountingDocumentPoster::reverseExpense($expense);
         $expense->delete();
         return response(['message' => 'هزینه با موفقیت حذف شد'], 200);
     }

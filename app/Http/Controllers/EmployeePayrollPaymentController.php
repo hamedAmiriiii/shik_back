@@ -6,6 +6,7 @@ use App\Models\EmployeePayroll;
 use App\Models\EmployeePayrollPayment;
 use App\Models\Expense;
 use App\Models\ShopEmployee;
+use App\Services\AccountingDocumentPoster;
 use App\Services\DocumentPaymentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -245,7 +246,11 @@ class EmployeePayrollPaymentController extends Controller
 
         DB::transaction(function () use ($employeePayroll, $payment) {
             if ($payment->expense_id) {
-                Expense::where('id', $payment->expense_id)->delete();
+                $expense = Expense::find($payment->expense_id);
+                if ($expense) {
+                    AccountingDocumentPoster::reverseExpense($expense);
+                    $expense->delete();
+                }
             }
             $payment->delete();
             $employeePayroll->syncStatus();
@@ -357,6 +362,8 @@ class EmployeePayrollPaymentController extends Controller
             'expense_id' => $expense->id,
             'note' => $fields['note'] ?? null,
         ]);
+
+        AccountingDocumentPoster::postExpense($expense->fresh(['payments']), $paymentType);
 
         $payroll->syncStatus();
 

@@ -135,6 +135,7 @@ class ManualTradeController extends Controller
         $fields['atelier_id'] = $atelierId;
 
         $trade = ManualTrade::create($fields);
+        \App\Services\AccountingMiscPoster::postManualTrade($trade);
 
         return response($this->withAccount($trade), 201);
     }
@@ -182,6 +183,8 @@ class ManualTradeController extends Controller
         }
 
         $manualTrade->update($fields);
+        \App\Services\AccountingMiscPoster::reverseManualTrade($manualTrade);
+        \App\Services\AccountingMiscPoster::postManualTrade($manualTrade->fresh());
 
         return response($this->withAccount($manualTrade->fresh()), 200);
     }
@@ -190,6 +193,7 @@ class ManualTradeController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $manualTrade);
 
+        \App\Services\AccountingMiscPoster::reverseManualTrade($manualTrade);
         $manualTrade->delete();
 
         return response(['message' => 'سند حذف شد'], 200);

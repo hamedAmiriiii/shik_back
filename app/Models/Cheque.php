@@ -228,16 +228,18 @@ class Cheque extends Model
                     }
                     $expense = Expense::create($expensePayload);
                     $locked->expense_id = $expense->id;
+                    \App\Services\AccountingDocumentPoster::syncExpense($expense->fresh());
                 }
 
                 $accountId = $locked->shop_account_id
                     ?: ($invoice ? $invoice->shop_account_id : null)
                     ?: ($expense ? $expense->shop_account_id : null);
 
+                $debited = false;
                 if ($invoice) {
-                    DocumentPaymentService::trySettleAfterClear($invoice, $accountId ? (int) $accountId : null, (int) $locked->id);
+                    $debited = DocumentPaymentService::trySettleAfterClear($invoice, $accountId ? (int) $accountId : null, (int) $locked->id);
                 } elseif ($expense) {
-                    DocumentPaymentService::trySettleAfterClear($expense, $accountId ? (int) $accountId : null, (int) $locked->id);
+                    $debited = DocumentPaymentService::trySettleAfterClear($expense, $accountId ? (int) $accountId : null, (int) $locked->id);
                 }
 
                 $locked->update([
@@ -245,6 +247,10 @@ class Cheque extends Model
                     'expense_id' => $expense ? $expense->id : $locked->expense_id,
                     'cleared_at' => now(),
                 ]);
+
+                if ($debited) {
+                    \App\Services\AccountingMiscPoster::postIssuedChequeClear($locked->fresh(['invoice', 'expense']));
+                }
             } elseif ($locked->type === self::TYPE_RECEIVED) {
                 if ($locked->income_id) {
                     throw new RuntimeException('برای این چک قبلاً درآمد ثبت شده است.');
@@ -268,6 +274,8 @@ class Cheque extends Model
                     'income_id' => $income->id,
                     'cleared_at' => now(),
                 ]);
+
+                \App\Services\AccountingSalePoster::postChequeClear($locked->fresh());
             } else {
                 throw new RuntimeException('نوع چک نامعتبر است.');
             }
@@ -296,6 +304,7 @@ class Cheque extends Model
             }
 
             if ($locked->type === self::TYPE_ISSUED) {
+                \App\Services\AccountingMiscPoster::reverseIssuedChequeClear($locked);
                 if ($locked->invoice_id) {
                     $invoice = Invoice::find($locked->invoice_id);
                     if ($invoice) {
@@ -308,11 +317,16 @@ class Cheque extends Model
                     } elseif ($expense && (($expense->payment_method ?? null) === 'cheque' || $expense->cheque_id == $locked->id)) {
                         DocumentPaymentService::unpay($expense);
                     } else {
-                        Expense::where('id', $locked->expense_id)->delete();
+                        $expenseToDelete = Expense::find($locked->expense_id);
+                        if ($expenseToDelete) {
+                            \App\Services\AccountingDocumentPoster::reverseExpense($expenseToDelete);
+                            $expenseToDelete->delete();
+                        }
                         $locked->expense_id = null;
                     }
                 }
             } elseif ($locked->type === self::TYPE_RECEIVED) {
+                \App\Services\AccountingSalePoster::reverseChequeClear($locked);
                 if ($locked->income_id) {
                     Income::where('id', $locked->income_id)->delete();
                 }

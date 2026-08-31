@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ShopAccount;
 use App\Models\ShopAccountTransfer;
+use App\Services\AccountingTreasuryPoster;
 use App\Services\DocumentPaymentService;
 use App\Services\ShopAccountBalanceService;
 use Carbon\Carbon;
@@ -107,16 +108,21 @@ class ShopAccountTransferController extends Controller
             ? Carbon::parse($fields['date'])->setTimezone('Asia/Tehran')->format('Y-m-d')
             : Carbon::now('Asia/Tehran')->format('Y-m-d');
 
-        $transfer = DB::transaction(fn () => ShopAccountTransfer::create([
-            'atelier_id' => $atelierId,
-            'from_shop_account_id' => $from->id,
-            'to_shop_account_id' => $to->id,
-            'amount' => $amount,
-            'date' => $date,
-            'title' => $fields['title'] ?? 'شارژ تنخواه '.$to->name,
-            'description' => $fields['description'] ?? null,
-            'user_name' => trim($user->name.' '.$user->last_name),
-        ]));
+        $transfer = DB::transaction(function () use ($atelierId, $from, $to, $amount, $date, $fields, $user) {
+            $row = ShopAccountTransfer::create([
+                'atelier_id' => $atelierId,
+                'from_shop_account_id' => $from->id,
+                'to_shop_account_id' => $to->id,
+                'amount' => $amount,
+                'date' => $date,
+                'title' => $fields['title'] ?? 'شارژ تنخواه '.$to->name,
+                'description' => $fields['description'] ?? null,
+                'user_name' => trim($user->name.' '.$user->last_name),
+            ]);
+            AccountingTreasuryPoster::postTransfer($row);
+
+            return $row;
+        });
 
         $balances = ShopAccountBalanceService::balances($atelierId, [$from->id, $to->id]);
 
@@ -145,7 +151,10 @@ class ShopAccountTransferController extends Controller
             (int) $shopAccountTransfer->from_shop_account_id,
             (int) $shopAccountTransfer->to_shop_account_id,
         ];
-        $shopAccountTransfer->delete();
+        DB::transaction(function () use ($shopAccountTransfer) {
+            AccountingTreasuryPoster::reverseTransfer($shopAccountTransfer);
+            $shopAccountTransfer->delete();
+        });
 
         return response([
             'message' => 'شارژ تنخواه حذف شد.',

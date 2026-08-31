@@ -231,6 +231,7 @@ class PurchaseDebtController extends Controller
                 'debt_settled_cash_amount' => round($cash, 2),
                 'debt_settlement_note' => $fields['note'] ?? null,
             ]);
+            \App\Services\AccountingSalePoster::postDebtSettle($locked->fresh());
         });
 
         $purchase->refresh()->load('purchasedProducts.product');

@@ -11,7 +11,8 @@ use Illuminate\Support\Facades\Schema;
 /**
  * ثبت مصرف اعتبار و اعطای دستی به‌صورت هزینه، بدون اثر روی موجودی حساب.
  * اعتبار وفاداری تا مصرف فقط عدد است؛ هزینه وقتی ثبت می‌شود که از کیف پول کم شود.
- * برگشت خرید در جمع سود/هزینه دوباره شمرده نمی‌شود (فروش از قبل کم شده).
+ * برگشت خرید و مصرف اعتبار وفاداری در جمع سود/هزینه دوباره شمرده نمی‌شود
+ * (فروش از قبل کم شده؛ اعتبار در سود فروش با credit_used آمده).
  */
 class CustomerCreditExpenseService
 {
@@ -133,7 +134,7 @@ class CustomerCreditExpenseService
     }
 
     /**
-     * برگشت خرید در فروش خالص از قبل کم شده.
+     * برگشت خرید و مصرف اعتبار وفاداری در جمع هزینه دوباره شمرده نمی‌شود.
      *
      * @param  \Illuminate\Database\Eloquent\Builder  $query
      * @return \Illuminate\Database\Eloquent\Builder
@@ -146,7 +147,7 @@ class CustomerCreditExpenseService
 
         return $query->where(function ($q) {
             $q->whereNull('credit_source')
-                ->orWhere('credit_source', '!=', self::SOURCE_RETURN);
+                ->orWhereNotIn('credit_source', [self::SOURCE_RETURN, self::SOURCE_LOYALTY]);
         });
     }
 
@@ -204,6 +205,7 @@ class CustomerCreditExpenseService
                 $existing->user_name = $userName;
             }
             $existing->save();
+            AccountingDocumentPoster::syncExpense($existing);
 
             return $existing;
         }
@@ -225,7 +227,10 @@ class CustomerCreditExpenseService
             $payload['shop_account_id'] = null;
         }
 
-        return Expense::create($payload);
+        $expense = Expense::create($payload);
+        AccountingDocumentPoster::postExpense($expense);
+
+        return $expense;
     }
 
     protected static function titleLoyaltyUsed(int $purchaseId, string $phone): string

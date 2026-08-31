@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\ChartOfAccountsSeeder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -123,6 +124,7 @@ class ShopAccount extends Model
         }
 
         self::backfillLegacyDepositsForAtelier($atelierId);
+        ChartOfAccountsSeeder::ensureForAtelier($atelierId);
     }
 
     /**

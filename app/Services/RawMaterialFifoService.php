@@ -442,6 +442,8 @@ class RawMaterialFifoService
             $good->refresh();
             $good->syncSalePriceFromCost((float) $production->cost_per_kg);
 
+            AccountingProductionPoster::post($production);
+
             return $production->load(['consumptions.rawMaterial', 'producedGood']);
         });
     }
@@ -478,6 +480,7 @@ class RawMaterialFifoService
             }
 
             $locked->load('consumptions');
+            AccountingProductionPoster::reverse($locked);
             $lotIds = $locked->consumptions->pluck('raw_material_lot_id')->unique()->filter()->values();
             $lots = RawMaterialLot::query()
                 ->whereIn('id', $lotIds)

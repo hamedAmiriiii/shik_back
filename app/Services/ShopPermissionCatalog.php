@@ -64,6 +64,7 @@ class ShopPermissionCatalog
             ['key' => 'shop_tables', 'label' => 'میز و سفارش میز', 'prefixes' => ['shop-tables', 'table-orders']],
             ['key' => 'settings', 'label' => 'تنظیمات فروشگاه', 'prefixes' => ['settings']],
             ['key' => 'reports', 'label' => 'گزارش مالی', 'prefixes' => ['financial-report', 'reports']],
+            ['key' => 'accounting', 'label' => 'حسابداری', 'prefixes' => ['accounting']],
             ['key' => 'shop_sms', 'label' => 'پیامک فروشگاه', 'prefixes' => ['shop-sms-logs', 'shop-sms-quota', 'sms-package-orders', 'sms-packages', 'sms-logs']],
             ['key' => 'backup', 'label' => 'پشتیبان‌گیری', 'prefixes' => ['shop-backup']],
             ['key' => 'online_orders', 'label' => 'سفارش آنلاین', 'prefixes' => ['orders']],
