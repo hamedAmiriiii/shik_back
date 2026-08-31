@@ -72,5 +72,6 @@ class Kernel extends HttpKernel
         'city.access' => \App\Http\Middleware\CheckCityAccess::class,
         'shop.from.route' => \App\Http\Middleware\BindShopFromRoute::class,
         'shop.staff.permission' => \App\Http\Middleware\EnforceShopStaffPermission::class,
+        'oil.project' => \App\Http\Middleware\EnsureOilProject::class,
     ];
 }

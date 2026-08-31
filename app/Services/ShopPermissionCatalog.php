@@ -38,6 +38,7 @@ class ShopPermissionCatalog
         'reset-password',
         'confirmation-code',
         'agency-requests',
+        'oil',
     ];
 
     /**

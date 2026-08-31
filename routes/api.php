@@ -30,6 +30,30 @@ Route::name('auth.')->prefix('auth')->group(function () {
     Route::get('atelier', [\App\Http\Controllers\Auth\AtelierController::class, 'index']);
 });
 
+Route::prefix('oil')->name('oil.')->group(function () {
+    Route::post('login', [\App\Http\Controllers\Oil\OilAuthController::class, 'login']);
+    Route::post('register/send-code', [\App\Http\Controllers\Oil\OilAuthController::class, 'sendRegistrationPhoneCode']);
+    Route::post('register', [\App\Http\Controllers\Oil\OilAuthController::class, 'register']);
+    Route::match(['get', 'post'], 'reminders/run', [\App\Http\Controllers\Oil\OilReminderController::class, 'run'])
+        ->middleware('throttle:12,60');
+
+    Route::middleware(['auth:sanctum', 'oil.project'])->group(function () {
+        Route::post('logout', [\App\Http\Controllers\Oil\OilAuthController::class, 'logout']);
+        Route::get('me', [\App\Http\Controllers\Oil\OilAuthController::class, 'me']);
+        Route::patch('shop', [\App\Http\Controllers\Oil\OilAuthController::class, 'updateShop']);
+        Route::get('customers', [\App\Http\Controllers\Oil\OilVisitController::class, 'customers']);
+        Route::get('customers/{plate}', [\App\Http\Controllers\Oil\OilVisitController::class, 'showCustomer'])
+            ->where('plate', '[^/]+');
+        Route::get('visits/lookup', [\App\Http\Controllers\Oil\OilVisitController::class, 'lookup']);
+        Route::post('visits', [\App\Http\Controllers\Oil\OilVisitController::class, 'store']);
+        Route::get('reminders', [\App\Http\Controllers\Oil\OilReminderController::class, 'index']);
+        Route::get('sms-quota', [\App\Http\Controllers\ShopSmsQuotaController::class, 'show']);
+        Route::get('sms-packages', [\App\Http\Controllers\ShopSmsPackageController::class, 'index']);
+        Route::post('sms-packages/{smsPackage}/purchase', [\App\Http\Controllers\ShopSmsPackageController::class, 'purchase']);
+        Route::get('sms-package-orders', [\App\Http\Controllers\ShopSmsPackageController::class, 'orders']);
+    });
+});
+
 Route::name('geo.')->prefix('geo')->group(function (){
     Route::get('cities' , [\App\Http\Controllers\CityController::class,'index']);
     Route::get('states' , [\App\Http\Controllers\StateController::class,'index']);

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\ProjectType;
 use App\Tools\QueryTools;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -19,7 +20,7 @@ class User extends Authenticatable
      * @var string[]
      */
     protected $fillable = [
-        'name', 'last_name', 'national_code', 'phone', 'atelier_id', 'shop_staff_role', 'password', 'gender',
+        'name', 'last_name', 'national_code', 'phone', 'atelier_id', 'project_type', 'shop_staff_role', 'password', 'gender',
         'personality_image', 'birth_certificate', 'national_cart' , 'tech_certificate', 'city_id',
         'referral_code', 'referral_dashboard_token', 'referral_balance',
     ];
@@ -137,5 +138,15 @@ class User extends Authenticatable
     public function referredShops()
     {
         return $this->hasMany(ShopReferral::class, 'referrer_user_id');
+    }
+
+    public function projectType(): string
+    {
+        return ProjectType::normalize($this->project_type ?? null);
+    }
+
+    public function isOilProject(): bool
+    {
+        return $this->projectType() === ProjectType::OIL;
     }
 }

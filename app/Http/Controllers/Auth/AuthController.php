@@ -156,7 +156,7 @@ class AuthController extends Controller
 
             $gender = $fields['gender'] ?? User::USER_GENDER_KEY['مرد'];
 
-            $user = User::create([
+            $userPayload = [
                 'name' => $fields['name'],
                 'last_name' => $fields['last_name'],
                 'atelier_id' => $fields['atelier_id'] ?? null,
@@ -169,7 +169,11 @@ class AuthController extends Controller
                 'birth_certificate' => $this->saveImageField($request, 'birth_certificate', $nationalCode . '/birth_certificate.jpeg'),
                 'tech_certificate' => $this->saveImageField($request, 'tech_certificate', $nationalCode . '/tech_certificate.jpeg'),
                 'national_cart' => $this->saveImageField($request, 'national_cart', $nationalCode . '/national_cart.jpeg'),
-            ]);
+            ];
+            if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'project_type')) {
+                $userPayload['project_type'] = \App\Support\ProjectType::SHOP;
+            }
+            $user = User::create($userPayload);
         }
 
         $roles = array_map('intval', $user->roles()->select('id')->pluck('id')->toArray());
@@ -189,16 +193,24 @@ class AuthController extends Controller
                 $nationalCode . '/business_license.jpeg'
             );
 
-            $atelier = Atelier::create(array_merge([
+            $atelierPayload = array_merge([
                 'name' => $fields['atelier_name'],
                 'code' => $atelierCode,
                 'address' => $address,
                 'business_license' => $businessLicense,
-            ], Atelier::trialAccessAttributes()));
-            $user->update([
+            ], Atelier::trialAccessAttributes());
+            if (\Illuminate\Support\Facades\Schema::hasColumn('ateliers', 'project_type')) {
+                $atelierPayload['project_type'] = \App\Support\ProjectType::SHOP;
+            }
+            $atelier = Atelier::create($atelierPayload);
+            $userUpdates = [
                 'atelier_id' => $atelier->id,
                 'shop_staff_role' => 'owner',
-            ]);
+            ];
+            if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'project_type')) {
+                $userUpdates['project_type'] = \App\Support\ProjectType::SHOP;
+            }
+            $user->update($userUpdates);
 
             ShopReferralService::attachReferrerOnShopRegistration(
                 $user,
@@ -288,6 +300,22 @@ class AuthController extends Controller
             return response([
                 'message' => 'اطلاعات وارد شده صحیح نیست',
             ], 401);
+        }
+
+        $userProject = \Illuminate\Support\Facades\Schema::hasColumn('users', 'project_type')
+            ? \App\Support\ProjectType::normalize($user->project_type)
+            : \App\Support\ProjectType::SHOP;
+        $requestedProject = \App\Support\ProjectType::normalize($request->input('project_type'));
+        if ($userProject !== $requestedProject) {
+            if ($userProject === \App\Support\ProjectType::OIL) {
+                return response([
+                    'message' => 'این حساب مربوط به تعویض روغن است. از مسیر /oil وارد شوید.',
+                ], 403);
+            }
+
+            return response([
+                'message' => 'این حساب مربوط به فروشگاه است، نه تعویض روغن.',
+            ], 403);
         }
 
         // وضعیت اعتبار فروشگاه در پاسخ (برای نمایش در فرانت) — ورود مسدود نمی‌شود

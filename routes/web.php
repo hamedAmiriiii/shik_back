@@ -17,6 +17,10 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+Route::get('/oil', function () {
+    return view('oil');
+});
+
 // Route موقت برای پاک کردن cache - بعد از استفاده حذف کنید!
 Route::get('/clear-cache', function () {
     \Illuminate\Support\Facades\Artisan::call('config:clear');

@@ -3,10 +3,12 @@
 namespace App\Models;
 
 use App\Services\ChartOfAccountsSeeder;
+use App\Support\ProjectType;
 use App\Tools\QueryTools;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 class Atelier extends Model
@@ -19,8 +21,14 @@ class Atelier extends Model
 
         static::created(function (Atelier $atelier) {
             Setting::ensureDefaultsForAtelier((int) $atelier->id);
-            ShopAccount::ensureDefaultsForAtelier((int) $atelier->id);
-            ChartOfAccountsSeeder::ensureForAtelier((int) $atelier->id);
+
+            $isOil = Schema::hasColumn('ateliers', 'project_type')
+                && ProjectType::normalize($atelier->project_type ?? null) === ProjectType::OIL;
+
+            if (! $isOil) {
+                ShopAccount::ensureDefaultsForAtelier((int) $atelier->id);
+                ChartOfAccountsSeeder::ensureForAtelier((int) $atelier->id);
+            }
 
             if ($atelier->shop_access_starts_at === null && $atelier->shop_access_ends_at === null) {
                 $atelier->forceFill(static::trialAccessAttributes())->saveQuietly();
@@ -46,6 +54,8 @@ class Atelier extends Model
         'subscription_status',
         'referred_by_user_id',
         'paid_plan_activated_at',
+        'project_type',
+        'oil_interval_km',
     ];
 
     protected $casts = [
@@ -53,6 +63,7 @@ class Atelier extends Model
         'shop_access_ends_at' => 'datetime',
         'shop_access_suspended' => 'boolean',
         'paid_plan_activated_at' => 'datetime',
+        'oil_interval_km' => 'integer',
     ];
 
     /**
@@ -131,6 +142,23 @@ class Atelier extends Model
     public function referrer()
     {
         return $this->belongsTo(User::class, 'referred_by_user_id');
+    }
+
+    public function projectType(): string
+    {
+        return ProjectType::normalize($this->project_type ?? null);
+    }
+
+    public function isOilProject(): bool
+    {
+        return $this->projectType() === ProjectType::OIL;
+    }
+
+    public function oilIntervalKm(): int
+    {
+        $n = (int) ($this->oil_interval_km ?? 5000);
+
+        return $n > 0 ? $n : 5000;
     }
 
     public function staffUsers()
