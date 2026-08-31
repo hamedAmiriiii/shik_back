@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AccountingVoucher;
 use App\Models\Atelier;
 use App\Models\Customer;
 use App\Models\Setting;
@@ -50,6 +51,7 @@ class ShopBackupService
                 'بازگردانی داده‌های فعلی این فروشگاه را با فایل پشتیبان جایگزین می‌کند.',
                 'حساب پرسنل، کد فروشگاه و دورهٔ اشتراک عوض نمی‌شود.',
                 'سهمیه پیامک فروشگاه حفظ می‌شود.',
+                'کدینگ، اسناد و آرتیکل حسابداری هم در پشتیبان است.',
             ],
         ];
     }
@@ -154,6 +156,7 @@ class ShopBackupService
                     $this->deleteShopData($atelierId);
                     $restored = $this->insertTables($atelierId, $tables);
                     $this->updateForeignKeys($tables);
+                    $this->rewriteActiveSourceKeys($atelierId);
                     $this->restoreFiles($atelierId, $tables, $zip);
                     $this->restoreAtelierMeta($atelier, $manifest, $zip);
                 });
@@ -162,6 +165,7 @@ class ShopBackupService
             }
 
             ShopAccount::ensureDefaultsForAtelier($atelierId);
+            ChartOfAccountsSeeder::ensureForAtelier($atelierId);
             Setting::ensureDefaultsForAtelier($atelierId);
 
             return [
@@ -472,10 +476,9 @@ class ShopBackupService
                 if (in_array('atelier_id', $columns, true)) {
                     $row['atelier_id'] = $atelierId;
                 }
-                foreach ($def['fks'] ?? [] as $col => $refTable) {
-                    if (array_key_exists($col, $row)) {
-                        $row[$col] = $this->mappedId($refTable, $row[$col] ?? null);
-                    }
+                $mapped = $this->mappedColumnsForRow($def, $row, $columns);
+                foreach ($mapped as $col => $value) {
+                    $row[$col] = $value;
                 }
                 $row = $this->filterColumns($row, $columns, $skip);
                 if (isset($row['legacy_slot']) && $row['legacy_slot'] === '') {
@@ -504,7 +507,9 @@ class ShopBackupService
                 continue;
             }
             $fks = $def['fks'] ?? [];
-            if ($fks === []) {
+            $typed = $def['typed_fks'] ?? [];
+            $poly = $def['polymorphic_fks'] ?? [];
+            if ($fks === [] && $typed === [] && $poly === []) {
                 continue;
             }
             $name = $def['name'];
@@ -517,12 +522,7 @@ class ShopBackupService
                 if (! $newId) {
                     continue;
                 }
-                $updates = [];
-                foreach ($fks as $col => $refTable) {
-                    if (in_array($col, $columns, true)) {
-                        $updates[$col] = $this->mappedId($refTable, $row[$col] ?? null);
-                    }
-                }
+                $updates = $this->mappedColumnsForRow($def, $row, $columns);
                 if ($updates !== []) {
                     DB::table($name)->where('id', $newId)->update($updates);
                 }
@@ -617,6 +617,71 @@ class ShopBackupService
         Storage::put('public/'.$newRelative, $contents, 'public');
 
         return $newRelative;
+    }
+
+    /**
+     * @param  array<string, mixed>  $def
+     * @param  array<string, mixed>  $row  ردیف فایل پشتیبان (idهای قدیمی)
+     * @param  array<int, string>  $columns
+     * @return array<string, mixed>
+     */
+    private function mappedColumnsForRow(array $def, array $row, array $columns): array
+    {
+        $updates = [];
+        foreach ($def['fks'] ?? [] as $col => $refTable) {
+            if (in_array($col, $columns, true) && array_key_exists($col, $row)) {
+                $updates[$col] = $this->mappedId($refTable, $row[$col] ?? null);
+            }
+        }
+        foreach ($def['typed_fks'] ?? [] as $col => $spec) {
+            if (! in_array($col, $columns, true) || ! array_key_exists($col, $row)) {
+                continue;
+            }
+            $type = (string) ($row[$spec['column'] ?? ''] ?? '');
+            $table = $spec['map'][$type] ?? null;
+            $updates[$col] = $table
+                ? $this->mappedId($table, $row[$col] ?? null)
+                : ($row[$col] ?? null);
+        }
+        foreach ($def['polymorphic_fks'] ?? [] as $col => $spec) {
+            if (! in_array($col, $columns, true) || ! array_key_exists($col, $row)) {
+                continue;
+            }
+            $type = (string) ($row[$spec['column'] ?? ''] ?? '');
+            $table = $spec['map'][$type] ?? null;
+            if (! $table) {
+                continue;
+            }
+            $mapped = $this->mappedId($table, $row[$col] ?? null);
+            if ($mapped !== null) {
+                $updates[$col] = $mapped;
+            }
+        }
+
+        return $updates;
+    }
+
+    private function rewriteActiveSourceKeys(int $atelierId): void
+    {
+        if (! Schema::hasTable('accounting_vouchers')
+            || ! Schema::hasColumn('accounting_vouchers', 'active_source_key')
+        ) {
+            return;
+        }
+
+        $rows = DB::table('accounting_vouchers')
+            ->where('atelier_id', $atelierId)
+            ->get(['id', 'source_type', 'source_id', 'status', 'reverses_voucher_id']);
+
+        foreach ($rows as $row) {
+            $key = null;
+            if ($row->status === AccountingVoucher::STATUS_POSTED && $row->reverses_voucher_id === null) {
+                $key = AccountingVoucher::activeSourceKey((string) $row->source_type, (int) $row->source_id);
+            }
+            DB::table('accounting_vouchers')->where('id', $row->id)->update([
+                'active_source_key' => $key,
+            ]);
+        }
     }
 
     private function mappedId(string $table, $oldId): ?int

@@ -71,15 +71,31 @@ class AccountingHealthCheck extends Command
         );
 
         $backupNames = array_column(ShopBackupTables::definitions(), 'name');
+        $purchaseIdx = array_search('purchases', $backupNames, true);
+        $voucherIdx = array_search('accounting_vouchers', $backupNames, true);
+        $lineIdx = array_search('accounting_lines', $backupNames, true);
+        $accountIdx = array_search('accounting_accounts', $backupNames, true);
+        $sourceTables = array_values(ShopBackupTables::voucherSourceTables());
+        $sourceOk = true;
+        foreach ($sourceTables as $table) {
+            if (! in_array($table, $backupNames, true)) {
+                $sourceOk = false;
+                break;
+            }
+        }
         $backupOk = ShopBackupTables::VERSION >= 2
-            && in_array('accounting_accounts', $backupNames, true)
-            && in_array('accounting_vouchers', $backupNames, true)
-            && in_array('accounting_lines', $backupNames, true);
+            && $accountIdx !== false
+            && $voucherIdx !== false
+            && $lineIdx !== false
+            && $purchaseIdx !== false
+            && $voucherIdx > $purchaseIdx
+            && $lineIdx > $voucherIdx
+            && $sourceOk;
         $checks[] = $this->check(
             'بکاپ',
             $backupOk,
-            'نسخه ۲ و سه جدول دفتر در تعریف پشتیبان هستند',
-            'ShopBackupTables جداول حسابداری را ندارد'
+            'نسخه ۲، سه جدول دفتر، remap منبع سند، و ترتیب درج درست است',
+            'تعریف پشتیبان حسابداری ناقص است'
         );
 
         $tbOk = false;

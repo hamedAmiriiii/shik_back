@@ -113,6 +113,15 @@ class AccountingVoucher extends Model
         return $query->where('status', self::STATUS_POSTED)->whereNull('reverses_voucher_id');
     }
 
+    /**
+     * گردش دفتر: اصل (posted یا reversed) به‌علاوه سند storno (posted با reverses_voucher_id).
+     * اگر اصل reversed از گزارش حذف شود، فقط آرتیکل معکوس می‌ماند و مانده برعکس می‌شود.
+     */
+    public function scopeInLedger($query)
+    {
+        return $query->whereIn('status', [self::STATUS_POSTED, self::STATUS_REVERSED]);
+    }
+
     public function isPosted(): bool
     {
         return $this->status === self::STATUS_POSTED && $this->reverses_voucher_id === null;

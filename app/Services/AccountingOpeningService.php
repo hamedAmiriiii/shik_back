@@ -107,7 +107,10 @@ class AccountingOpeningService
         $row = DB::table('accounting_lines')
             ->join('accounting_vouchers', 'accounting_vouchers.id', '=', 'accounting_lines.voucher_id')
             ->where('accounting_vouchers.atelier_id', $atelierId)
-            ->where('accounting_vouchers.status', AccountingVoucher::STATUS_POSTED)
+            ->whereIn('accounting_vouchers.status', [
+                AccountingVoucher::STATUS_POSTED,
+                AccountingVoucher::STATUS_REVERSED,
+            ])
             ->where('accounting_lines.account_id', $accountId)
             ->selectRaw('COALESCE(SUM(accounting_lines.debit), 0) as debit_sum, COALESCE(SUM(accounting_lines.credit), 0) as credit_sum')
             ->first();

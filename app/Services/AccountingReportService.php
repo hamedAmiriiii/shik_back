@@ -380,7 +380,10 @@ class AccountingReportService
         $query = DB::table('accounting_lines')
             ->join('accounting_vouchers', 'accounting_vouchers.id', '=', 'accounting_lines.voucher_id')
             ->where('accounting_vouchers.atelier_id', $atelierId)
-            ->where('accounting_vouchers.status', AccountingVoucher::STATUS_POSTED);
+            ->whereIn('accounting_vouchers.status', [
+                AccountingVoucher::STATUS_POSTED,
+                AccountingVoucher::STATUS_REVERSED,
+            ]);
 
         if ($from) {
             $query->whereDate('accounting_vouchers.date', '>=', $from);

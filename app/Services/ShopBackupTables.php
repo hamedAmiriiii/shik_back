@@ -35,25 +35,14 @@ class ShopBackupTables
                 'scope' => 'atelier',
                 'fks' => [
                     'parent_id' => 'accounting_accounts',
-                    'linked_id' => 'shop_accounts',
                 ],
-            ],
-            [
-                'name' => 'accounting_vouchers',
-                'scope' => 'atelier',
-                'fks' => [
-                    'reverses_voucher_id' => 'accounting_vouchers',
-                ],
-                'skip_columns' => ['created_by'],
-            ],
-            [
-                'name' => 'accounting_lines',
-                'scope' => 'parent',
-                'parent' => 'accounting_vouchers',
-                'parent_key' => 'voucher_id',
-                'fks' => [
-                    'voucher_id' => 'accounting_vouchers',
-                    'account_id' => 'accounting_accounts',
+                'typed_fks' => [
+                    'linked_id' => [
+                        'column' => 'linked_type',
+                        'map' => [
+                            \App\Models\AccountingAccount::LINK_SHOP_ACCOUNT => 'shop_accounts',
+                        ],
+                    ],
                 ],
             ],
             [
@@ -420,12 +409,62 @@ class ShopBackupTables
                 ],
             ],
             [
+                'name' => 'accounting_vouchers',
+                'scope' => 'atelier',
+                'fks' => [
+                    'reverses_voucher_id' => 'accounting_vouchers',
+                ],
+                'polymorphic_fks' => [
+                    'source_id' => [
+                        'column' => 'source_type',
+                        'map' => self::voucherSourceTables(),
+                    ],
+                ],
+                'skip_columns' => ['created_by'],
+                'rewrite_active_source_key' => true,
+            ],
+            [
+                'name' => 'accounting_lines',
+                'scope' => 'parent',
+                'parent' => 'accounting_vouchers',
+                'parent_key' => 'voucher_id',
+                'fks' => [
+                    'voucher_id' => 'accounting_vouchers',
+                    'account_id' => 'accounting_accounts',
+                ],
+            ],
+            [
                 'name' => 'sms_package_orders',
                 'scope' => 'atelier',
                 'fks' => [],
                 'restore' => false,
                 'skip_columns' => ['requested_by_user_id', 'reviewed_by_user_id'],
             ],
+        ];
+    }
+
+    /**
+     * source_type سند → جدول عملیاتی برای remap هنگام بازگردانی.
+     *
+     * @return array<string, string>
+     */
+    public static function voucherSourceTables(): array
+    {
+        return [
+            \App\Models\AccountingVoucher::SOURCE_PURCHASE => 'purchases',
+            \App\Models\AccountingVoucher::SOURCE_INSTALLMENT_PAY => 'installments',
+            \App\Models\AccountingVoucher::SOURCE_DEBT_SETTLE => 'purchases',
+            \App\Models\AccountingVoucher::SOURCE_CHEQUE_CLEAR => 'cheques',
+            \App\Models\AccountingVoucher::SOURCE_RECON_DEPOSIT => 'daily_shop_reconciliation_account_deposits',
+            \App\Models\AccountingVoucher::SOURCE_ACCOUNT_TRANSFER => 'shop_account_transfers',
+            \App\Models\AccountingVoucher::SOURCE_EXPENSE => 'expenses',
+            \App\Models\AccountingVoucher::SOURCE_INVOICE => 'invoices',
+            \App\Models\AccountingVoucher::SOURCE_DOCUMENT_PAYMENT => 'document_payments',
+            \App\Models\AccountingVoucher::SOURCE_PRODUCTION => 'productions',
+            \App\Models\AccountingVoucher::SOURCE_PURCHASE_RETURN => 'purchase_item_returns',
+            \App\Models\AccountingVoucher::SOURCE_PAYROLL_PAYMENT => 'employee_payroll_payments',
+            \App\Models\AccountingVoucher::SOURCE_MANUAL_TRADE => 'manual_trades',
+            \App\Models\AccountingVoucher::SOURCE_INCOME => 'cheques',
         ];
     }
 }
