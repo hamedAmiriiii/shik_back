@@ -1,13 +1,22 @@
 -- پاک کردن دادهٔ عملیاتی فروشگاه ۱۳
 -- می‌ماند: کالاها، تصاویر کالا، دسته‌بندی، پیوند کالا-دسته، تولیدکننده‌ها
 -- می‌ماند: تنظیمات، حساب‌های فروشگاه/تنخواه (خالی)، پرسنل، میزها، بازه‌های اعتبار
+-- می‌ماند: درخت کدینگ حسابداری (accounting_accounts) — بدون سند
 -- حذف می‌شود: فروش، خرید، فاکتور، هزینه، درآمد، چک، اعتبار، مشتری، تولید، مواد اولیه
+-- حذف می‌شود: اسناد و آرتیکل دفتر (accounting_vouchers / accounting_lines) از جمله افتتاحیه
 --
 -- کل این فایل را یکجا در تب SQL phpMyAdmin اجرا کنید (نه دستوربه‌دستور جدا در نشست‌های مختلف).
 
 SET @aid = 13;
 
 SET FOREIGN_KEY_CHECKS = 0;
+
+-- —— دفتر حسابداری (درخت حساب می‌ماند) ——
+DELETE l FROM accounting_lines l
+INNER JOIN accounting_vouchers v ON v.id = l.voucher_id
+WHERE v.atelier_id = @aid;
+
+DELETE FROM accounting_vouchers WHERE atelier_id = @aid;
 
 -- —— فروش / سبد / میز ——
 DELETE ci FROM cart_items ci
@@ -72,6 +81,10 @@ WHERE pr.atelier_id = @aid;
 DELETE FROM productions WHERE atelier_id = @aid;
 DELETE FROM raw_material_lots WHERE atelier_id = @aid;
 
+DELETE cpg FROM category_produced_good cpg
+INNER JOIN produced_goods g ON g.id = cpg.produced_good_id
+WHERE g.atelier_id = @aid;
+
 DELETE pgi FROM produced_good_ingredients pgi
 INNER JOIN produced_goods g ON g.id = pgi.produced_good_id
 WHERE g.atelier_id = @aid;
@@ -90,14 +103,19 @@ DELETE FROM confirmation_codes WHERE atelier_id = @aid;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
--- کنترل: باید صفر باشد
+-- کنترل: ستون‌های عملیاتی باید صفر باشند؛ کالا و کدینگ می‌مانند
 SELECT
-    (SELECT COUNT(*) FROM purchases WHERE atelier_id = 13) AS purchases,
-    (SELECT COUNT(*) FROM invoices WHERE atelier_id = 13) AS invoices,
-    (SELECT COUNT(*) FROM expenses WHERE atelier_id = 13) AS expenses,
-    (SELECT COUNT(*) FROM incomes WHERE atelier_id = 13) AS incomes,
-    (SELECT COUNT(*) FROM cheques WHERE atelier_id = 13) AS cheques,
-    (SELECT COUNT(*) FROM produced_goods WHERE atelier_id = 13) AS produced_goods,
-    (SELECT COUNT(*) FROM raw_materials WHERE atelier_id = 13) AS raw_materials,
-    (SELECT COUNT(*) FROM products WHERE atelier_id = 13) AS products_kept,
-    (SELECT COUNT(*) FROM categories WHERE atelier_id = 13) AS categories_kept;
+    (SELECT COUNT(*) FROM purchases WHERE atelier_id = @aid) AS purchases,
+    (SELECT COUNT(*) FROM invoices WHERE atelier_id = @aid) AS invoices,
+    (SELECT COUNT(*) FROM expenses WHERE atelier_id = @aid) AS expenses,
+    (SELECT COUNT(*) FROM incomes WHERE atelier_id = @aid) AS incomes,
+    (SELECT COUNT(*) FROM cheques WHERE atelier_id = @aid) AS cheques,
+    (SELECT COUNT(*) FROM accounting_vouchers WHERE atelier_id = @aid) AS accounting_vouchers,
+    (SELECT COUNT(*) FROM accounting_lines l
+     INNER JOIN accounting_vouchers v ON v.id = l.voucher_id
+     WHERE v.atelier_id = @aid) AS accounting_lines,
+    (SELECT COUNT(*) FROM produced_goods WHERE atelier_id = @aid) AS produced_goods,
+    (SELECT COUNT(*) FROM raw_materials WHERE atelier_id = @aid) AS raw_materials,
+    (SELECT COUNT(*) FROM products WHERE atelier_id = @aid) AS products_kept,
+    (SELECT COUNT(*) FROM categories WHERE atelier_id = @aid) AS categories_kept,
+    (SELECT COUNT(*) FROM accounting_accounts WHERE atelier_id = @aid) AS accounting_accounts_kept;
