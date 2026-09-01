@@ -727,7 +727,14 @@
       try {
         const data = await api("/reminders/run", { method: "POST" });
         state.busy = "";
-        alert(data.message || "انجام شد.");
+        const lines = (data.inspected || []).map(function (i) {
+          const d = i.days_until_due == null ? "—" : i.days_until_due;
+          const extra = i.remaining_km != null
+            ? " — " + i.remaining_km + " کیلومتر ≈ " + (i.interval_days || "—") + " روز از ثبت"
+            : "";
+          return (i.plate || "") + ": " + (i.action || "") + " (" + d + " روز مانده)" + extra;
+        });
+        alert((data.message || "انجام شد.") + (lines.length ? "\n\n" + lines.join("\n") : ""));
         await loadSmsHub();
       } catch (err) {
         state.busy = "";

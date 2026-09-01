@@ -9,14 +9,18 @@ use App\Models\OilVisit;
 use App\Support\ProjectType;
 use App\Tools\SmsTools;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
 
 class OilReminderDispatcher
 {
-    /** ۲۵–۳۰ هزار کیلومتر در سال → میانگین */
-    public const KM_PER_YEAR = 27500;
+    /** میانگین ثابت همهٔ ماشین‌ها */
+    public const KM_PER_YEAR = 27000;
 
     public const LOOKAHEAD_DAYS = 10;
+
+    /** اگر API بعد از نوبت صدا زده شد، تا این تعداد روز تأخیر هنوز یک‌بار یادآوری برود */
+    public const MAX_OVERDUE_DAYS = 90;
 
     /**
      * @return array<string, mixed>
@@ -30,18 +34,21 @@ class OilReminderDispatcher
         }
 
         $kmPerYear = max(1000, (int) config('oil.km_per_year', self::KM_PER_YEAR));
-        $kmPerDay = $kmPerYear / 365;
+        $defaultKmPerDay = $kmPerYear / 365;
         $lookahead = max(1, (int) config('oil.reminder_lookahead_days', self::LOOKAHEAD_DAYS));
+        $maxOverdue = max(0, (int) config('oil.reminder_max_overdue_days', self::MAX_OVERDUE_DAYS));
 
         $atelierIds = self::oilAtelierIds($atelierId);
         $scanned = 0;
         $due = 0;
         $sent = 0;
         $skipped = 0;
+        $skippedOther = 0;
         $failed = 0;
+        $inspected = [];
 
         if ($atelierIds === []) {
-            return self::summary($kmPerYear, $kmPerDay, $lookahead, 0, 0, 0, 0, 0);
+            return self::summary($kmPerYear, $defaultKmPerDay, $lookahead, $maxOverdue, 0, 0, 0, 0, 0, 0, []);
         }
 
         $alreadySent = OilReminderSms::query()
@@ -61,22 +68,56 @@ class OilReminderDispatcher
             ->orderBy('id')
             ->get();
 
+        $histories = self::historiesByPlate($visits->pluck('plate')->unique()->filter()->all());
+
         $shopNames = Atelier::query()
             ->whereIn('id', $atelierIds)
             ->pluck('name', 'id');
 
         foreach ($visits as $visit) {
             $scanned++;
+            $history = $histories->get($visit->plate, collect());
+            $forecast = self::forecast($visit, $defaultKmPerDay);
+            $row = [
+                'oil_visit_id' => (int) $visit->id,
+                'plate' => $visit->plate_display,
+                'phone' => $visit->phone,
+                'km' => (int) $visit->km,
+                'next_km' => (int) $visit->next_km,
+                'remaining_km' => is_array($forecast) ? ($forecast['remaining_km'] ?? null) : null,
+                'interval_days' => is_array($forecast) ? ($forecast['interval_days'] ?? null) : null,
+                'days_until_due' => is_array($forecast) ? ($forecast['days_until_due'] ?? null) : null,
+                'estimated_due_on' => is_array($forecast) ? ($forecast['estimated_due_on'] ?? null) : null,
+                'action' => null,
+            ];
+
             if (isset($alreadyMap[$visit->id])) {
                 $skipped++;
+                $row['action'] = 'already_sent';
+                $inspected[] = $row;
                 continue;
             }
 
-            $forecast = self::forecast($visit, $kmPerDay);
-            if ($forecast === null) {
+            if (self::plateMovedToAnotherShop($visit, $history)) {
+                $skippedOther++;
+                $row['action'] = 'other_shop_has_newer_visit';
+                $inspected[] = $row;
                 continue;
             }
-            if ($forecast['days_until_due'] > $lookahead || $forecast['days_until_due'] < -1) {
+
+            if ($forecast === null) {
+                $row['action'] = 'no_forecast';
+                $inspected[] = $row;
+                continue;
+            }
+            if ($forecast['days_until_due'] > $lookahead) {
+                $row['action'] = 'too_early';
+                $inspected[] = $row;
+                continue;
+            }
+            if ($forecast['days_until_due'] < -$maxOverdue) {
+                $row['action'] = 'too_overdue';
+                $inspected[] = $row;
                 continue;
             }
 
@@ -91,6 +132,8 @@ class OilReminderDispatcher
                 $log = OilReminderSms::query()->where('oil_visit_id', $visit->id)->first();
                 if ($log && $log->sms_sent) {
                     $skipped++;
+                    $row['action'] = 'already_sent';
+                    $inspected[] = $row;
                     continue;
                 }
                 if (! $log) {
@@ -109,6 +152,8 @@ class OilReminderDispatcher
                 }
             } catch (QueryException $e) {
                 $skipped++;
+                $row['action'] = 'db_skip';
+                $inspected[] = $row;
                 continue;
             }
 
@@ -120,37 +165,68 @@ class OilReminderDispatcher
             if ($ok) {
                 $sent++;
                 $alreadyMap[$visit->id] = true;
+                $row['action'] = 'sent';
             } else {
                 $failed++;
+                $row['action'] = 'send_failed';
+                $row['error'] = $error;
             }
+            $inspected[] = $row;
         }
 
-        return self::summary($kmPerYear, $kmPerDay, $lookahead, $scanned, $due, $sent, $skipped, $failed);
+        return self::summary($kmPerYear, $defaultKmPerDay, $lookahead, $maxOverdue, $scanned, $due, $sent, $skipped, $failed, $skippedOther, $inspected);
     }
 
     /**
-     * @return array{days_until_due: int, estimated_due_on: string}|null
+     * اگر آخرین مراجعهٔ این پلاک در مغازهٔ دیگری باشد، این مغازه دیگر یادآوری ندهد.
+     */
+    public static function plateMovedToAnotherShop(OilVisit $visit, Collection $history): bool
+    {
+        if ($history->isEmpty()) {
+            return false;
+        }
+        $latest = $history->sortBy([
+            ['created_at', 'asc'],
+            ['id', 'asc'],
+        ])->last();
+        if (! $latest) {
+            return false;
+        }
+
+        return (int) $latest->id !== (int) $visit->id;
+    }
+
+    /**
+     * از تاریخ ثبت: (next_km − km) با میانگین ۲۷۰۰۰ کیلومتر/سال چند روز طول می‌کشد.
+     *
+     * @return array{days_until_due: int, estimated_due_on: string, remaining_km: int, interval_days: int}|null
      */
     public static function forecast(OilVisit $visit, float $kmPerDay): ?array
     {
         if ($kmPerDay <= 0 || ! $visit->created_at) {
             return null;
         }
+
         $remaining = (int) $visit->next_km - (int) $visit->km;
         if ($remaining <= 0) {
             return [
                 'days_until_due' => 0,
                 'estimated_due_on' => $visit->created_at->toDateString(),
+                'remaining_km' => $remaining,
+                'interval_days' => 0,
             ];
         }
+
         $intervalDays = $remaining / $kmPerDay;
-        $elapsed = $visit->created_at->diffInDays(now());
+        $elapsed = $visit->created_at->floatDiffInDays(now());
         $daysUntil = (int) round($intervalDays - $elapsed);
-        $dueOn = $visit->created_at->copy()->addDays((int) round($intervalDays));
+        $dueOn = $visit->created_at->copy()->addSeconds((int) round($intervalDays * 86400));
 
         return [
             'days_until_due' => $daysUntil,
             'estimated_due_on' => $dueOn->toDateString(),
+            'remaining_km' => $remaining,
+            'interval_days' => (int) round($intervalDays),
         ];
     }
 
@@ -159,6 +235,24 @@ class OilReminderDispatcher
         $when = $daysUntil <= 0 ? 'الان' : 'حدود '.abs($daysUntil).' روز دیگر';
 
         return "نوبت تعویض روغن نزدیک است\n{$shopName}\nپلاک {$plateDisplay}\n{$when} — کیلومتر {$nextKm}";
+    }
+
+    /**
+     * @param  array<int, string>  $plates
+     * @return Collection<string, Collection<int, OilVisit>>
+     */
+    private static function historiesByPlate(array $plates): Collection
+    {
+        if ($plates === []) {
+            return collect();
+        }
+
+        return OilVisit::query()
+            ->whereIn('plate', $plates)
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->get()
+            ->groupBy('plate');
     }
 
     /**
@@ -206,27 +300,35 @@ class OilReminderDispatcher
         int $kmPerYear,
         float $kmPerDay,
         int $lookahead,
+        int $maxOverdue,
         int $scanned,
         int $due,
         int $sent,
         int $skipped,
-        int $failed
+        int $failed,
+        int $skippedOther,
+        array $inspected
     ): array {
-        $interval5000Days = $kmPerDay > 0 ? (int) round(5000 / $kmPerDay) : null;
+        $daysFor = static fn (int $km) => $kmPerDay > 0 ? (int) round($km / $kmPerDay) : null;
 
         return [
             'km_per_year' => $kmPerYear,
             'km_per_day' => round($kmPerDay, 2),
             'lookahead_days' => $lookahead,
-            'typical_days_between_changes' => $interval5000Days,
+            'max_overdue_days' => $maxOverdue,
+            'days_for_5000_km' => $daysFor(5000),
+            'days_for_7000_km' => $daysFor(7000),
+            'typical_days_between_changes' => $daysFor(5000),
             'scanned' => $scanned,
             'due' => $due,
             'sent' => $sent,
             'skipped_already_sent' => $skipped,
+            'skipped_other_shop' => $skippedOther,
             'failed' => $failed,
+            'inspected' => $inspected,
             'message' => $sent > 0
                 ? $sent.' پیامک یادآوری ارسال شد.'
-                : 'ماشینی در پنجرهٔ ۱۰ روزه بدون پیامک قبلی نبود.',
+                : 'ماشینی در پنجرهٔ یادآوری بدون پیامک قبلی نبود.',
         ];
     }
 }
