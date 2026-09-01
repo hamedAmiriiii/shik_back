@@ -269,7 +269,6 @@ class PurchasedProductController extends Controller
             $userShiksho = $userShikshoQuery->first();
             if ($userShiksho && $userShiksho->credit > 0) {
                 $creditUsed = min($userShiksho->credit, $amountAfterDiscount);
-                $userShiksho->useCredit($creditUsed);
             }
         }
 
@@ -325,6 +324,16 @@ class PurchasedProductController extends Controller
         $amountPaidNow = $paymentType === 'installment'
             ? $this->roundToThreeZeroEnding($finalTotalAmount / 3)
             : ($paymentType === 'debt' ? 0.0 : (float) $payableAmount);
+
+        $installmentReserve = 0.0;
+        if ($paymentType === 'installment' && $installmentCount && $installmentAmount) {
+            $installmentReserve = max(0, round($finalTotalAmount - $amountPaidNow, 2));
+            if (! $phone) {
+                return response([
+                    'error' => 'برای فروش اقساطی شماره موبایل الزامی است.',
+                ], 422);
+            }
+        }
 
         $settlement = $paymentType === 'debt'
             ? ['card_amount' => 0.0, 'cash_amount' => 0.0]
@@ -391,6 +400,27 @@ class PurchasedProductController extends Controller
         try {
             DB::beginTransaction();
 
+            if ($creditUsed > 0 || $installmentReserve > 0) {
+                $lockedQuery = UserShiksho::where('phone', $phone);
+                if ($purchaseAtelierId !== null) {
+                    $lockedQuery->where('atelier_id', $purchaseAtelierId);
+                }
+                $lockedUser = $lockedQuery->lockForUpdate()->first();
+                if ($creditUsed > 0) {
+                    if (! $lockedUser || (float) $lockedUser->credit + 0.001 < $creditUsed) {
+                        throw new \RuntimeException('اعتبار مشتری کافی نیست.');
+                    }
+                    $lockedUser->useCredit($creditUsed);
+                }
+                if ($installmentReserve > 0) {
+                    if (! $lockedUser || (float) $lockedUser->installment_credit + 0.001 < $installmentReserve) {
+                        throw new \RuntimeException('سقف اعتبار اقساطی کافی نیست.');
+                    }
+                    $lockedUser->useInstallmentCredit($installmentReserve);
+                }
+                $userShiksho = $lockedUser;
+            }
+
             if ($paymentType === 'cheque') {
                 $linkedCheque = Cheque::query()
                     ->where('id', $chequeId)
@@ -455,6 +485,9 @@ class PurchasedProductController extends Controller
                 \App\Services\AccountingMiscPoster::reverseReceivedCheque($linkedCheque);
             }
             \App\Services\AccountingSalePoster::post($purchase);
+            if ($paymentType === 'installment' && $installmentCount && $installmentAmount) {
+                $this->createInstallments($purchase, $installmentCount, $installmentAmount, $finalTotalAmount);
+            }
             DB::commit();
         } catch (QueryException $e) {
             DB::rollBack();
@@ -470,30 +503,6 @@ class PurchasedProductController extends Controller
             DB::rollBack();
 
             return response(['error' => $e->getMessage()], 400);
-        }
-
-        // ایجاد قسط‌ها در صورت اقساطی بودن
-        if ($paymentType === 'installment' && $installmentCount && $installmentAmount) {
-            $this->createInstallments($purchase, $installmentCount, $installmentAmount, $finalTotalAmount);
-            
-            // کسر اعتبار اقساطی: مبلغ باقیمانده (کل مبلغ منهای قسط اول که پرداخت شده - یک سوم)
-            if ($phone) {
-                $userShiksho = UserShiksho::where('phone', $phone)
-                    ->when($purchaseAtelierId !== null, function ($q) use ($purchaseAtelierId) {
-                        $q->where('atelier_id', $purchaseAtelierId);
-                    })
-                    ->first();
-                if ($userShiksho) {
-                    // مبلغ قسط اول که پرداخت شده است (یک سوم)
-                    $firstInstallmentAmount = $this->roundToThreeZeroEnding($finalTotalAmount / 3);
-                    // مبلغ باقیمانده که باید از اعتبار اقساطی کسر شود
-                    $remainingAmount = $finalTotalAmount - $firstInstallmentAmount;
-                    
-                    if ($remainingAmount > 0 && $userShiksho->installment_credit >= $remainingAmount) {
-                        $userShiksho->useInstallmentCredit($remainingAmount);
-                    }
-                }
-            }
         }
 
         // اگر شماره تلفن وجود دارد
@@ -643,10 +652,71 @@ class PurchasedProductController extends Controller
     public function destroy(Purchase $purchase)
     {
         DB::transaction(function () use ($purchase) {
+            $purchase->load([
+                'purchasedProducts.product',
+                'purchasedProducts.producedGood',
+                'purchasedProducts.rawMaterial',
+                'installments',
+                'cheque',
+            ]);
+            $posSale = app(ShopPosSaleService::class);
+            foreach ($purchase->purchasedProducts as $line) {
+                $qty = (float) $line->quantity;
+                if ($qty <= 0) {
+                    continue;
+                }
+                if ($line->product_id && $line->product) {
+                    $line->product->increment('quantity', $qty);
+                } else {
+                    $posSale->restoreStock($line, $qty);
+                }
+            }
+            $this->restoreCustomerOnVoidedSale($purchase);
+            if ($purchase->cheque && $purchase->cheque->status === Cheque::STATUS_PENDING) {
+                $purchase->cheque->update(['purchase_id' => null]);
+            }
+            if ((int) $purchase->atelier_id > 0) {
+                \App\Services\CustomerCreditExpenseService::removeCreditUsedForPurchase(
+                    (int) $purchase->atelier_id,
+                    (int) $purchase->id
+                );
+            }
             \App\Services\AccountingSalePoster::reversePurchase($purchase);
             $purchase->delete();
         });
         return response(['message' => 'سبد خرید حذف شد'], 200);
+    }
+
+    protected function restoreCustomerOnVoidedSale(Purchase $purchase): void
+    {
+        if (! $purchase->phone) {
+            return;
+        }
+
+        $query = UserShiksho::where('phone', $purchase->phone);
+        if ($purchase->atelier_id !== null) {
+            $query->where('atelier_id', $purchase->atelier_id);
+        }
+        $customer = $query->lockForUpdate()->first();
+        if (! $customer) {
+            return;
+        }
+
+        $earned = round((float) $purchase->credit_earned, 2);
+        $used = round((float) $purchase->credit_used, 2);
+        if ($earned >= 0.01) {
+            $customer->credit = max(0, round((float) $customer->credit - $earned, 2));
+        } elseif ($used >= 0.01) {
+            $customer->credit = round((float) $customer->credit + $used, 2);
+        }
+
+        $unpaidReserve = round((float) $purchase->installments
+            ->where('is_paid', false)
+            ->sum('amount'), 2);
+        if ($unpaidReserve >= 0.01) {
+            $customer->installment_credit = round((float) $customer->installment_credit + $unpaidReserve, 2);
+        }
+        $customer->save();
     }
 
     /**
@@ -816,7 +886,7 @@ class PurchasedProductController extends Controller
         }
 
         return response([
-            'message' => 'محصول با موفقیت برگشت داده شد. مبلغ به اعتبار مشتری اضافه شد.',
+            'message' => 'محصول با موفقیت برگشت داده شد.',
             'returned_item' => $result['returned_item'],
             'row' => $result['row'],
             'phone' => $result['phone'] ?? $purchase->phone,
@@ -1040,11 +1110,12 @@ class PurchasedProductController extends Controller
                 ->first();
             $userInstallmentCredit = $userShiksho ? (float) $userShiksho->installment_credit : 0;
             
-            // اعتبار اقساطی باید به اندازه کل مبلغ با سود باشد
-            $hasEnoughCredit = $userInstallmentCredit >= $finalTotalAmount;
+            $paidNow = $this->roundToThreeZeroEnding($finalTotalAmount / 3);
+            $reserveNeeded = max(0, round($finalTotalAmount - $paidNow, 2));
+            $hasEnoughCredit = $userInstallmentCredit + 0.001 >= $reserveNeeded;
             
             if (!$hasEnoughCredit) {
-                $creditShortage = $this->roundToThreeZeroEnding($finalTotalAmount - $userInstallmentCredit);
+                $creditShortage = $this->roundToThreeZeroEnding($reserveNeeded - $userInstallmentCredit);
             }
         }
 
@@ -1067,7 +1138,7 @@ class PurchasedProductController extends Controller
             
             if (!$hasEnoughCredit) {
                 $response['credit_shortage'] = $creditShortage;
-                $response['error'] = 'اعتبار اقساطی کاربر کافی نیست. اعتبار مورد نیاز: ' . number_format($finalTotalAmount, 0) . ' تومان، اعتبار موجود: ' . number_format($userInstallmentCredit, 0) . ' تومان';
+                $response['error'] = 'اعتبار اقساطی کاربر کافی نیست. اعتبار مورد نیاز: ' . number_format($reserveNeeded, 0) . ' تومان، اعتبار موجود: ' . number_format($userInstallmentCredit, 0) . ' تومان';
             }
         }
 

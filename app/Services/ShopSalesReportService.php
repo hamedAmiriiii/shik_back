@@ -121,10 +121,11 @@ class ShopSalesReportService
             ->whereBetween('created_at', [$startString, $endString])
             ->get();
 
-        [$totalReturns, $totalReturnsPurchase] = self::sumReturnedProducts($returnedProducts);
+        [$totalReturns] = self::sumReturnedProducts($returnedProducts);
 
-        $netSales = round($totalSales - $totalReturns, 2);
-        $netPurchase = round($totalPurchase - $totalReturnsPurchase, 2);
+        // فروش و بها از اقلام باقی‌مانده است؛ برگشت فاکتور را دوباره کم نکنید.
+        $netSales = round($totalSales, 2);
+        $netPurchase = round($totalPurchase, 2);
 
         $manualCreditGranted = UserCreditGrantService::sumManualGrantsInRange(
             $atelierId,
@@ -133,8 +134,8 @@ class ShopSalesReportService
         );
 
         $totalCreditGranted = $creditEarnedFromPurchases + $manualCreditGranted;
-        // سود تعهدی: فروش روز فاکتور − بها − اعتبار مصرف‌شده (وصول چک/قسط بعدی سود نمی‌سازد)
-        $totalProfit = round($netSales - $netPurchase - $creditUsedTotal, 2);
+        // سود تعهدی: فروش ناخالص − تخفیف فاکتور − بها − اعتبار مصرف‌شده
+        $totalProfit = round($netSales - $discountGiven - $netPurchase - $creditUsedTotal, 2);
 
         return [
             'sales' => (float) $netSales,
@@ -261,6 +262,7 @@ class ShopSalesReportService
     {
         return (float) Installment::query()
             ->where('is_paid', true)
+            ->where('installment_number', '>', 1)
             ->whereNotNull('paid_at')
             ->whereBetween('paid_at', [$start, $end])
             ->whereHas('purchase', function ($q) use ($atelierId) {

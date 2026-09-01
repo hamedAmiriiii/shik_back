@@ -69,6 +69,7 @@ class CustomerCreditExpenseService
 
         $expense = self::find($atelierId, self::SOURCE_LOYALTY, $purchaseId);
         if ($expense) {
+            AccountingDocumentPoster::reverseExpense($expense);
             $expense->delete();
         }
     }

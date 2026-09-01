@@ -406,13 +406,34 @@ class InvoiceController extends Controller
             ->where('invoice_id', $invoice->id)
             ->where('status', \App\Models\Cheque::STATUS_PENDING)
             ->get();
-        foreach ($pendingCheques as $cheque) {
-            $cheque->update(['status' => \App\Models\Cheque::STATUS_CANCELLED, 'invoice_id' => null]);
-        }
-
         $this->deleteInvoiceImage($invoice);
-        AccountingDocumentPoster::reverseInvoice($invoice);
-        $invoice->delete();
+
+        try {
+            DB::transaction(function () use ($invoice, $pendingCheques) {
+                foreach ($pendingCheques as $cheque) {
+                    $cheque->update(['status' => \App\Models\Cheque::STATUS_CANCELLED, 'invoice_id' => null]);
+                }
+
+                if (Schema::hasTable('raw_material_lots')) {
+                    $invoice->load('rawMaterialLots');
+                    foreach ($invoice->rawMaterialLots as $lot) {
+                        if (! $lot->isUntouched()) {
+                            throw new RuntimeException(
+                                'بخشی از مواد این فاکتور مصرف شده و قابل حذف نیست. ابتدا تولید/فروش را برگردانید.'
+                            );
+                        }
+                    }
+                    foreach ($invoice->rawMaterialLots as $lot) {
+                        $lot->delete();
+                    }
+                }
+
+                AccountingDocumentPoster::reverseInvoice($invoice);
+                $invoice->delete();
+            });
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         return response(['message' => 'فاکتور با موفقیت حذف شد'], 200);
     }

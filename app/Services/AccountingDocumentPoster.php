@@ -24,7 +24,8 @@ class AccountingDocumentPoster
             (int) $invoice->id,
             function () use ($invoice) {
                 return self::postInvoice($invoice);
-            }
+            },
+            $invoice
         );
     }
 
@@ -48,7 +49,8 @@ class AccountingDocumentPoster
             (int) $expense->id,
             function () use ($expense, $payrollType) {
                 return self::postExpense($expense, $payrollType);
-            }
+            },
+            $expense
         );
     }
 
@@ -221,12 +223,20 @@ class AccountingDocumentPoster
     /**
      * @param  callable(): ?AccountingVoucher  $poster
      */
-    protected static function syncDocument(int $atelierId, string $sourceType, int $sourceId, callable $poster): ?AccountingVoucher
-    {
+    protected static function syncDocument(
+        int $atelierId,
+        string $sourceType,
+        int $sourceId,
+        callable $poster,
+        ?Model $document = null
+    ): ?AccountingVoucher {
         if ($atelierId <= 0 || $sourceId <= 0 || ! AccountingLedger::ready()) {
             return null;
         }
 
+        if ($document) {
+            self::reverseDocumentPayments($document);
+        }
         AccountingVoucherService::reversePostedIfAny($atelierId, $sourceType, $sourceId);
 
         return $poster();

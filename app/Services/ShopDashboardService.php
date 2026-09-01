@@ -116,6 +116,7 @@ class ShopDashboardService
 
         $paidInstallments = Installment::query()
             ->where('is_paid', true)
+            ->where('installment_number', '>', 1)
             ->whereNotNull('paid_at')
             ->whereBetween('paid_at', [$rangeStart, $rangeEnd])
             ->whereHas('purchase', fn ($q) => $q->forAtelier($atelierId))
@@ -184,7 +185,7 @@ class ShopDashboardService
         $daily = [];
         $periodTotalSales = 0.0;
         foreach ($buckets as $row) {
-            $row['total_sales'] = (float) ($row['gross_sales'] - $row['total_returns']);
+            $row['total_sales'] = (float) $row['gross_sales'];
             $row['cash_and_card_total'] = (float) ($row['card_amount'] + $row['cash_amount']);
             $row['total_collected'] = (float) ($row['cash_and_card_total'] + $row['installments_collected'] + ($row['debts_collected'] ?? 0) + ($row['cheques_collected'] ?? 0));
             $row['uncollected_cheques'] = (float) ($row['uncollected_cheques'] ?? 0);

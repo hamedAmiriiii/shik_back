@@ -348,30 +348,30 @@ check('۴ اقساط + قسط بعد', () => {
   assertBalanced('اقساط');
 });
 
-check('۵ برگشت یک خط (طبق پوستر فعلی)', () => {
+check('۵ برگشت نقد — بستن صندوق/طلب نه هزینه اعتبار', () => {
   const netBefore = pnl().net;
   post('purchase_return', 10, [
     { code: '412', debit: 100000, credit: 0, desc: 'برگشت از فروش' },
-    { code: '613', debit: 0, credit: 100000, desc: 'برگشت به اعتبار' },
+    { code: '11201', debit: 0, credit: 100000, desc: 'اعتبار مشتری' },
     { code: '11301', debit: 40000, credit: 0, desc: 'بازگشت موجودی' },
     { code: '511', debit: 0, credit: 40000, desc: 'برگشت بها' },
   ]);
   assertBalanced('برگشت');
   const p = pnl();
-  // POS: سود فروش نقد ۶۰هزار باید خنثی شود → انتظار اقتصادی netBefore-60000
-  // پوستر فعلی 412 و 613 همدیگر را در سود خنثی می‌کنند و فقط بها برمی‌گردد → net += 40000
   const posLike = round2(netBefore - (100000 - 40000));
-  const actual = p.net;
-  if (Math.abs(actual - posLike) > 0.01) {
-    results.push({
-      name: '۵ب سود برگشت در برابر POS',
-      ok: true,
-      warn: true,
-      detail: `طبق پوستر (یِ ۶۱۳) دفتر net=${actual} ؛ اگر برگشت مثل POS سود را خنثی می‌کرد ${posLike} می‌شد. اختلاف به‌خاطر بستانکار هزینه اعتبار است نه صندوق/طلب.`,
-    });
-  } else {
-    ok('۵ب سود برگشت در برابر POS', 'یکی است');
-  }
+  if (Math.abs(p.net - posLike) > 0.01) fail('ret', `سود برگشت net=${p.net} want ${posLike}`);
+});
+
+check('۵ج برگشت نسیه طلب را می‌بندد', () => {
+  const arBefore = debitNet(turnover(), '11201');
+  post('purchase_return', 20, [
+    { code: '412', debit: 80000, credit: 0 },
+    { code: '11201', debit: 0, credit: 80000 },
+    { code: '11301', debit: 30000, credit: 0 },
+    { code: '511', debit: 0, credit: 30000 },
+  ]);
+  if (Math.abs(debitNet(turnover(), '11201') - (arBefore - 80000)) > 0.01) fail('ar', 'طلب نسیه بسته نشد');
+  assertBalanced('برگشت نسیه');
 });
 
 check('۶ خرید ماده + تولید + فروش تولید', () => {
@@ -421,8 +421,7 @@ check('اعتبار وفاداری یک‌بار در دفتر', () => {
   // سند هزینه loyalty_purchase ساخته نمی‌شود
   const by = turnover();
   const loyalty = debitNet(by, '613');
-  // فروش ۷۰: +5000 ؛ برگشت فروش ۱۰: -100000
-  if (Math.abs(loyalty - (5000 - 100000)) > 0.01) fail('l', `613=${loyalty}`);
+  if (Math.abs(loyalty - 5000) > 0.01) fail('l', `613=${loyalty}`);
   assertBalanced('اعتبار');
 });
 

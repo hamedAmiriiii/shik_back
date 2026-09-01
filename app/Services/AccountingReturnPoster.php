@@ -11,7 +11,10 @@ use RuntimeException;
 
 class AccountingReturnPoster
 {
-    public static function post(PurchaseItemReturn $log): ?AccountingVoucher
+    /**
+     * @param  array{loyalty?: float, wallet?: float, ar?: float, cheque?: float}  $settlement
+     */
+    public static function post(PurchaseItemReturn $log, array $settlement = []): ?AccountingVoucher
     {
         $atelierId = (int) $log->atelier_id;
         $sale = round((float) $log->return_sale_total, 2);
@@ -39,12 +42,22 @@ class AccountingReturnPoster
             $invCode = ChartOfAccountsSeeder::CODE_INV_RAW;
         }
 
+        $loyalty = round((float) ($settlement['loyalty'] ?? 0), 2);
+        $wallet = round((float) ($settlement['wallet'] ?? 0), 2);
+        $ar = round((float) ($settlement['ar'] ?? 0), 2);
+        $cheque = round((float) ($settlement['cheque'] ?? 0), 2);
+        $credits = round($loyalty + $wallet + $ar + $cheque, 2);
+        if ($sale >= 0.01 && $credits < 0.01) {
+            $wallet = $sale;
+            $credits = $sale;
+        }
+
         try {
             $lines = [];
             AccountingLedger::push(
                 $lines,
                 AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_DISCOUNT),
-                $sale,
+                $credits > 0 ? $credits : $sale,
                 0,
                 'برگشت از فروش'
             );
@@ -52,8 +65,22 @@ class AccountingReturnPoster
                 $lines,
                 AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_LOYALTY),
                 0,
-                $sale,
-                'برگشت به اعتبار مشتری'
+                $loyalty,
+                'برگشت اعتبار مصرف‌شده'
+            );
+            AccountingLedger::push(
+                $lines,
+                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AR),
+                0,
+                round($wallet + $ar, 2),
+                $ar >= 0.01 ? 'بستن طلب / اعتبار مشتری' : 'برگشت به اعتبار مشتری'
+            );
+            AccountingLedger::push(
+                $lines,
+                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_CHEQUE_RECEIVABLE),
+                0,
+                $cheque,
+                'کاهش چک دریافتنی'
             );
             AccountingLedger::push(
                 $lines,

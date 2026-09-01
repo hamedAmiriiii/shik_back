@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Cheque;
 use App\Models\Purchase;
 use App\Models\PurchaseItemReturn;
 use App\Models\PurchasedProduct;
@@ -85,7 +86,7 @@ class PurchaseItemReturnService
 
     /**
      * برگشت یک یا چند عدد از خط فاکتور.
-     * مبلغ فروش کالا به اعتبار مشتری اضافه می‌شود و اعتبار کسب‌شده همان خرید به نسبت کم می‌شود.
+     * سهم پرداخت‌نشده (نسیه/قسط/چک) بسته می‌شود؛ فقط سهم نقدی پرداخت‌شده به اعتبار می‌رود.
      *
      * @return array<string, mixed>
      */
@@ -140,16 +141,31 @@ class PurchaseItemReturnService
                 throw new \InvalidArgumentException('فروشگاه این فاکتور مشخص نیست');
             }
 
-            $customer = self::resolveCustomer($purchase, $phone, $atelierId);
-
+            $purchase->loadMissing(['installments', 'cheque']);
+            $settlement = self::allocateReturnSettlement($purchase, $ratio);
             $creditEarnedReversed = round((float) $purchase->credit_earned * $ratio, 2);
-            $creditRefunded = $returnAmount;
+            $creditRefunded = round($settlement['wallet'] + $settlement['loyalty'], 2);
 
-            $newCredit = max(0, (float) $customer->credit + $creditRefunded - $creditEarnedReversed);
-            $customer->credit = $newCredit;
-            $customer->credit_last_updated_at = now();
-            $customer->last_warning_sent_at = null;
-            $customer->save();
+            $needsCustomer = $creditRefunded >= 0.01 || $creditEarnedReversed >= 0.01
+                || $purchase->phone || $phone;
+            $customer = $needsCustomer
+                ? self::resolveCustomer($purchase, $phone, $atelierId)
+                : null;
+
+            if ($customer) {
+                $newCredit = max(0, (float) $customer->credit + $creditRefunded - $creditEarnedReversed);
+                $customer->credit = $newCredit;
+                $customer->credit_last_updated_at = now();
+                $customer->last_warning_sent_at = null;
+                $customer->save();
+            }
+
+            if ($settlement['ar'] >= 0.01 && $purchase->isInstallment()) {
+                self::reduceUnpaidInstallments($purchase, $settlement['ar'], $customer);
+            }
+            if ($settlement['cheque'] >= 0.01) {
+                self::reduceOutstandingCheque($purchase, $settlement['cheque']);
+            }
 
             $purchase->credit_earned = max(0, (float) $purchase->credit_earned - $creditEarnedReversed);
             $purchase->credit_used = max(0, round((float) $purchase->credit_used * (1 - $ratio), 2));
@@ -211,13 +227,15 @@ class PurchaseItemReturnService
                 $userName
             );
 
-            AccountingReturnPoster::post($log);
+            AccountingReturnPoster::post($log, $settlement);
 
             $purchase->load('purchasedProducts');
             $purchase->syncAmountsFromRemainingLines();
             $purchase->save();
             $purchase->load('purchasedProducts.product', 'purchasedProducts.producedGood', 'purchasedProducts.rawMaterial');
-            $customer->refresh();
+            if ($customer) {
+                $customer->refresh();
+            }
 
             return [
                 'log' => $log,
@@ -232,12 +250,13 @@ class PurchaseItemReturnService
                     'credit_refunded' => $creditRefunded,
                     'credit_used_refund' => $creditRefunded,
                     'credit_earned_reversed' => $creditEarnedReversed,
+                    'unpaid_reduced' => round($settlement['ar'] + $settlement['cheque'], 2),
                 ],
                 'row' => PurchaseItemReturnGridService::formatTransactionRow(
                     $log->fresh(['product:id,name,barcode'])
                 ),
                 'phone' => $purchase->phone,
-                'customer_credit' => (float) $customer->credit,
+                'customer_credit' => $customer ? (float) $customer->credit : 0,
                 'purchase' => $purchase,
             ];
         };
@@ -247,6 +266,106 @@ class PurchaseItemReturnService
         }
 
         return $run();
+    }
+
+    /**
+     * سهم برگشت: اول بدهی پرداخت‌نشده، بعد اعتبار برای مبلغ نقدی پرداخت‌شده.
+     *
+     * @return array{loyalty: float, wallet: float, ar: float, cheque: float}
+     */
+    public static function allocateReturnSettlement(Purchase $purchase, float $ratio): array
+    {
+        $ratio = min(1, max(0, $ratio));
+        $purchase->loadMissing(['installments', 'cheque']);
+
+        $loyalty = round((float) $purchase->credit_used * $ratio, 2);
+        $wallet = round((float) $purchase->actual_paid_amount * $ratio, 2);
+        $ar = 0.0;
+        $cheque = 0.0;
+
+        if ($purchase->isInstallment()) {
+            $unpaid = (float) $purchase->installments->where('is_paid', false)->sum('amount');
+            $ar = round($unpaid * $ratio, 2);
+        } elseif ($purchase->isDebt() && ! $purchase->isDebtSettled()) {
+            $ar = round($purchase->outstandingDebtAmount() * $ratio, 2);
+        } elseif ($purchase->isCheque() && ! $purchase->isChequeSettled()) {
+            $cheque = round($purchase->outstandingChequeAmount() * $ratio, 2);
+        }
+
+        return [
+            'loyalty' => $loyalty,
+            'wallet' => $wallet,
+            'ar' => $ar,
+            'cheque' => $cheque,
+        ];
+    }
+
+    protected static function reduceUnpaidInstallments(Purchase $purchase, float $reduceBy, ?UserShiksho $customer): void
+    {
+        $left = round($reduceBy, 2);
+        if ($left < 0.01) {
+            return;
+        }
+
+        $unpaid = $purchase->installments
+            ->where('is_paid', false)
+            ->sortByDesc('installment_number')
+            ->values();
+
+        foreach ($unpaid as $row) {
+            if ($left < 0.01) {
+                break;
+            }
+            $amount = round((float) $row->amount, 2);
+            $take = round(min($amount, $left), 2);
+            $newAmount = round($amount - $take, 2);
+            if ($newAmount < 0.01) {
+                $row->delete();
+            } else {
+                $row->amount = $newAmount;
+                $row->save();
+            }
+            $left = round($left - $take, 2);
+        }
+
+        $restored = round($reduceBy - $left, 2);
+        if ($customer && $restored >= 0.01) {
+            $customer->installment_credit = round((float) $customer->installment_credit + $restored, 2);
+            $customer->save();
+        }
+
+        $purchase->unsetRelation('installments');
+        $purchase->load('installments');
+        $remainingUnpaid = $purchase->installments->where('is_paid', false);
+        $purchase->installment_count = max(1, (int) $purchase->installments->count());
+        $purchase->installment_amount = $remainingUnpaid->isEmpty()
+            ? 0
+            : round((float) $remainingUnpaid->avg('amount'), 2);
+    }
+
+    protected static function reduceOutstandingCheque(Purchase $purchase, float $reduceBy): void
+    {
+        $reduceBy = round($reduceBy, 2);
+        if ($reduceBy < 0.01 || ! $purchase->cheque) {
+            return;
+        }
+
+        $cheque = $purchase->cheque;
+        if ($cheque->status === Cheque::STATUS_CLEARED) {
+            return;
+        }
+
+        $newAmount = round((float) $cheque->amount - $reduceBy, 2);
+        if ($newAmount < 0.01) {
+            $cheque->update([
+                'amount' => 0,
+                'status' => Cheque::STATUS_CANCELLED,
+                'purchase_id' => null,
+            ]);
+            $purchase->cheque_id = null;
+        } else {
+            $cheque->update(['amount' => $newAmount]);
+        }
     }
 
     protected static function resolveCustomer(Purchase $purchase, ?string $phoneInput, int $atelierId): UserShiksho

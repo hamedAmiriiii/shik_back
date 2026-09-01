@@ -3,8 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Product;
+use App\Models\PurchasedProduct;
 use App\Models\ReturnedProduct;
+use App\Services\PurchaseItemReturnService;
 use App\Services\ReturnedProductGridService;
+use App\Tools\ProductQuantityTools;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Morilog\Jalali\Jalalian;
@@ -41,54 +44,93 @@ class ReturnedProductController extends Controller
     }
 
     /**
-     * برگشت کالا بر اساس بارکد — ذخیره قیمت فروش و خرید همان لحظه.
+     * برگشت کالا بر اساس بارکد — از آخرین خط فروش باقی‌مانده، با تسویه پول/بدهی.
      */
     public function store(Request $request)
     {
         $request->validate([
             'barcode' => 'required|string',
             'notes' => 'nullable|string|max:2000',
+            'phone' => 'nullable|string|max:20',
+            'quantity' => 'nullable|numeric|min:0.001',
         ]);
 
         $staffAtelierId = $this->staffShopAtelierId($request);
-        $userName = null;
-        if ($staffAtelierId !== null) {
-            $user = $this->requireStaffShopUser($request);
-            $userName = trim($user->name.' '.$user->last_name);
+        if ($staffAtelierId === null) {
+            return response()->json([
+                'message' => 'برگشت با بارکد فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
+            ], 422);
         }
+        $user = $this->requireStaffShopUser($request);
+        $userName = trim($user->name.' '.$user->last_name);
 
-        $productQuery = Product::query()->where('barcode', $request->input('barcode'));
-        if ($staffAtelierId !== null) {
-            $productQuery->where('atelier_id', $staffAtelierId);
-        }
-        $product = $productQuery->first();
+        $product = Product::query()
+            ->where('barcode', $request->input('barcode'))
+            ->where('atelier_id', $staffAtelierId)
+            ->first();
 
         if (! $product) {
             return response(['error' => 'محصولی با این بارکد یافت نشد'], 404);
         }
 
-        $product->increment('quantity', 1);
+        $line = PurchasedProduct::query()
+            ->where('product_id', $product->id)
+            ->where('quantity', '>', 0)
+            ->whereHas('purchase', function ($q) use ($staffAtelierId) {
+                $q->where('atelier_id', $staffAtelierId);
+            })
+            ->orderByDesc('id')
+            ->first();
 
-        $returnedProduct = ReturnedProduct::create([
-            'product_id' => $product->id,
-            'atelier_id' => $staffAtelierId ?? $product->atelier_id,
-            'sale_price' => $product->sale_price,
-            'purchase_price' => $product->purchase_price,
-            'user_name' => $userName,
-            'notes' => $request->input('notes'),
-        ]);
+        if (! $line) {
+            return response([
+                'error' => 'فاکتور باز با این بارکد یافت نشد. برگشت باید از روی فاکتور باشد تا پول یا بدهی تسویه شود.',
+            ], 422);
+        }
 
-        $returnedProduct->load('product');
+        $line->load(['purchase.installments', 'purchase.cheque', 'product']);
+
+        $unitType = $product->unit_type ?? Product::UNIT_PIECE;
+        $qty = $request->filled('quantity')
+            ? ProductQuantityTools::normalize($request->input('quantity'), $unitType)
+            : ProductQuantityTools::normalize(1, $unitType);
+
+        try {
+            $result = PurchaseItemReturnService::processReturn(
+                $line->purchase,
+                $line,
+                $qty,
+                $userName,
+                $request->input('notes'),
+                $request->input('phone')
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response(['error' => $e->getMessage(), 'message' => $e->getMessage()], 422);
+        }
+
+        $returnedProduct = null;
+        if ($result['log']->product_id && \Illuminate\Support\Facades\Schema::hasColumn('returned_products', 'purchase_id')) {
+            $returnedProduct = ReturnedProduct::query()
+                ->where('purchase_id', $result['log']->purchase_id)
+                ->where('product_id', $result['log']->product_id)
+                ->orderByDesc('id')
+                ->first();
+        }
 
         return response([
-            'message' => 'کالا با موفقیت برگشت داده شد',
-            'row' => ReturnedProductGridService::formatTransactionRow($returnedProduct),
+            'message' => 'کالا از روی فاکتور برگشت داده شد.',
+            'row' => $returnedProduct
+                ? ReturnedProductGridService::formatTransactionRow($returnedProduct)
+                : $result['row'],
+            'returned_item' => $result['returned_item'],
             'returned_product' => $returnedProduct,
+            'purchase' => $result['purchase'],
+            'customer_credit' => $result['customer_credit'],
             'product' => [
                 'id' => $product->id,
                 'name' => $product->name,
                 'barcode' => $product->barcode,
-                'new_quantity' => $product->quantity,
+                'new_quantity' => $product->fresh()->quantity,
             ],
         ], 201);
     }
