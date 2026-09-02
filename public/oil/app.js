@@ -3,6 +3,11 @@
   const LETTERS = (window.OIL && window.OIL.letters) || [
     "ب", "پ", "ت", "ث", "ج", "د", "س", "ص", "ط", "ع", "ق", "ک", "گ", "ل", "م", "ن", "و", "ه", "ی", "الف",
   ];
+  const ITEM_KINDS = [
+    { key: "oil", label: "روغن", field: "oil_product_id" },
+    { key: "air_filter", label: "فیلتر هوا", field: "air_filter_product_id" },
+    { key: "oil_filter", label: "فیلتر روغن", field: "oil_filter_product_id" },
+  ];
   const TOKEN_KEY = "oil_token";
   const SESSION_KEY = "oil_session";
 
@@ -34,6 +39,7 @@
     smsQuota: null,
     smsPackages: [],
     smsOrders: [],
+    products: [],
   };
 
   function emptyForm() {
@@ -45,7 +51,12 @@
       phone: "",
       km: "",
       next_km: "",
+      notes: "",
+      oil_product_id: "",
+      air_filter_product_id: "",
+      oil_filter_product_id: "",
       known: false,
+      knownText: "",
     };
   }
 
@@ -63,6 +74,7 @@
     if (!parts.length) return { name: "home" };
     if (parts[0] === "login") return { name: "login" };
     if (parts[0] === "new") return { name: "new" };
+    if (parts[0] === "products") return { name: "products" };
     if (parts[0] === "sms") return { name: "sms" };
     if (parts[0] === "car" && parts[1]) return { name: "car", plate: decodeURIComponent(parts[1]) };
     return { name: "home" };
@@ -190,6 +202,71 @@
     return Number(n).toLocaleString("fa-IR") + " تومان";
   }
 
+  function itemsLine(visit) {
+    const items = (visit && visit.items) || [];
+    if (!items.length) return "";
+    return items.map(function (i) {
+      return (i.kind_label || "") + " " + (i.name || "");
+    }).join(" · ");
+  }
+
+  function knownVisitText(visit) {
+    if (!visit) return "";
+    let t = "قبلاً آمده: کیلومتر " + fmtKm(visit.km) + " — بعدی " + fmtKm(visit.next_km);
+    const line = itemsLine(visit);
+    if (line) t += " — " + line;
+    return t;
+  }
+
+  function applyVisitProducts(visit) {
+    ITEM_KINDS.forEach(function (k) {
+      state.form[k.field] = "";
+    });
+    ((visit && visit.items) || []).forEach(function (i) {
+      const kind = ITEM_KINDS.find(function (k) { return k.key === i.kind; });
+      if (kind && i.oil_product_id) state.form[kind.field] = String(i.oil_product_id);
+    });
+  }
+
+  function productSelectsHtml() {
+    return ITEM_KINDS.map(function (k) {
+      const selected = String(state.form[k.field] || "");
+      const list = (state.products || []).filter(function (p) {
+        return p.kind === k.key && (p.is_active || String(p.id) === selected);
+      });
+      if (!list.length) {
+        return (
+          "<label>" + esc(k.label) + "</label>" +
+          '<div class="muted">محصولی تعریف نشده. از تنظیمات، روغن و فیلتر اضافه کنید.</div>'
+        );
+      }
+      const opts = ['<option value="">انتخاب نشده</option>'].concat(list.map(function (p) {
+        return (
+          '<option value="' + esc(p.id) + '"' +
+          (String(p.id) === selected ? " selected" : "") + ">" +
+          esc(p.name) + "</option>"
+        );
+      }));
+      return "<label>" + esc(k.label) + '</label><select id="' + k.field + '">' + opts.join("") + "</select>";
+    }).join("");
+  }
+
+  async function loadProductsSilent() {
+    try {
+      const data = await api("/products?include_inactive=1");
+      state.products = data.data || [];
+      state.error = state.route.name === "products" ? "" : state.error;
+    } catch (e) {
+      if (e.status === 401) {
+        clearSession();
+        go("#/login");
+        return;
+      }
+      state.products = [];
+      if (state.route.name === "products") state.error = e.message;
+    }
+  }
+
   async function bootRoute() {
     const r = state.route;
     if (!state.token) {
@@ -204,9 +281,11 @@
     if (r.name === "home") {
       await loadCustomers();
       loadQuotaSilent();
+      loadProductsSilent();
     }
     if (r.name === "car") await loadCar(r.plate);
     if (r.name === "sms") await loadSmsHub();
+    if (r.name === "new" || r.name === "products") await loadProductsSilent();
     render();
   }
 
@@ -367,14 +446,14 @@
         if (data.found && data.visit) {
           state.form.phone = data.visit.phone || state.form.phone;
           state.form.known = true;
-          const phoneEl = document.getElementById("phone");
-          if (phoneEl && !phoneEl.value) phoneEl.value = state.form.phone;
-          const note = document.getElementById("knownNote");
-          if (note) {
-            note.style.display = "block";
-            note.textContent =
-              "قبلاً آمده: کیلومتر " + fmtKm(data.visit.km) + " — بعدی " + fmtKm(data.visit.next_km);
-          }
+          state.form.knownText = knownVisitText(data.visit);
+          applyVisitProducts(data.visit);
+          render();
+        } else if (state.form.known) {
+          state.form.known = false;
+          state.form.knownText = "";
+          applyVisitProducts(null);
+          render();
         }
       } catch (e) { /* ignore */ }
     }, 280);
@@ -428,7 +507,8 @@
         return (
           '<button type="button" class="cust" data-plate="' + esc(c.plate) + '">' +
             '<div class="meta"><div class="name">' + esc(c.plate_display) + "</div>" +
-            '<div class="sub">' + esc(c.phone) + " · " + esc(c.created_at_jalali || "") + "</div></div>" +
+            '<div class="sub">' + esc(c.phone) + " · " + esc(c.created_at_jalali || "") +
+            (itemsLine(c) ? "<br>" + esc(itemsLine(c)) : "") + "</div></div>" +
             '<div class="pill">بعدی ' + fmtKm(c.next_km) + "</div>" +
           "</button>"
         );
@@ -465,6 +545,7 @@
         '<label>فاصله تعویض بعدی (کیلومتر)</label><input id="setInterval" inputmode="numeric" value="' + esc(shop.oil_interval_km || 5000) + '">' +
         '<div class="row-btns"><button class="btn btn-ghost" id="closeSettings">بستن</button>' +
         '<button class="btn btn-primary" id="saveSettings">ذخیره</button></div>' +
+        '<div class="mt"><button class="btn btn-ghost" id="openProducts">روغن و فیلترها</button></div>' +
         '<div class="mt"><button class="btn btn-ghost" id="openSmsFromSettings">موجودی و پیامک‌ها</button></div>' +
         '<div class="mt"><button class="btn btn-danger" id="logoutBtn">خروج</button></div>' +
       "</div></div>"
@@ -490,12 +571,16 @@
           '<button class="btn btn-ghost" type="button" id="fromGallery">گالری</button>' +
         "</div>" +
         '<div class="mt">' + plateWidget(f) + "</div>" +
-        '<div class="alert alert-info" id="knownNote" style="display:' + (f.known ? "block" : "none") + '"></div>' +
+        '<div class="alert alert-info" id="knownNote" style="display:' + (f.known ? "block" : "none") + '">' +
+          esc(f.knownText || "") +
+        "</div>" +
         '<label>موبایل صاحب ماشین</label><input id="phone" inputmode="numeric" maxlength="11" value="' + esc(f.phone) + '" placeholder="09xxxxxxxxx">' +
         '<div class="km-grid">' +
           '<div><label>کیلومتر فعلی</label><input id="km" inputmode="numeric" value="' + esc(f.km) + '" placeholder="12500"></div>' +
           '<div><label>تعویض بعدی</label><input id="nextKm" inputmode="numeric" value="' + esc(f.next_km) + '" placeholder="خودکار"></div>' +
         "</div>" +
+        '<div class="mt">' + productSelectsHtml() + "</div>" +
+        '<label>توضیحات</label><textarea id="notes" rows="3" maxlength="1000" placeholder="مثلاً شستشوی موتور">' + esc(f.notes) + "</textarea>" +
         '<p class="muted mt">اگر پلاک خوانده نشد، همین‌جا دستی وارد کنید.</p>' +
         '<div class="mt"><button class="btn btn-primary" id="saveVisit">ثبت و ارسال پیامک</button></div>' +
       "</div>" +
@@ -514,9 +599,12 @@
     }
     const hist = state.visits
       .map(function (v) {
+        const note = v.notes ? '<div class="hist-notes">' + esc(v.notes) + "</div>" : "";
+        const used = itemsLine(v) ? '<div class="hist-items">' + esc(itemsLine(v)) + "</div>" : "";
         return (
-          '<div class="hist-item"><div>' + esc(v.created_at_jalali || "") + "</div>" +
-          "<div>کیلومتر " + fmtKm(v.km) + " → بعدی " + fmtKm(v.next_km) + "</div></div>"
+          '<div class="hist-item"><div class="hist-row"><div>' + esc(v.created_at_jalali || "") + "</div>" +
+          "<div>کیلومتر " + fmtKm(v.km) + " → بعدی " + fmtKm(v.next_km) + "</div></div>" +
+          used + note + "</div>"
         );
       })
       .join("");
@@ -525,6 +613,9 @@
         '<div class="topbar"><button class="icon-btn" id="backHome">→</button><h2>' + esc(c.plate_display) + "</h2></div>" +
         '<div class="card"><div class="muted">موبایل</div><div style="font-weight:800;font-size:18px">' + esc(c.phone) + "</div>" +
         '<div class="muted mt">آخرین تعویض ' + fmtKm(c.km) + " — بعدی " + fmtKm(c.next_km) + "</div>" +
+        (itemsLine(c) ? '<div class="chips mt">' + (c.items || []).map(function (i) {
+          return '<span class="chip">' + esc((i.kind_label || "") + " " + (i.name || "")) + "</span>";
+        }).join("") + "</div>" : "") +
         '<div class="muted">تعداد مراجعه: ' + esc(c.visit_count) + "</div></div>" +
         '<h3>سوابق</h3><div class="hist">' + hist + "</div>" +
         '<div class="mt"><button class="btn btn-primary" id="newForCar">تعویض جدید</button></div>' +
@@ -608,6 +699,42 @@
     );
   }
 
+  function renderProducts() {
+    const groups = ITEM_KINDS.map(function (k) {
+      const list = (state.products || []).filter(function (p) { return p.kind === k.key; });
+      const rows = list.map(function (p) {
+        const action = p.is_active
+          ? '<button class="btn btn-ghost" type="button" style="width:auto;padding:6px 10px" data-del-prod="' + esc(p.id) + '">حذف</button>'
+          : '<button class="btn btn-ghost" type="button" style="width:auto;padding:6px 10px" data-restore-prod="' + esc(p.id) + '">برگرداندن</button>';
+        return (
+          '<div class="prod-row' + (p.is_active ? "" : " off") + '">' +
+            '<div class="name">' + esc(p.name) + (p.is_active ? "" : " (غیرفعال)") + "</div>" +
+            action +
+          "</div>"
+        );
+      }).join("") || '<div class="muted">هنوز موردی نیست.</div>';
+      return (
+        '<div class="kind-block">' +
+          "<h3>" + esc(k.label) + "</h3>" +
+          rows +
+          '<div class="add-row">' +
+            '<input id="newProd-' + k.key + '" maxlength="120" placeholder="مثلاً بهران ۱۰W۴۰">' +
+            '<button class="btn btn-primary" type="button" data-add-kind="' + k.key + '">افزودن</button>' +
+          "</div>" +
+        "</div>"
+      );
+    }).join("");
+    return (
+      '<div class="screen">' +
+        '<div class="topbar"><button class="icon-btn" id="backHome">→</button><h2>روغن و فیلتر</h2><span></span></div>' +
+        '<p class="muted">برای هر قلم چند محصول تعریف کنید تا موقع ثبت تعویض از لیست انتخاب شود و در سابقهٔ ماشین بماند.</p>' +
+        (state.error ? '<div class="alert alert-err">' + esc(state.error) + "</div>" : "") +
+        groups +
+      "</div>" +
+      (state.busy ? '<div class="overlay"><div class="box"><div class="spin"></div><div>' + esc(state.busy) + "</div></div></div>" : "")
+    );
+  }
+
   function render() {
     const root = document.getElementById("app");
     if (!root) return;
@@ -615,6 +742,7 @@
     else if (state.route.name === "new") root.innerHTML = renderNew();
     else if (state.route.name === "car") root.innerHTML = renderCar();
     else if (state.route.name === "sms") root.innerHTML = renderSms();
+    else if (state.route.name === "products") root.innerHTML = renderProducts();
     else root.innerHTML = renderHome();
     bind();
   }
@@ -718,6 +846,11 @@
     if (openSmsFromSettings) openSmsFromSettings.addEventListener("click", function () {
       state.showSettings = false;
       go("#/sms");
+    });
+    const openProducts = document.getElementById("openProducts");
+    if (openProducts) openProducts.addEventListener("click", function () {
+      state.showSettings = false;
+      go("#/products");
     });
     const runReminders = document.getElementById("runReminders");
     if (runReminders) runReminders.addEventListener("click", async function () {
@@ -826,6 +959,80 @@
       state.form.next_km = onlyDigits(this.value, 7);
       this.value = state.form.next_km;
     });
+    const notes = document.getElementById("notes");
+    if (notes) notes.addEventListener("input", function () {
+      state.form.notes = this.value.slice(0, 1000);
+    });
+    ITEM_KINDS.forEach(function (k) {
+      const el = document.getElementById(k.field);
+      if (el) el.addEventListener("change", function () {
+        state.form[k.field] = this.value;
+      });
+    });
+    document.querySelectorAll("[data-add-kind]").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        const kind = btn.getAttribute("data-add-kind");
+        const input = document.getElementById("newProd-" + kind);
+        const name = input ? String(input.value || "").trim() : "";
+        if (!name) {
+          state.error = "نام محصول را بنویسید.";
+          render();
+          return;
+        }
+        state.busy = "در حال ذخیره…";
+        state.error = "";
+        render();
+        try {
+          await api("/products", { method: "POST", body: { kind: kind, name: name } });
+          state.busy = "";
+          await loadProductsSilent();
+          render();
+        } catch (err) {
+          state.busy = "";
+          state.error = err.message;
+          render();
+        }
+      });
+    });
+    ITEM_KINDS.forEach(function (k) {
+      const input = document.getElementById("newProd-" + k.key);
+      if (!input) return;
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const btn = document.querySelector('[data-add-kind="' + k.key + '"]');
+          if (btn) btn.click();
+        }
+      });
+    });
+    document.querySelectorAll("[data-del-prod]").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        if (!confirm("این محصول از لیست انتخاب برداشته شود؟")) return;
+        try {
+          await api("/products/" + btn.getAttribute("data-del-prod"), { method: "DELETE" });
+          await loadProductsSilent();
+          render();
+        } catch (err) {
+          state.error = err.message;
+          render();
+        }
+      });
+    });
+    document.querySelectorAll("[data-restore-prod]").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        try {
+          await api("/products/" + btn.getAttribute("data-restore-prod"), {
+            method: "PATCH",
+            body: { is_active: true },
+          });
+          await loadProductsSilent();
+          render();
+        } catch (err) {
+          state.error = err.message;
+          render();
+        }
+      });
+    });
     const takePhoto = document.getElementById("takePhoto");
     const camInput = document.getElementById("camInput");
     if (takePhoto && camInput) takePhoto.addEventListener("click", function () { camInput.click(); });
@@ -847,6 +1054,8 @@
         state.form.province = p.province || "";
         state.form.phone = state.customer.phone || "";
         state.form.known = true;
+        state.form.knownText = knownVisitText(state.customer);
+        applyVisitProducts(state.customer);
         state.preview = "";
         state.ocrNote = "پلاک از مشتری قبلی پر شد.";
         go("#/new");
@@ -982,6 +1191,12 @@
         km: Number(f.km),
       };
       if (f.next_km) body.next_km = Number(f.next_km);
+      const notes = String(f.notes || "").trim();
+      if (notes) body.notes = notes;
+      ITEM_KINDS.forEach(function (k) {
+        const id = Number(f[k.field] || 0);
+        if (id) body[k.field] = id;
+      });
       const data = await api("/visits", { method: "POST", body: body });
       state.busy = "";
       alert(data.message || "ثبت شد.");

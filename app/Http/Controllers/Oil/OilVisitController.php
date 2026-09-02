@@ -4,7 +4,10 @@ namespace App\Http\Controllers\Oil;
 
 use App\Exceptions\InsufficientShopSmsQuotaException;
 use App\Http\Controllers\Controller;
+use App\Models\OilProduct;
 use App\Models\OilVisit;
+use App\Models\OilVisitItem;
+use App\Services\OilPublicHistoryService;
 use App\Support\ProjectType;
 use App\Tools\PhoneTools;
 use App\Tools\PlateTools;
@@ -34,6 +37,7 @@ class OilVisitController extends Controller
             ->groupBy('plate');
 
         $rows = OilVisit::query()
+            ->withItems()
             ->where('atelier_id', $atelierId)
             ->whereIn('id', $latestIds)
             ->orderByDesc('id')
@@ -64,6 +68,7 @@ class OilVisitController extends Controller
         $compact = $parsed['compact'] ?? trim($plate);
 
         $visits = OilVisit::query()
+            ->withItems()
             ->where('atelier_id', $atelierId)
             ->where('plate', $compact)
             ->orderByDesc('id')
@@ -89,7 +94,7 @@ class OilVisitController extends Controller
         $plateRaw = $request->input('plate');
         $phoneRaw = $request->input('phone');
 
-        $query = OilVisit::query()->where('atelier_id', $atelierId);
+        $query = OilVisit::query()->withItems()->where('atelier_id', $atelierId);
 
         if ($plateRaw) {
             $parsed = PlateTools::parse($plateRaw);
@@ -137,6 +142,10 @@ class OilVisitController extends Controller
             'phone' => 'required|string|max:15',
             'km' => 'required|integer|min:0|max:9999999',
             'next_km' => 'nullable|integer|min:1|max:9999999',
+            'notes' => 'nullable|string|max:1000',
+            'oil_product_id' => 'nullable|integer|min:1',
+            'air_filter_product_id' => 'nullable|integer|min:1',
+            'oil_filter_product_id' => 'nullable|integer|min:1',
         ]);
 
         $parsed = PlateTools::parse($fields['plate'] ?? '')
@@ -170,7 +179,14 @@ class OilVisitController extends Controller
 
         $message = "خوش آمدید به {$shopName}\nکیلومتر تعویض {$km}\nتعویض بعدی {$nextKm}";
 
-        $visit = OilVisit::create([
+        $notes = trim((string) ($fields['notes'] ?? ''));
+        if ($notes !== '' && ! Schema::hasColumn('oil_visits', 'notes')) {
+            return response()->json([
+                'message' => 'ستون توضیحات هنوز ساخته نشده. فایل database/sql/add_oil_visits_notes_manual.sql را اجرا کنید.',
+            ], 422);
+        }
+
+        $payload = [
             'atelier_id' => $atelierId,
             'created_by' => $user->id,
             'plate' => $parsed['compact'],
@@ -179,29 +195,98 @@ class OilVisitController extends Controller
             'km' => $km,
             'next_km' => $nextKm,
             'sms_sent' => false,
-        ]);
+        ];
+        if (Schema::hasColumn('oil_visits', 'notes')) {
+            $payload['notes'] = $notes !== '' ? $notes : null;
+        }
 
-        [$smsSent, $smsError] = $this->sendWelcomeSms($phone, $message, $atelierId);
+        $visit = DB::transaction(function () use ($payload, $atelierId, $fields) {
+            $visit = OilVisit::create($payload);
+            $this->attachVisitItems($visit, $atelierId, $fields);
+
+            return $visit;
+        });
+
+        [$smsSent, $smsError] = $this->sendOilSms($phone, $message, $atelierId, 'oil_welcome');
+        $historyUrl = OilPublicHistoryService::historyUrl($phone);
+        [$linkSent, $linkError] = $this->sendOilSms($phone, $historyUrl, $atelierId, 'oil_history_link');
         $visit->update([
             'sms_sent' => $smsSent,
-            'sms_error' => $smsError,
+            'sms_error' => $smsError ?: $linkError,
         ]);
 
+        $fresh = $visit->fresh();
+        if (Schema::hasTable('oil_visit_items')) {
+            $fresh->load('items');
+        }
+
+        $okMessage = 'ثبت شد ولی پیامک ارسال نشد.';
+        if ($smsSent && $linkSent) {
+            $okMessage = 'ثبت شد و پیامک خوش‌آمد و لینک سابقه ارسال گردید.';
+        } elseif ($smsSent) {
+            $okMessage = 'ثبت شد و پیامک ارسال گردید.';
+        } elseif ($linkSent) {
+            $okMessage = 'ثبت شد و لینک سابقه ارسال گردید.';
+        }
+
         return response()->json([
-            'message' => $smsSent ? 'ثبت شد و پیامک ارسال گردید.' : 'ثبت شد ولی پیامک ارسال نشد.',
-            'visit' => $visit->fresh()->toApiArray(),
+            'message' => $okMessage,
+            'visit' => $fresh->toApiArray(),
             'sms_sent' => $smsSent,
             'sms_error' => $smsError,
+            'link_sms_sent' => $linkSent,
+            'history_url' => $historyUrl,
         ], 201);
+    }
+
+    /**
+     * @param  array<string, mixed>  $fields
+     */
+    private function attachVisitItems(OilVisit $visit, int $atelierId, array $fields): void
+    {
+        $selected = [
+            OilProduct::KIND_OIL => (int) ($fields['oil_product_id'] ?? 0),
+            OilProduct::KIND_AIR_FILTER => (int) ($fields['air_filter_product_id'] ?? 0),
+            OilProduct::KIND_OIL_FILTER => (int) ($fields['oil_filter_product_id'] ?? 0),
+        ];
+        $hasAny = collect($selected)->contains(fn ($id) => $id > 0);
+        if (! $hasAny) {
+            return;
+        }
+        if (! Schema::hasTable('oil_visit_items') || ! Schema::hasTable('oil_products')) {
+            abort(response()->json([
+                'message' => 'جدول محصولات هنوز ساخته نشده. فایل database/sql/create_oil_products_manual.sql را اجرا کنید.',
+            ], 422));
+        }
+
+        foreach ($selected as $kind => $productId) {
+            if ($productId <= 0) {
+                continue;
+            }
+            $product = OilProduct::query()
+                ->where('atelier_id', $atelierId)
+                ->where('id', $productId)
+                ->where('kind', $kind)
+                ->first();
+            if (! $product) {
+                abort(response()->json(['message' => 'محصول انتخاب‌شده معتبر نیست.'], 422));
+            }
+            OilVisitItem::create([
+                'oil_visit_id' => $visit->id,
+                'oil_product_id' => $product->id,
+                'kind' => $kind,
+                'product_name' => $product->name,
+            ]);
+        }
     }
 
     /**
      * @return array{0: bool, 1: string|null}
      */
-    private function sendWelcomeSms(string $phone, string $message, int $atelierId): array
+    private function sendOilSms(string $phone, string $message, int $atelierId, string $smsType): array
     {
         try {
-            SmsTools::sendShopSms($phone, $message, null, null, 'oil_welcome', $atelierId);
+            SmsTools::sendShopSms($phone, $message, null, null, $smsType, $atelierId);
 
             return [true, null];
         } catch (InsufficientShopSmsQuotaException $e) {

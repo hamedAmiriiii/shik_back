@@ -42,6 +42,7 @@ class AddProjectTypeAndOilVisits extends Migration
                 $table->string('phone', 11);
                 $table->unsignedInteger('km');
                 $table->unsignedInteger('next_km');
+                $table->text('notes')->nullable();
                 $table->boolean('sms_sent')->default(false);
                 $table->string('sms_error')->nullable();
                 $table->timestamps();

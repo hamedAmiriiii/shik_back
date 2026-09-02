@@ -18,4 +18,10 @@ return [
      * GET/POST /api/oil/reminders/run?token=...
      */
     'reminder_token' => env('OIL_REMINDER_TOKEN'),
+
+    /**
+     * لینک سابقهٔ مشتری بدون لاگین.
+     * پیامک دوم فقط همین آدرس است: {base}/oilservice/09xxxxxxxxx
+     */
+    'public_base_url' => rtrim((string) env('OIL_PUBLIC_BASE_URL', 'https://webinoo-plus.ir'), '/'),
 ];

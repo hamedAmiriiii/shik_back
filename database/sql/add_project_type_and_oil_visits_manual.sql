@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS `oil_visits` (
   `phone` varchar(11) NOT NULL,
   `km` int unsigned NOT NULL,
   `next_km` int unsigned NOT NULL,
+  `notes` text DEFAULT NULL,
   `sms_sent` tinyint(1) NOT NULL DEFAULT 0,
   `sms_error` varchar(255) DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT NULL,

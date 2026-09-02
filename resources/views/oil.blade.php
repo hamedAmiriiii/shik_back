@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ asset('oil/app.css') }}">
+    <link rel="stylesheet" href="{{ asset('oil/app.css') }}?v={{ filemtime(public_path('oil/app.css')) }}">
 </head>
 <body>
     <div id="app"></div>
@@ -21,6 +21,6 @@
         };
     </script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script src="{{ asset('oil/app.js') }}"></script>
+    <script src="{{ asset('oil/app.js') }}?v={{ filemtime(public_path('oil/app.js')) }}"></script>
 </body>
 </html>
