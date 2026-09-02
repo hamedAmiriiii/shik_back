@@ -44,10 +44,18 @@ class OilVisit extends Model
         return $this->hasMany(OilVisitItem::class, 'oil_visit_id')->orderBy('id');
     }
 
+    public function purchase()
+    {
+        return $this->hasOne(Purchase::class, 'oil_visit_id');
+    }
+
     public function scopeWithItems($query)
     {
         if (Schema::hasTable('oil_visit_items')) {
             $query->with('items');
+        }
+        if (Schema::hasTable('purchases') && Schema::hasColumn('purchases', 'oil_visit_id')) {
+            $query->with('purchase');
         }
 
         return $query;
@@ -57,6 +65,15 @@ class OilVisit extends Model
     {
         $parsed = PlateTools::parse($this->plate);
         $created = $this->created_at;
+        $items = $this->itemsPayload();
+        $sale = 0.0;
+        $cost = 0.0;
+        foreach ($items as $item) {
+            $sale += (float) ($item['sale_price'] ?? 0);
+            $cost += (float) ($item['purchase_price'] ?? 0);
+        }
+        $sale = round($sale, 2);
+        $cost = round($cost, 2);
 
         return [
             'id' => (int) $this->id,
@@ -72,7 +89,11 @@ class OilVisit extends Model
             'km' => (int) $this->km,
             'next_km' => (int) $this->next_km,
             'notes' => $this->notes !== null && $this->notes !== '' ? (string) $this->notes : null,
-            'items' => $this->itemsPayload(),
+            'items' => $items,
+            'sale_amount' => $sale,
+            'cost_amount' => $cost,
+            'profit' => round($sale - $cost, 2),
+            'purchase_id' => $this->linkedPurchaseId(),
             'sms_sent' => (bool) $this->sms_sent,
             'sms_error' => $this->sms_error,
             'created_at' => $created ? $created->format('Y-m-d H:i:s') : null,
@@ -93,5 +114,18 @@ class OilVisit extends Model
         }
 
         return $this->items->map(fn (OilVisitItem $item) => $item->toApiArray())->values()->all();
+    }
+
+    protected function linkedPurchaseId(): ?int
+    {
+        if (! Schema::hasTable('purchases') || ! Schema::hasColumn('purchases', 'oil_visit_id')) {
+            return null;
+        }
+        if ($this->relationLoaded('purchase')) {
+            return $this->purchase ? (int) $this->purchase->id : null;
+        }
+        $id = Purchase::query()->where('oil_visit_id', $this->id)->value('id');
+
+        return $id ? (int) $id : null;
     }
 }

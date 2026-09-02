@@ -49,6 +49,8 @@ class OilProductController extends Controller
         $fields = $request->validate([
             'kind' => ['required', 'string', Rule::in(array_keys(OilProduct::kinds()))],
             'name' => 'required|string|max:120',
+            'purchase_price' => 'nullable|numeric|min:0',
+            'sale_price' => 'nullable|numeric|min:0',
         ]);
 
         $name = trim($fields['name']);
@@ -71,13 +73,19 @@ class OilProductController extends Controller
             ->where('kind', $fields['kind'])
             ->max('sort_order');
 
-        $product = OilProduct::create([
+        $product = OilProduct::create(array_filter([
             'atelier_id' => $atelierId,
             'kind' => $fields['kind'],
             'name' => $name,
+            'purchase_price' => Schema::hasColumn('oil_products', 'purchase_price')
+                ? round((float) ($fields['purchase_price'] ?? 0), 2)
+                : null,
+            'sale_price' => Schema::hasColumn('oil_products', 'sale_price')
+                ? round((float) ($fields['sale_price'] ?? 0), 2)
+                : null,
             'is_active' => true,
             'sort_order' => $max + 1,
-        ]);
+        ], fn ($v) => $v !== null));
 
         return response([
             'message' => 'محصول اضافه شد.',
@@ -93,6 +101,8 @@ class OilProductController extends Controller
         $fields = $request->validate([
             'name' => 'sometimes|required|string|max:120',
             'is_active' => 'sometimes|boolean',
+            'purchase_price' => 'sometimes|nullable|numeric|min:0',
+            'sale_price' => 'sometimes|nullable|numeric|min:0',
         ]);
 
         $updates = [];
@@ -105,6 +115,22 @@ class OilProductController extends Controller
         }
         if (array_key_exists('is_active', $fields)) {
             $updates['is_active'] = (bool) $fields['is_active'];
+        }
+        if (array_key_exists('purchase_price', $fields)) {
+            if (! Schema::hasColumn('oil_products', 'purchase_price')) {
+                return response()->json([
+                    'message' => 'ستون قیمت هنوز ساخته نشده. فایل database/sql/add_oil_product_prices_manual.sql را اجرا کنید.',
+                ], 422);
+            }
+            $updates['purchase_price'] = round((float) $fields['purchase_price'], 2);
+        }
+        if (array_key_exists('sale_price', $fields)) {
+            if (! Schema::hasColumn('oil_products', 'sale_price')) {
+                return response()->json([
+                    'message' => 'ستون قیمت هنوز ساخته نشده. فایل database/sql/add_oil_product_prices_manual.sql را اجرا کنید.',
+                ], 422);
+            }
+            $updates['sale_price'] = round((float) $fields['sale_price'], 2);
         }
         if ($updates !== []) {
             $oilProduct->update($updates);

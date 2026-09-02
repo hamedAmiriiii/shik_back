@@ -18,6 +18,8 @@ class OilProduct extends Model
         'atelier_id',
         'kind',
         'name',
+        'purchase_price',
+        'sale_price',
         'is_active',
         'sort_order',
     ];
@@ -25,6 +27,8 @@ class OilProduct extends Model
     protected $casts = [
         'is_active' => 'boolean',
         'sort_order' => 'integer',
+        'purchase_price' => 'decimal:2',
+        'sale_price' => 'decimal:2',
     ];
 
     /**
@@ -61,6 +65,8 @@ class OilProduct extends Model
             'kind' => $this->kind,
             'kind_label' => self::kindLabel((string) $this->kind),
             'name' => $this->name,
+            'purchase_price' => round((float) $this->purchase_price, 2),
+            'sale_price' => round((float) $this->sale_price, 2),
             'is_active' => (bool) $this->is_active,
             'sort_order' => (int) $this->sort_order,
         ];

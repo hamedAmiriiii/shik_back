@@ -30,6 +30,7 @@ class Purchase extends Model
         'installment_amount',
         'atelier_id',
         'client_id',
+        'oil_visit_id',
         'shop_table_id',
         'table_label',
     ];

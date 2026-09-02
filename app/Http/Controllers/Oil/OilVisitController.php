@@ -8,6 +8,7 @@ use App\Models\OilProduct;
 use App\Models\OilVisit;
 use App\Models\OilVisitItem;
 use App\Services\OilPublicHistoryService;
+use App\Services\OilVisitSaleService;
 use App\Support\ProjectType;
 use App\Tools\PhoneTools;
 use App\Tools\PlateTools;
@@ -203,6 +204,8 @@ class OilVisitController extends Controller
         $visit = DB::transaction(function () use ($payload, $atelierId, $fields) {
             $visit = OilVisit::create($payload);
             $this->attachVisitItems($visit, $atelierId, $fields);
+            $visit->load('items');
+            OilVisitSaleService::post($visit);
 
             return $visit;
         });
@@ -218,6 +221,9 @@ class OilVisitController extends Controller
         $fresh = $visit->fresh();
         if (Schema::hasTable('oil_visit_items')) {
             $fresh->load('items');
+        }
+        if (Schema::hasTable('purchases') && Schema::hasColumn('purchases', 'oil_visit_id')) {
+            $fresh->load('purchase');
         }
 
         $okMessage = 'ثبت شد ولی پیامک ارسال نشد.';
@@ -271,12 +277,17 @@ class OilVisitController extends Controller
             if (! $product) {
                 abort(response()->json(['message' => 'محصول انتخاب‌شده معتبر نیست.'], 422));
             }
-            OilVisitItem::create([
+            $item = [
                 'oil_visit_id' => $visit->id,
                 'oil_product_id' => $product->id,
                 'kind' => $kind,
                 'product_name' => $product->name,
-            ]);
+            ];
+            if (Schema::hasColumn('oil_visit_items', 'purchase_price')) {
+                $item['purchase_price'] = round((float) $product->purchase_price, 2);
+                $item['sale_price'] = round((float) $product->sale_price, 2);
+            }
+            OilVisitItem::create($item);
         }
     }
 

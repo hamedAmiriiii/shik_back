@@ -11,6 +11,7 @@ SQL لازم روی دیتابیس موجود:
 - `database/sql/add_project_type_and_oil_visits_manual.sql`
 - `database/sql/add_oil_visits_notes_manual.sql`
 - `database/sql/create_oil_products_manual.sql`
+- `database/sql/add_oil_product_prices_manual.sql`
 
 ---
 
@@ -36,10 +37,14 @@ SQL لازم روی دیتابیس موجود:
   "kind": "oil",
   "kind_label": "روغن",
   "name": "بهران 10W40",
+  "purchase_price": 180000,
+  "sale_price": 250000,
   "is_active": true,
   "sort_order": 1
 }
 ```
+
+`purchase_price` بهای خرید، `sale_price` قیمت فروش به مشتری. واحد تومان. پیش‌فرض ۰.
 
 ### `GET /api/oil/products`
 
@@ -72,7 +77,7 @@ Query:
 ### `POST /api/oil/products` — ۲۰۱
 
 ```json
-{ "kind": "oil", "name": "بهران 10W40" }
+{ "kind": "oil", "name": "بهران 10W40", "purchase_price": 180000, "sale_price": 250000 }
 ```
 
 `kind` یکی از سه مقدار بالا، `name` حداکثر ۱۲۰ کاراکتر.
@@ -80,7 +85,7 @@ Query:
 ```json
 {
   "message": "محصول اضافه شد.",
-  "data": { "id": 12, "kind": "oil", "kind_label": "روغن", "name": "بهران 10W40", "is_active": true, "sort_order": 1 }
+  "data": { "id": 12, "kind": "oil", "kind_label": "روغن", "name": "بهران 10W40", "purchase_price": 180000, "sale_price": 250000, "is_active": true, "sort_order": 1 }
 }
 ```
 
@@ -89,7 +94,7 @@ Query:
 ### `PATCH /api/oil/products/{id}` — ۲۰۰
 
 ```json
-{ "name": "بهران 20W50", "is_active": true }
+{ "name": "بهران 20W50", "purchase_price": 190000, "sale_price": 260000, "is_active": true }
 ```
 
 هر دو فیلد اختیاری‌اند. برای برگرداندن محصول حذف‌شده: `{ "is_active": true }`.
@@ -126,9 +131,13 @@ Query:
   "next_km": 50000,
   "notes": "شستشوی موتور",
   "items": [
-    { "kind": "oil", "kind_label": "روغن", "oil_product_id": 12, "name": "بهران 10W40" },
-    { "kind": "air_filter", "kind_label": "فیلتر هوا", "oil_product_id": 20, "name": "سرکان" }
+    { "kind": "oil", "kind_label": "روغن", "oil_product_id": 12, "name": "بهران 10W40", "purchase_price": 180000, "sale_price": 250000 },
+    { "kind": "air_filter", "kind_label": "فیلتر هوا", "oil_product_id": 20, "name": "سرکان", "purchase_price": 40000, "sale_price": 70000 }
   ],
+  "sale_amount": 320000,
+  "cost_amount": 220000,
+  "profit": 100000,
+  "purchase_id": 901,
   "sms_sent": true,
   "sms_error": null,
   "created_at": "2026-09-02 16:20:00",
@@ -214,6 +223,25 @@ Query: `q` (پلاک یا موبایل)، `per_page` (۱–۵۰، پیش‌فر�
 | `oil_filter_product_id` | نه | `kind=oil_filter` |
 
 محصول‌ها در پیامک خوش‌آمد نیستند؛ فقط در سابقه می‌مانند.
+
+اگر اقلام `sale_price` داشته باشند، همان لحظه یک فروش نقدی در جدول `purchases` فروشگاه ساخته می‌شود (سود = فروش − بهای خرید). گزارش از همین فاکتورهاست.
+
+### `GET /api/oil/reports`
+
+با توکن. فروش / بها / سود همان روال گزارش فروشگاه:
+
+```json
+{
+  "today": { "sales": 320000, "cost": 220000, "profit": 100000 },
+  "yesterday": { "sales": 0, "cost": 0, "profit": 0 },
+  "week": { "sales": 320000, "cost": 220000, "profit": 100000 },
+  "month": { "sales": 320000, "cost": 220000, "profit": 100000 },
+  "last_month": { "sales": 0, "cost": 0, "profit": 0 },
+  "year": { "sales": 320000, "cost": 220000, "profit": 100000 }
+}
+```
+
+---
 
 بعد از ثبت، **دو پیامک جدا** می‌رود (لینک را با خوش‌آمد قاطی نکنید؛ پیامک لینک‌دار گاهی فیلتر می‌شود):
 

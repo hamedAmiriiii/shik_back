@@ -53,6 +53,7 @@ Route::prefix('oil')->name('oil.')->group(function () {
         Route::post('products', [\App\Http\Controllers\Oil\OilProductController::class, 'store']);
         Route::patch('products/{oilProduct}', [\App\Http\Controllers\Oil\OilProductController::class, 'update']);
         Route::delete('products/{oilProduct}', [\App\Http\Controllers\Oil\OilProductController::class, 'destroy']);
+        Route::get('reports', [\App\Http\Controllers\Oil\OilReportController::class, 'index']);
         Route::get('reminders', [\App\Http\Controllers\Oil\OilReminderController::class, 'index']);
         Route::get('sms-quota', [\App\Http\Controllers\ShopSmsQuotaController::class, 'show']);
         Route::get('sms-packages', [\App\Http\Controllers\ShopSmsPackageController::class, 'index']);
