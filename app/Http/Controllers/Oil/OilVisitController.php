@@ -9,6 +9,7 @@ use App\Models\OilVisit;
 use App\Models\OilVisitItem;
 use App\Services\OilPublicHistoryService;
 use App\Services\OilVisitSaleService;
+use App\Support\OilSms;
 use App\Support\ProjectType;
 use App\Tools\PhoneTools;
 use App\Tools\PlateTools;
@@ -191,12 +192,17 @@ class OilVisitController extends Controller
             $nextKm = $km + $interval;
         }
 
+        $occurredAt = $this->parseOccurredAt($fields['occurred_at'] ?? null);
+
         $shopName = $atelier ? trim((string) $atelier->name) : 'تعویض روغن';
         if ($shopName === '') {
             $shopName = 'تعویض روغن';
         }
 
-        $message = "خوش آمدید به {$shopName}\nکیلومتر تعویض {$km}\nتعویض بعدی {$nextKm}";
+        $message = OilSms::appendDate(
+            "خوش آمدید به {$shopName}\nکیلومتر تعویض {$km}\nتعویض بعدی {$nextKm}",
+            $occurredAt
+        );
 
         $notes = trim((string) ($fields['notes'] ?? ''));
         if ($notes !== '' && ! Schema::hasColumn('oil_visits', 'notes')) {
@@ -221,7 +227,6 @@ class OilVisitController extends Controller
         if ($clientId !== null) {
             $payload['client_id'] = $clientId;
         }
-        $occurredAt = $this->parseOccurredAt($fields['occurred_at'] ?? null);
         if ($occurredAt) {
             $payload['created_at'] = $occurredAt;
             $payload['updated_at'] = $occurredAt;
@@ -252,7 +257,12 @@ class OilVisitController extends Controller
         $linkSent = false;
         $linkError = null;
         if (config('oil.send_history_link_sms')) {
-            [$linkSent, $linkError] = $this->sendOilSms($phone, $historyUrl, $atelierId, 'oil_history_link');
+            [$linkSent, $linkError] = $this->sendOilSms(
+                $phone,
+                OilSms::appendDate($historyUrl),
+                $atelierId,
+                'oil_history_link'
+            );
         }
         $visit->update([
             'sms_sent' => $smsSent,

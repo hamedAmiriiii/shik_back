@@ -405,7 +405,7 @@ Query: `q` (پلاک یا موبایل)، `per_page` (۱–۵۰، پیش‌فر�
   "estimated_due_on": "2026-09-10",
   "estimated_due_on_jalali": "1405/06/19",
   "days_until_due": 8,
-  "message": "نوبت تعویض روغن نزدیک است\n…",
+  "message": "نوبت تعویض روغن نزدیک است\n…\n1405/06/19",
   "sms_sent": true,
   "sms_error": null,
   "created_at": "2026-09-02 16:20:00",

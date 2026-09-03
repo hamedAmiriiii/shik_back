@@ -6,6 +6,7 @@ use App\Exceptions\InsufficientShopSmsQuotaException;
 use App\Models\Atelier;
 use App\Models\OilReminderSms;
 use App\Models\OilVisit;
+use App\Support\OilSms;
 use App\Support\ProjectType;
 use App\Tools\SmsTools;
 use Illuminate\Database\QueryException;
@@ -126,7 +127,13 @@ class OilReminderDispatcher
             if ($shopName === '') {
                 $shopName = 'تعویض روغن';
             }
-            $message = self::message($shopName, $visit->plate_display, (int) $visit->next_km, (int) $forecast['days_until_due']);
+            $message = self::message(
+                $shopName,
+                $visit->plate_display,
+                (int) $visit->next_km,
+                (int) $forecast['days_until_due'],
+                $forecast['estimated_due_on']
+            );
 
             try {
                 $log = OilReminderSms::query()->where('oil_visit_id', $visit->id)->first();
@@ -230,11 +237,14 @@ class OilReminderDispatcher
         ];
     }
 
-    public static function message(string $shopName, string $plateDisplay, int $nextKm, int $daysUntil): string
+    public static function message(string $shopName, string $plateDisplay, int $nextKm, int $daysUntil, $dueOn = null): string
     {
         $when = $daysUntil <= 0 ? 'الان' : 'حدود '.abs($daysUntil).' روز دیگر';
 
-        return "نوبت تعویض روغن نزدیک است\n{$shopName}\nپلاک {$plateDisplay}\n{$when} — کیلومتر {$nextKm}";
+        return OilSms::appendDate(
+            "نوبت تعویض روغن نزدیک است\n{$shopName}\nپلاک {$plateDisplay}\n{$when} — کیلومتر {$nextKm}",
+            $dueOn
+        );
     }
 
     /**
