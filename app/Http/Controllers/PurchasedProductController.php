@@ -268,11 +268,11 @@ class PurchasedProductController extends Controller
             }
             $userShiksho = $userShikshoQuery->first();
             if ($userShiksho && $userShiksho->credit > 0) {
-                $creditUsed = min($userShiksho->credit, $amountAfterDiscount);
+                $creditUsed = \App\Tools\PriceTools::roundToman(min($userShiksho->credit, $amountAfterDiscount));
             }
         }
 
-        $payableAmount = max(0, $amountAfterDiscount - $creditUsed);
+        $payableAmount = max(0, \App\Tools\PriceTools::roundToman($amountAfterDiscount - $creditUsed));
 
         $creditEarned = 0;
         

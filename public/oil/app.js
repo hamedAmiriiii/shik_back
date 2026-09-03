@@ -5,6 +5,7 @@
   ];
   const ITEM_KINDS = [
     { key: "oil", label: "روغن", field: "oil_product_id" },
+    { key: "gearbox_oil", label: "روغن گیربکس", field: "gearbox_oil_product_id" },
     { key: "air_filter", label: "فیلتر هوا", field: "air_filter_product_id" },
     { key: "oil_filter", label: "فیلتر روغن", field: "oil_filter_product_id" },
   ];
@@ -53,6 +54,7 @@
       next_km: "",
       notes: "",
       oil_product_id: "",
+      gearbox_oil_product_id: "",
       air_filter_product_id: "",
       oil_filter_product_id: "",
       known: false,

@@ -57,12 +57,12 @@ class TableOrderCheckoutService
                     ->lockForUpdate()
                     ->first();
                 if ($userShiksho && $userShiksho->credit > 0) {
-                    $creditUsed = min((float) $userShiksho->credit, $grossTotal);
+                    $creditUsed = \App\Tools\PriceTools::roundToman(min((float) $userShiksho->credit, $grossTotal));
                     $userShiksho->useCredit($creditUsed);
                 }
             }
 
-            $payable = max(0, round($grossTotal - $creditUsed, 2));
+            $payable = max(0, \App\Tools\PriceTools::roundToman($grossTotal - $creditUsed));
             $settlement = $this->resolveSettlement($request, $payable, $order->payment_method);
 
             $creditEarned = 0.0;

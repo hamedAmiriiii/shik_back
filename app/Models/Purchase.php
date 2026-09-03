@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Tools\PriceTools;
 use Morilog\Jalali\Jalalian;
 
 class Purchase extends Model
@@ -372,10 +373,10 @@ class Purchase extends Model
         }
 
         $discount = (float) $this->discount_amount;
-        $afterDiscount = max(0, round($lineTotal - $discount, 2));
+        $afterDiscount = max(0, PriceTools::roundToman($lineTotal - $discount));
         $creditUsed = min((float) $this->credit_used, $afterDiscount);
-        $this->credit_used = $creditUsed;
-        $payable = round($afterDiscount - $creditUsed, 2);
+        $this->credit_used = PriceTools::roundToman($creditUsed);
+        $payable = PriceTools::roundToman($afterDiscount - $this->credit_used);
         $this->total_amount = $lineTotal;
 
         $card = (float) $this->card_amount;
@@ -384,11 +385,11 @@ class Purchase extends Model
 
         if ($settlement > 0 && abs($settlement - $payable) > 0.02) {
             $ratio = $payable / $settlement;
-            $this->card_amount = round($card * $ratio, 2);
-            $this->cash_amount = round($cash * $ratio, 2);
-            $fix = round($payable - ((float) $this->card_amount + (float) $this->cash_amount), 2);
+            $this->card_amount = PriceTools::roundToman($card * $ratio);
+            $this->cash_amount = PriceTools::roundToman($cash * $ratio);
+            $fix = PriceTools::roundToman($payable - ((float) $this->card_amount + (float) $this->cash_amount));
             if (abs($fix) >= 0.01) {
-                $this->cash_amount = round((float) $this->cash_amount + $fix, 2);
+                $this->cash_amount = PriceTools::roundToman((float) $this->cash_amount + $fix);
             }
         } elseif ($settlement <= 0 && $payable > 0) {
             $this->cash_amount = $payable;

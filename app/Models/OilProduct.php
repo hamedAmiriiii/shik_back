@@ -10,6 +10,8 @@ class OilProduct extends Model
 {
     public const KIND_OIL = 'oil';
 
+    public const KIND_GEARBOX_OIL = 'gearbox_oil';
+
     public const KIND_AIR_FILTER = 'air_filter';
 
     public const KIND_OIL_FILTER = 'oil_filter';
@@ -38,6 +40,7 @@ class OilProduct extends Model
     {
         return [
             self::KIND_OIL => 'روغن',
+            self::KIND_GEARBOX_OIL => 'روغن گیربکس',
             self::KIND_AIR_FILTER => 'فیلتر هوا',
             self::KIND_OIL_FILTER => 'فیلتر روغن',
         ];

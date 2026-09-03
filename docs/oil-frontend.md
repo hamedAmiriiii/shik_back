@@ -12,16 +12,18 @@ SQL لازم روی دیتابیس موجود:
 - `database/sql/add_oil_visits_notes_manual.sql`
 - `database/sql/create_oil_products_manual.sql`
 - `database/sql/add_oil_product_prices_manual.sql`
+- `database/sql/add_oil_visits_client_id_manual.sql`
 
 ---
 
 ## انواع قلم (ثابت)
 
-کمبوهای ثبت تعویض از این سه `kind` ساخته می‌شوند. خود فرانت kind جدید نسازد.
+کمبوهای ثبت تعویض از این `kind`ها ساخته می‌شوند. خود فرانت kind جدید نسازد؛ از `GET /products` → `kinds` بخوانید.
 
 | `kind` | `kind_label` |
 |--------|----------------|
 | `oil` | روغن |
+| `gearbox_oil` | روغن گیربکس |
 | `air_filter` | فیلتر هوا |
 | `oil_filter` | فیلتر روغن |
 
@@ -63,6 +65,7 @@ Query:
       "kind_label": "روغن",
       "products": [{ "id": 12, "kind": "oil", "kind_label": "روغن", "name": "بهران 10W40", "is_active": true, "sort_order": 1 }]
     },
+    { "kind": "gearbox_oil", "kind_label": "روغن گیربکس", "products": [] },
     { "kind": "air_filter", "kind_label": "فیلتر هوا", "products": [] },
     { "kind": "oil_filter", "kind_label": "فیلتر روغن", "products": [] }
   ],
@@ -72,7 +75,7 @@ Query:
 }
 ```
 
-برای سه کمبو از `kinds` استفاده کنید. `data` همان لیست تخت است.
+برای کمبوها از `kinds` استفاده کنید. `data` همان لیست تخت است.
 
 ### `POST /api/oil/products` — ۲۰۱
 
@@ -80,7 +83,7 @@ Query:
 { "kind": "oil", "name": "بهران 10W40", "purchase_price": 180000, "sale_price": 250000 }
 ```
 
-`kind` یکی از سه مقدار بالا، `name` حداکثر ۱۲۰ کاراکتر.
+`kind` یکی از چهار مقدار بالا، `name` حداکثر ۱۲۰ کاراکتر.
 
 ```json
 {
@@ -118,6 +121,7 @@ Query:
 ```json
 {
   "id": 88,
+  "client_id": "c1a2b3c4-d5e6-7890-ab12-cd34ef567890",
   "plate": "12ب34522",
   "plate_display": "12 ب 345 ایران 22",
   "plate_parts": {
@@ -132,6 +136,7 @@ Query:
   "notes": "شستشوی موتور",
   "items": [
     { "kind": "oil", "kind_label": "روغن", "oil_product_id": 12, "name": "بهران 10W40", "purchase_price": 180000, "sale_price": 250000 },
+    { "kind": "gearbox_oil", "kind_label": "روغن گیربکس", "oil_product_id": 30, "name": "بهران ATF", "purchase_price": 220000, "sale_price": 320000 },
     { "kind": "air_filter", "kind_label": "فیلتر هوا", "oil_product_id": 20, "name": "سرکان", "purchase_price": 40000, "sale_price": 70000 }
   ],
   "sale_amount": 320000,
@@ -191,12 +196,16 @@ Query: `q` (پلاک یا موبایل)، `per_page` (۱–۵۰، پیش‌فر�
 
 اگر `found` بود تلفن، `items` و متن «قبلاً آمده» را از `visit` پر کنید.
 
-### `POST /api/oil/visits` — ۲۰۱
+### `POST /api/oil/visits` — ۲۰۱ یا ۲۰۰ (تکرار `client_id`)
 
-پلاک یا با `plate` یا با چهار تکه:
+پلاک یا با `plate` یا با چهار تکه.
+
+برای صف آفلاین روی دستگاه یک `client_id` یکتا بسازید (مثلاً UUID) و همان را تا وقتی سرور ۲۰۱/۲۰۰ بدهد نگه دارید. اگر نت قطع بود در صف بگذارید؛ بعد از وصل دوباره همان بدنه را بفرستید. سرور دوبار ثبت نمی‌کند.
 
 ```json
 {
+  "client_id": "c1a2b3c4-d5e6-7890-ab12-cd34ef567890",
+  "occurred_at": "2026-09-03 12:40:00",
   "serial": "12",
   "letter": "ب",
   "middle": "345",
@@ -206,6 +215,7 @@ Query: `q` (پلاک یا موبایل)، `per_page` (۱–۵۰، پیش‌فر�
   "next_km": 50000,
   "notes": "شستشوی موتور",
   "oil_product_id": 12,
+  "gearbox_oil_product_id": 30,
   "air_filter_product_id": 20,
   "oil_filter_product_id": 21
 }
@@ -213,14 +223,34 @@ Query: `q` (پلاک یا موبایل)، `per_page` (۱–۵۰، پیش‌فر�
 
 | فیلد | اجباری | توضیح |
 |------|---------|--------|
+| `client_id` | برای آفلاین بله | حداکثر ۶۴ کاراکتر؛ یکتا در هر فروشگاه. خالی = بدون ضدتکرار |
+| `occurred_at` | نه | زمان واقعی ثبت روی دستگاه (آفلاین). اگر نباشد ساعت سرور است. آینده قبول نمی‌شود |
 | `phone` | بله | موبایل ۱۱ رقمی ایران |
 | `km` | بله | کیلومتر فعلی |
 | پلاک | بله | `plate` یا `serial`+`letter`+`middle`+`province` |
 | `next_km` | نه | خالی = `km + oil_interval_km` فروشگاه |
 | `notes` | نه | حداکثر ۱۰۰۰ |
 | `oil_product_id` | نه | باید `kind=oil` همین فروشگاه باشد |
+| `gearbox_oil_product_id` | نه | `kind=gearbox_oil` |
 | `air_filter_product_id` | نه | `kind=air_filter` |
 | `oil_filter_product_id` | نه | `kind=oil_filter` |
+
+اولین ثبت **۲۰۱** با `already_exists: false`. اگر همان `client_id` دوباره بیاید **۲۰۰**:
+
+```json
+{
+  "already_exists": true,
+  "code": "duplicate_client_id",
+  "message": "این مراجعه قبلاً با همین client_id ثبت شده است.",
+  "visit": { "...همان مراجعه قبلی" },
+  "sms_sent": true,
+  "sms_error": null,
+  "link_sms_sent": true,
+  "history_url": "https://webinoo-plus.ir/oilservice/09121234567"
+}
+```
+
+روی ۲۰۰ پیامک دوباره نمی‌رود. آیتم صف را حذف کنید (موفق). اگر ۴۰۱ بود توکن را تازه کنید و همان `client_id` را دوباره بفرستید.
 
 محصول‌ها در پیامک خوش‌آمد نیستند؛ فقط در سابقه می‌مانند.
 
@@ -252,8 +282,9 @@ Query: `q` (پلاک یا موبایل)، `per_page` (۱–۵۰، پیش‌فر�
 
 ```json
 {
+  "already_exists": false,
   "message": "ثبت شد و پیامک خوش‌آمد و لینک سابقه ارسال گردید.",
-  "visit": { "...visit با items" },
+  "visit": { "...visit با items و client_id" },
   "sms_sent": true,
   "sms_error": null,
   "link_sms_sent": true,
@@ -306,10 +337,10 @@ Query: `q` (پلاک یا موبایل)، `per_page` (۱–۵۰، پیش‌فر�
 
 ## پیشنهاد UI
 
-1. تنظیمات → صفحهٔ «روغن و فیلترها»: سه بلوک از `GET /products?include_inactive=1`، افزودن با `POST`، حذف با `DELETE`، برگرداندن با `PATCH { is_active: true }`.
-2. فرم ثبت تعویض: سه `<select>` از محصولات فعال. گزینهٔ خالی = انتخاب‌نشده.
+1. تنظیمات → صفحهٔ «روغن و فیلترها»: بلوک‌ها از `GET /products?include_inactive=1` → `kinds`، افزودن با `POST`، حذف با `DELETE`، برگرداندن با `PATCH { is_active: true }`.
+2. فرم ثبت تعویض: یک `<select>` برای هر آیتم `kinds`. گزینهٔ خالی = انتخاب‌نشده.
 3. اگر پلاک تکراری بود (`lookup` یا مشتری): `select.value = item.oil_product_id` برای هر kind.
-4. سابقه: `items` را مثل «روغن بهران 10W40 · فیلتر هوا سرکان» نشان بدهید؛ `notes` جدا زیرش.
+4. سابقه: `items` را مثل «روغن بهران 10W40 · روغن گیربکس بهران ATF · فیلتر هوا سرکان» نشان بدهید؛ `notes` جدا زیرش.
 5. کمبو اگر خالی بود لینک به تعریف محصول؛ ثبت بدون انتخاب محصول مجاز است.
 
 حروف پلاک در `window.OIL.letters` روی صفحهٔ `/oil` هست.

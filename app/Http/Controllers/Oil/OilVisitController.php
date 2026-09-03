@@ -13,6 +13,8 @@ use App\Support\ProjectType;
 use App\Tools\PhoneTools;
 use App\Tools\PlateTools;
 use App\Tools\SmsTools;
+use Carbon\Carbon;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -135,6 +137,8 @@ class OilVisitController extends Controller
         $atelier = $user->atelier;
 
         $fields = $request->validate([
+            'client_id' => 'nullable|string|max:64',
+            'occurred_at' => 'nullable|date',
             'plate' => 'nullable|string|max:64',
             'serial' => 'nullable|string|max:4',
             'letter' => 'nullable|string|max:8',
@@ -145,6 +149,7 @@ class OilVisitController extends Controller
             'next_km' => 'nullable|integer|min:1|max:9999999',
             'notes' => 'nullable|string|max:1000',
             'oil_product_id' => 'nullable|integer|min:1',
+            'gearbox_oil_product_id' => 'nullable|integer|min:1',
             'air_filter_product_id' => 'nullable|integer|min:1',
             'oil_filter_product_id' => 'nullable|integer|min:1',
         ]);
@@ -164,6 +169,19 @@ class OilVisitController extends Controller
         $phone = PhoneTools::normalizeIranPhone($fields['phone']);
         if (! PhoneTools::isValidIranMobile($phone)) {
             return response()->json(['message' => 'شماره موبایل معتبر نیست.'], 422);
+        }
+
+        $clientId = $this->normalizeClientId($fields['client_id'] ?? null);
+        if ($clientId !== null && ! Schema::hasColumn('oil_visits', 'client_id')) {
+            return response()->json([
+                'message' => 'ستون client_id هنوز ساخته نشده. فایل database/sql/add_oil_visits_client_id_manual.sql را اجرا کنید.',
+            ], 422);
+        }
+        if ($clientId !== null) {
+            $existing = $this->findVisitByClientId($atelierId, $clientId);
+            if ($existing) {
+                return $this->storeVisitResponse($existing, true);
+            }
         }
 
         $km = (int) $fields['km'];
@@ -200,15 +218,34 @@ class OilVisitController extends Controller
         if (Schema::hasColumn('oil_visits', 'notes')) {
             $payload['notes'] = $notes !== '' ? $notes : null;
         }
+        if ($clientId !== null) {
+            $payload['client_id'] = $clientId;
+        }
+        $occurredAt = $this->parseOccurredAt($fields['occurred_at'] ?? null);
+        if ($occurredAt) {
+            $payload['created_at'] = $occurredAt;
+            $payload['updated_at'] = $occurredAt;
+        }
 
-        $visit = DB::transaction(function () use ($payload, $atelierId, $fields) {
-            $visit = OilVisit::create($payload);
-            $this->attachVisitItems($visit, $atelierId, $fields);
-            $visit->load('items');
-            OilVisitSaleService::post($visit);
+        try {
+            $visit = DB::transaction(function () use ($payload, $atelierId, $fields) {
+                $visit = OilVisit::create($payload);
+                $this->attachVisitItems($visit, $atelierId, $fields);
+                $visit->load('items');
+                OilVisitSaleService::post($visit);
 
-            return $visit;
-        });
+                return $visit;
+            });
+        } catch (QueryException $e) {
+            if ($clientId !== null && $this->isDuplicateClientIdException($e)) {
+                $existing = $this->findVisitByClientId($atelierId, $clientId);
+                if ($existing) {
+                    return $this->storeVisitResponse($existing, true);
+                }
+            }
+
+            throw $e;
+        }
 
         [$smsSent, $smsError] = $this->sendOilSms($phone, $message, $atelierId, 'oil_welcome');
         $historyUrl = OilPublicHistoryService::historyUrl($phone);
@@ -218,7 +255,20 @@ class OilVisitController extends Controller
             'sms_error' => $smsError ?: $linkError,
         ]);
 
-        $fresh = $visit->fresh();
+        return $this->storeVisitResponse($visit, false, [
+            'sms_sent' => $smsSent,
+            'sms_error' => $smsError,
+            'link_sms_sent' => $linkSent,
+            'history_url' => $historyUrl,
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $extra
+     */
+    private function storeVisitResponse(OilVisit $visit, bool $alreadyExists, array $extra = [])
+    {
+        $fresh = $visit->fresh() ?: $visit;
         if (Schema::hasTable('oil_visit_items')) {
             $fresh->load('items');
         }
@@ -226,6 +276,24 @@ class OilVisitController extends Controller
             $fresh->load('purchase');
         }
 
+        $payload = array_merge([
+            'already_exists' => $alreadyExists,
+            'visit' => $fresh->toApiArray(),
+        ], $extra);
+
+        if ($alreadyExists) {
+            $payload['code'] = 'duplicate_client_id';
+            $payload['message'] = 'این مراجعه قبلاً با همین client_id ثبت شده است.';
+            $payload['sms_sent'] = (bool) $fresh->sms_sent;
+            $payload['sms_error'] = $fresh->sms_error;
+            $payload['link_sms_sent'] = (bool) $fresh->sms_sent;
+            $payload['history_url'] = OilPublicHistoryService::historyUrl((string) $fresh->phone);
+
+            return response()->json($payload, 200);
+        }
+
+        $smsSent = (bool) ($extra['sms_sent'] ?? false);
+        $linkSent = (bool) ($extra['link_sms_sent'] ?? false);
         $okMessage = 'ثبت شد ولی پیامک ارسال نشد.';
         if ($smsSent && $linkSent) {
             $okMessage = 'ثبت شد و پیامک خوش‌آمد و لینک سابقه ارسال گردید.';
@@ -234,15 +302,52 @@ class OilVisitController extends Controller
         } elseif ($linkSent) {
             $okMessage = 'ثبت شد و لینک سابقه ارسال گردید.';
         }
+        $payload['message'] = $okMessage;
 
-        return response()->json([
-            'message' => $okMessage,
-            'visit' => $fresh->toApiArray(),
-            'sms_sent' => $smsSent,
-            'sms_error' => $smsError,
-            'link_sms_sent' => $linkSent,
-            'history_url' => $historyUrl,
-        ], 201);
+        return response()->json($payload, 201);
+    }
+
+    private function normalizeClientId($clientId): ?string
+    {
+        if ($clientId === null) {
+            return null;
+        }
+        $clientId = trim((string) $clientId);
+
+        return $clientId !== '' ? $clientId : null;
+    }
+
+    private function findVisitByClientId(int $atelierId, string $clientId): ?OilVisit
+    {
+        return OilVisit::query()
+            ->withItems()
+            ->where('atelier_id', $atelierId)
+            ->where('client_id', $clientId)
+            ->first();
+    }
+
+    private function isDuplicateClientIdException(QueryException $e): bool
+    {
+        $errorCode = (int) ($e->errorInfo[1] ?? 0);
+
+        return $errorCode === 1062 || strpos(strtolower($e->getMessage()), 'duplicate') !== false;
+    }
+
+    private function parseOccurredAt($value): ?Carbon
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        try {
+            $at = Carbon::parse($value)->timezone(config('app.timezone', 'Asia/Tehran'));
+        } catch (\Throwable $e) {
+            return null;
+        }
+        if ($at->isFuture()) {
+            return now();
+        }
+
+        return $at;
     }
 
     /**
@@ -252,6 +357,7 @@ class OilVisitController extends Controller
     {
         $selected = [
             OilProduct::KIND_OIL => (int) ($fields['oil_product_id'] ?? 0),
+            OilProduct::KIND_GEARBOX_OIL => (int) ($fields['gearbox_oil_product_id'] ?? 0),
             OilProduct::KIND_AIR_FILTER => (int) ($fields['air_filter_product_id'] ?? 0),
             OilProduct::KIND_OIL_FILTER => (int) ($fields['oil_filter_product_id'] ?? 0),
         ];

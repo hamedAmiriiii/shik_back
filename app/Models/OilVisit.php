@@ -13,6 +13,7 @@ class OilVisit extends Model
     protected $fillable = [
         'atelier_id',
         'created_by',
+        'client_id',
         'plate',
         'plate_display',
         'phone',
@@ -77,6 +78,9 @@ class OilVisit extends Model
 
         return [
             'id' => (int) $this->id,
+            'client_id' => Schema::hasColumn('oil_visits', 'client_id')
+                ? ($this->client_id ?: null)
+                : null,
             'plate' => $this->plate,
             'plate_display' => $this->plate_display,
             'plate_parts' => $parsed ? [

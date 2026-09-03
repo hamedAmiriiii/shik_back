@@ -23,4 +23,12 @@ class PriceTools
 
         return (float) (round($amount / 1000) * 1000);
     }
+
+    /**
+     * مبالغ پرداخت و اعتبار باید تومان کامل باشند (بدون ریال اعشاری).
+     */
+    public static function roundToman(float $amount): float
+    {
+        return round($amount, 0);
+    }
 }

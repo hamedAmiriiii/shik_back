@@ -11,6 +11,7 @@ use App\Models\ReturnedProduct;
 use App\Models\UserShiksho;
 use App\Services\CustomerCreditExpenseService;
 use App\Tools\PhoneTools;
+use App\Tools\PriceTools;
 use App\Tools\ProductQuantityTools;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -143,8 +144,12 @@ class PurchaseItemReturnService
 
             $purchase->loadMissing(['installments', 'cheque']);
             $settlement = self::allocateReturnSettlement($purchase, $ratio);
-            $creditEarnedReversed = round((float) $purchase->credit_earned * $ratio, 2);
-            $creditRefunded = round($settlement['wallet'] + $settlement['loyalty'], 2);
+            $origEarned = (float) $purchase->credit_earned;
+            $creditEarnedReversed = PriceTools::roundToman($origEarned * $ratio);
+            if ($creditEarnedReversed > $origEarned) {
+                $creditEarnedReversed = $origEarned;
+            }
+            $creditRefunded = PriceTools::roundToman($settlement['wallet'] + $settlement['loyalty']);
 
             $needsCustomer = $creditRefunded >= 0.01 || $creditEarnedReversed >= 0.01
                 || $purchase->phone || $phone;
@@ -153,7 +158,9 @@ class PurchaseItemReturnService
                 : null;
 
             if ($customer) {
-                $newCredit = max(0, (float) $customer->credit + $creditRefunded - $creditEarnedReversed);
+                $newCredit = max(0, PriceTools::roundToman(
+                    (float) $customer->credit + $creditRefunded - $creditEarnedReversed
+                ));
                 $customer->credit = $newCredit;
                 $customer->credit_last_updated_at = now();
                 $customer->last_warning_sent_at = null;
@@ -167,8 +174,9 @@ class PurchaseItemReturnService
                 self::reduceOutstandingCheque($purchase, $settlement['cheque']);
             }
 
-            $purchase->credit_earned = max(0, (float) $purchase->credit_earned - $creditEarnedReversed);
-            $purchase->credit_used = max(0, round((float) $purchase->credit_used * (1 - $ratio), 2));
+            $purchase->credit_earned = max(0, PriceTools::roundToman($origEarned - $creditEarnedReversed));
+            $origUsed = (float) $purchase->credit_used;
+            $purchase->credit_used = max(0, PriceTools::roundToman($origUsed - PriceTools::roundToman($origUsed * $ratio)));
 
             if ($purchasedProduct->product_id && $purchasedProduct->product) {
                 $purchasedProduct->product->increment('quantity', $returnQuantity);
@@ -278,8 +286,8 @@ class PurchaseItemReturnService
         $ratio = min(1, max(0, $ratio));
         $purchase->loadMissing(['installments', 'cheque']);
 
-        $loyalty = round((float) $purchase->credit_used * $ratio, 2);
-        $wallet = round((float) $purchase->actual_paid_amount * $ratio, 2);
+        $loyalty = PriceTools::roundToman((float) $purchase->credit_used * $ratio);
+        $wallet = PriceTools::roundToman((float) $purchase->actual_paid_amount * $ratio);
         $ar = 0.0;
         $cheque = 0.0;
 

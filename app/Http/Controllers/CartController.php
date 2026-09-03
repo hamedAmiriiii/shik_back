@@ -379,7 +379,7 @@ class CartController extends Controller
                     ->where('atelier_id', $atelierId)
                     ->first();
                 if ($userShiksho && $userShiksho->credit > 0) {
-                    $creditUsed = min($userShiksho->credit, $originalTotalAmount);
+                    $creditUsed = \App\Tools\PriceTools::roundToman(min($userShiksho->credit, $originalTotalAmount));
                     $userShiksho->useCredit($creditUsed);
                 }
             }
