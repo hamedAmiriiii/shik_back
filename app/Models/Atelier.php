@@ -36,7 +36,10 @@ class Atelier extends Model
         });
     }
 
-    /** مدت آزمایش رایگان پس از ثبت‌نام */
+    /** مدت آزمایش رایگان پس از ثبت‌نام (روز) */
+    public const TRIAL_DAYS = 7;
+
+    /** @deprecated از TRIAL_DAYS استفاده شود */
     public const TRIAL_MONTHS = 1;
 
     public const SUBSCRIPTION_TRIAL = 'trial';
@@ -86,7 +89,7 @@ class Atelier extends Model
     }
 
     /**
-     * یک ماه استفاده رایگان از زمان ثبت‌نام.
+     * یک هفته استفاده رایگان از زمان ثبت‌نام.
      */
     public static function trialAccessAttributes(?Carbon $startsAt = null): array
     {
@@ -94,7 +97,7 @@ class Atelier extends Model
 
         return [
             'shop_access_starts_at' => $startsAt,
-            'shop_access_ends_at' => $startsAt->copy()->addMonths(self::TRIAL_MONTHS),
+            'shop_access_ends_at' => $startsAt->copy()->addDays(self::TRIAL_DAYS),
             'shop_access_suspended' => false,
         ];
     }

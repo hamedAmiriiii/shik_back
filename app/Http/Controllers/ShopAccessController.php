@@ -18,6 +18,7 @@ class ShopAccessController extends Controller
         return response(array_merge([
             'atelier_id' => $atelierId,
             'shop_name' => $atelier->name,
+            'trial_days_on_register' => Atelier::TRIAL_DAYS,
             'trial_months_on_register' => Atelier::TRIAL_MONTHS,
         ], $atelier->accessStatusForApi()), 200);
     }

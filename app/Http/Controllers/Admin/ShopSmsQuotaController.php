@@ -87,6 +87,7 @@ class ShopSmsQuotaController extends Controller
         $payload['meta'] = array_merge($payload['meta'] ?? [], [
             'chars_per_sms' => ShopSmsQuotaService::CHARS_PER_SMS_PART,
             'setting_key' => ShopSmsQuotaService::SETTING_KEY,
+            'trial_days' => Atelier::TRIAL_DAYS,
             'trial_months' => Atelier::TRIAL_MONTHS,
         ]);
 
