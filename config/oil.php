@@ -21,7 +21,9 @@ return [
 
     /**
      * لینک سابقهٔ مشتری بدون لاگین.
-     * پیامک دوم فقط همین آدرس است: {base}/oilservice/09xxxxxxxxx
+     * پیامک لینک فعلاً خاموش است (OIL_SEND_HISTORY_LINK_SMS=false).
      */
     'public_base_url' => rtrim((string) env('OIL_PUBLIC_BASE_URL', 'https://webinoo-plus.ir'), '/'),
+
+    'send_history_link_sms' => filter_var(env('OIL_SEND_HISTORY_LINK_SMS', false), FILTER_VALIDATE_BOOLEAN),
 ];

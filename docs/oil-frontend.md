@@ -245,7 +245,7 @@ Query: `q` (پلاک یا موبایل)، `per_page` (۱–۵۰، پیش‌فر�
   "visit": { "...همان مراجعه قبلی" },
   "sms_sent": true,
   "sms_error": null,
-  "link_sms_sent": true,
+  "link_sms_sent": false,
   "history_url": "https://webinoo-plus.ir/oilservice/09121234567"
 }
 ```
@@ -273,21 +273,18 @@ Query: `q` (پلاک یا موبایل)، `per_page` (۱–۵۰، پیش‌فر�
 
 ---
 
-بعد از ثبت، **دو پیامک جدا** می‌رود (لینک را با خوش‌آمد قاطی نکنید؛ پیامک لینک‌دار گاهی فیلتر می‌شود):
+بعد از ثبت، **یک پیامک خوش‌آمد** می‌رود (بدون لینک).
 
-1. خوش‌آمد بدون لینک
-2. فقط آدرس سابقه: `https://webinoo-plus.ir/oilservice/09xxxxxxxxx`
-
-پایهٔ لینک از `OIL_PUBLIC_BASE_URL` است.
+پیامک لینک سابقه فعلاً خاموش است (`OIL_SEND_HISTORY_LINK_SMS=false`). API عمومی سابقه برقرار است. در پاسخ `link_sms_sent` همیشه `false` است؛ `history_url` برای نمایش در اپ می‌آید.
 
 ```json
 {
   "already_exists": false,
-  "message": "ثبت شد و پیامک خوش‌آمد و لینک سابقه ارسال گردید.",
+  "message": "ثبت شد و پیامک ارسال گردید.",
   "visit": { "...visit با items و client_id" },
   "sms_sent": true,
   "sms_error": null,
-  "link_sms_sent": true,
+  "link_sms_sent": false,
   "history_url": "https://webinoo-plus.ir/oilservice/09399166196"
 }
 ```

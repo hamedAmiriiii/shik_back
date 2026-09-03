@@ -249,7 +249,11 @@ class OilVisitController extends Controller
 
         [$smsSent, $smsError] = $this->sendOilSms($phone, $message, $atelierId, 'oil_welcome');
         $historyUrl = OilPublicHistoryService::historyUrl($phone);
-        [$linkSent, $linkError] = $this->sendOilSms($phone, $historyUrl, $atelierId, 'oil_history_link');
+        $linkSent = false;
+        $linkError = null;
+        if (config('oil.send_history_link_sms')) {
+            [$linkSent, $linkError] = $this->sendOilSms($phone, $historyUrl, $atelierId, 'oil_history_link');
+        }
         $visit->update([
             'sms_sent' => $smsSent,
             'sms_error' => $smsError ?: $linkError,
@@ -286,7 +290,7 @@ class OilVisitController extends Controller
             $payload['message'] = 'این مراجعه قبلاً با همین client_id ثبت شده است.';
             $payload['sms_sent'] = (bool) $fresh->sms_sent;
             $payload['sms_error'] = $fresh->sms_error;
-            $payload['link_sms_sent'] = (bool) $fresh->sms_sent;
+            $payload['link_sms_sent'] = false;
             $payload['history_url'] = OilPublicHistoryService::historyUrl((string) $fresh->phone);
 
             return response()->json($payload, 200);
