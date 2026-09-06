@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\ManualTrade;
 use App\Models\Purchase;
 use App\Services\CustomerCreditExpenseService;
+use App\Services\DocumentPaymentService;
 use App\Services\ShopSalesReportService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -338,7 +339,6 @@ class FinancialReportController extends Controller
             ->whereDate('date', '<=', $end->format('Y-m-d'));
 
         $totalExpenses = CustomerCreditExpenseService::excludeFromTotals(clone $expenseBase)->sum('amount');
-        $expensesForBalance = CustomerCreditExpenseService::excludeAllCustomerCredit(clone $expenseBase)->sum('amount');
 
         $totalIncomes = Income::where('atelier_id', $atelierId)
             ->whereDate('date', '>=', $start->format('Y-m-d'))
@@ -371,7 +371,6 @@ class FinancialReportController extends Controller
         $incomesForBalance = (float) $totalIncomes - $saleLinkedIncomes + $manualSales;
         $totalIncomes = (float) $totalIncomes + $manualSales;
         $totalExpenses = (float) $totalExpenses + $manualPurchases;
-        $expensesForBalance = (float) $expensesForBalance + $manualPurchases;
         $chequePayments = (float) ($metrics['cheque_payments'] ?? 0);
         $openCheques = (float) ($metrics['open_cheques'] ?? 0);
 
@@ -380,11 +379,15 @@ class FinancialReportController extends Controller
             ->whereDate('date', '<=', $end->format('Y-m-d'))
             ->sum('amount');
 
+        $invoiceCashOut = DocumentPaymentService::cashOutflowInRange($atelierId, $from, $to, 'invoices');
+        $expenseCashOut = DocumentPaymentService::cashOutflowInRange($atelierId, $from, $to, 'expenses');
+
         // خالص سود = سود - هزینه‌های جاری
         $netProfit = $totalProfit - $totalExpenses;
 
+        // موجودی نقد فقط با پرداخت واقعی یا پاس چک کم می‌شود (فاکتور/هزینهٔ چکی و نسیهٔ باز نه).
         // فروش چکی در sales هست ولی نقد نشده؛ یک‌بار کم می‌شود تا موجودی نقدی بماند
-        $accountBalance = $netSales + $incomesForBalance - $expensesForBalance - $totalInvoices
+        $accountBalance = $netSales + $incomesForBalance - $expenseCashOut - $invoiceCashOut - $manualPurchases
             - $metrics['credit_used_total'] - $chequePayments;
 
         return [

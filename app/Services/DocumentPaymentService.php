@@ -902,6 +902,128 @@ class DocumentPaymentService
         ]);
     }
 
+    /**
+     * خروج نقد از حساب فروشگاه/تنخواه/صندوق در بازهٔ تاریخ.
+     * چک و نسیهٔ پرداخت‌نشده حساب نمی‌شوند؛ چک فقط در تاریخ پاس شدن کم می‌شود.
+     *
+     * @param  'invoices'|'expenses'  $kind
+     */
+    public static function cashOutflowInRange(int $atelierId, string $from, string $to, string $kind): float
+    {
+        $total = 0.0;
+
+        if (self::supportsSplits()) {
+            $query = DocumentPayment::query()
+                ->where('atelier_id', $atelierId)
+                ->where('settled', true)
+                ->whereNotNull('shop_account_id');
+
+            if ($kind === 'invoices') {
+                $query->whereNotNull('invoice_id');
+            } else {
+                $query->whereNotNull('expense_id')
+                    ->whereHas('expense', function ($expense) {
+                        $expense->where('type', 'جاری');
+                        if (CustomerCreditExpenseService::supports()) {
+                            $expense->whereNull('credit_source');
+                        }
+                    });
+            }
+
+            $query->where(function ($outer) use ($from, $to) {
+                $outer->where(function ($q) use ($from, $to) {
+                    $q->where('method', self::METHOD_ACCOUNT)
+                        ->whereDate('created_at', '>=', $from)
+                        ->whereDate('created_at', '<=', $to);
+                })->orWhere(function ($q) use ($from, $to) {
+                    $q->where('method', self::METHOD_CREDIT)
+                        ->whereDate('updated_at', '>=', $from)
+                        ->whereDate('updated_at', '<=', $to);
+                })->orWhere(function ($q) use ($from, $to) {
+                    $q->where('method', self::METHOD_CHEQUE)
+                        ->whereHas('cheque', function ($cheque) use ($from, $to) {
+                            $cheque->where('status', Cheque::STATUS_CLEARED)
+                                ->whereDate('cleared_at', '>=', $from)
+                                ->whereDate('cleared_at', '<=', $to);
+                        });
+                });
+            });
+
+            $total += (float) $query->sum('amount');
+        }
+
+        $total += self::legacyCashOutflowInRange($atelierId, $from, $to, $kind);
+
+        return round($total, 2);
+    }
+
+    /**
+     * فاکتور/هزینهٔ قدیمی بدون ردیف document_payments.
+     *
+     * @param  'invoices'|'expenses'  $kind
+     */
+    protected static function legacyCashOutflowInRange(int $atelierId, string $from, string $to, string $kind): float
+    {
+        $query = $kind === 'invoices'
+            ? Invoice::query()->where('atelier_id', $atelierId)
+            : Expense::query()->where('atelier_id', $atelierId)->where('type', 'جاری');
+
+        if ($kind === 'expenses') {
+            CustomerCreditExpenseService::excludeAllCustomerCredit($query);
+        }
+
+        if (self::supportsSplits()) {
+            $query->whereDoesntHave('payments');
+        }
+
+        $hasStatus = Schema::hasColumn($query->getModel()->getTable(), 'payment_status');
+        $hasPaidAt = Schema::hasColumn($query->getModel()->getTable(), 'paid_at');
+
+        $account = (clone $query)
+            ->where(function ($q) {
+                $q->whereNull('payment_method')
+                    ->orWhere('payment_method', '')
+                    ->orWhere('payment_method', self::METHOD_ACCOUNT)
+                    ->orWhere('payment_method', self::METHOD_MIXED);
+            })
+            ->whereNotNull('shop_account_id')
+            ->whereDate('date', '>=', $from)
+            ->whereDate('date', '<=', $to);
+
+        if ($hasStatus) {
+            $account->where(function ($q) {
+                $q->where('payment_status', self::STATUS_PAID)
+                    ->orWhereNull('payment_status');
+            });
+        }
+
+        $cheque = (clone $query)
+            ->where('payment_method', self::METHOD_CHEQUE)
+            ->whereHas('cheque', function ($c) use ($from, $to) {
+                $c->where('status', Cheque::STATUS_CLEARED)
+                    ->whereDate('cleared_at', '>=', $from)
+                    ->whereDate('cleared_at', '<=', $to);
+            });
+
+        $credit = (clone $query)
+            ->where('payment_method', self::METHOD_CREDIT)
+            ->whereNotNull('shop_account_id');
+
+        if ($hasStatus) {
+            $credit->where('payment_status', self::STATUS_PAID);
+        }
+
+        if ($hasPaidAt) {
+            $credit->whereDate('paid_at', '>=', $from)->whereDate('paid_at', '<=', $to);
+        } else {
+            $credit->whereDate('updated_at', '>=', $from)->whereDate('updated_at', '<=', $to);
+        }
+
+        return (float) $account->sum('amount')
+            + (float) $cheque->sum('amount')
+            + (float) $credit->sum('amount');
+    }
+
     public static function parseJalaliDate($parts): ?string
     {
         if (! is_array($parts) || empty($parts['year']) || empty($parts['month']) || empty($parts['day'])) {

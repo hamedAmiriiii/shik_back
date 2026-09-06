@@ -356,6 +356,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Financial Report routes - requires authentication
     Route::prefix('financial-report')->name('financial-report.')->group(function () {
         Route::get('/monthly', [\App\Http\Controllers\FinancialReportController::class, 'monthlyReport']);
+        Route::get('/outstanding', [\App\Http\Controllers\OutstandingSettlementController::class, 'index']);
     });
 
     // Admin routes
