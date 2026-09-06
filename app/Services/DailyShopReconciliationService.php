@@ -123,6 +123,7 @@ class DailyShopReconciliationService
             ->count();
 
         $accounts = ShopSalesReportService::accountsBreakdown($metrics);
+        $tillPaidOut = ShopAccountBalanceService::tillPaidOnDate($atelierId, $dateKey);
 
         $accountDeposits = $shopAccounts->map(fn (ShopAccount $a) => [
             'shop_account_id' => $a->id,
@@ -142,6 +143,8 @@ class DailyShopReconciliationService
             'card_amount' => (float) $metrics['card_amount'],
             'cash_amount' => (float) $metrics['cash_amount'],
             'cash_and_card_total' => (float) $metrics['cash_and_card_total'],
+            'till_paid_out' => $tillPaidOut,
+            'expected_deposit' => round(max(0, (float) $metrics['total_collected'] - $tillPaidOut), 2),
             'installments_collected' => (float) $metrics['installments_collected'],
             'total_collected' => (float) $metrics['total_collected'],
             'discount_given' => (float) $metrics['discount_given'],
@@ -459,7 +462,9 @@ class DailyShopReconciliationService
 
         $metrics = ShopSalesReportService::salesAndProfitForDate($atelierId, $dateCarbon);
         $totalCollected = (float) $metrics['total_collected'];
-        $dailyDiscrepancy = round($depositedTotal - $totalCollected, 2);
+        $tillPaidOut = ShopAccountBalanceService::tillPaidOnDate($atelierId, $dateGregorian);
+        $expectedDeposit = round(max(0, $totalCollected - $tillPaidOut), 2);
+        $dailyDiscrepancy = round($depositedTotal - $expectedDeposit, 2);
 
         $dateJalali = Jalalian::fromCarbon($dateCarbon)->format('Y-m-d');
 

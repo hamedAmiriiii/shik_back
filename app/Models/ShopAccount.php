@@ -21,7 +21,12 @@ class ShopAccount extends Model
     /** تنخواه — فقط از حساب‌های اصلی شارژ می‌شود */
     public const TYPE_PETTY_CASH = 'petty_cash';
 
-    public const TYPES = [self::TYPE_SHOP, self::TYPE_PETTY_CASH];
+    /** صندوق نقد فروش — همان وجوه در راه (۱۱۱۰۱) */
+    public const TYPE_TILL = 'till';
+
+    public const LEGACY_TILL = 'till';
+
+    public const TYPES = [self::TYPE_SHOP, self::TYPE_PETTY_CASH, self::TYPE_TILL];
 
     public const DEFAULTS = [
         ['name' => 'حساب ۱', 'sort_order' => 1, 'legacy_slot' => self::LEGACY_ACCOUNT_1],
@@ -58,8 +63,17 @@ class ShopAccount extends Model
         return $this->type === self::TYPE_PETTY_CASH;
     }
 
+    public function isTill(): bool
+    {
+        return $this->type === self::TYPE_TILL || $this->legacy_slot === self::LEGACY_TILL;
+    }
+
     public function typeLabel(): string
     {
+        if ($this->isTill()) {
+            return 'صندوق نقد';
+        }
+
         return $this->isPettyCash() ? 'تنخواه' : 'حساب فروشگاه';
     }
 
@@ -123,8 +137,46 @@ class ShopAccount extends Model
             );
         }
 
+        self::ensureTillForAtelier($atelierId);
         self::backfillLegacyDepositsForAtelier($atelierId);
         ChartOfAccountsSeeder::ensureForAtelier($atelierId);
+    }
+
+    /**
+     * صندوق نقد فروشگاه — برای پرداخت فاکتور و هزینه از پول نقد همان روز.
+     */
+    public static function ensureTillForAtelier(int $atelierId): ?self
+    {
+        if ($atelierId <= 0 || ! Schema::hasTable('shop_accounts') || ! self::supportsTypes()) {
+            return null;
+        }
+
+        $existing = static::query()
+            ->forAtelier($atelierId)
+            ->where(function ($q) {
+                $q->where('type', self::TYPE_TILL)
+                    ->orWhere('legacy_slot', self::LEGACY_TILL);
+            })
+            ->first();
+        if ($existing) {
+            if ($existing->type !== self::TYPE_TILL || $existing->legacy_slot !== self::LEGACY_TILL) {
+                $existing->type = self::TYPE_TILL;
+                $existing->legacy_slot = self::LEGACY_TILL;
+                $existing->is_active = true;
+                $existing->save();
+            }
+
+            return $existing;
+        }
+
+        return static::query()->create([
+            'atelier_id' => $atelierId,
+            'name' => 'صندوق نقد',
+            'type' => self::TYPE_TILL,
+            'sort_order' => 0,
+            'legacy_slot' => self::LEGACY_TILL,
+            'is_active' => true,
+        ]);
     }
 
     /**

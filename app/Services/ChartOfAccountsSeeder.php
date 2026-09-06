@@ -144,6 +144,13 @@ class ChartOfAccountsSeeder
             ->where('linked_id', $account->id)
             ->first();
 
+        if ($account->isTill()) {
+            return AccountingAccount::query()
+                ->forAtelier((int) $account->atelier_id)
+                ->where('code', self::CODE_TILL)
+                ->first();
+        }
+
         if ($existing) {
             $existing->name = $account->name;
             $existing->is_active = (bool) $account->is_active;

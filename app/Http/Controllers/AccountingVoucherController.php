@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Console\Commands\AccountingFlowSelfTest;
 use App\Models\AccountingVoucher;
 use App\Services\AccountingOpeningService;
 use App\Services\AccountingVoucherService;
@@ -138,6 +139,40 @@ class AccountingVoucherController extends Controller
             'message' => $ok ? 'موتور سند درست کار می‌کند.' : 'یکی از کنترل‌های موتور سند رد شد.',
             'data' => $result,
         ], $ok ? 200 : 422);
+    }
+
+    /**
+     * تست زندهٔ مسیرهای مالی (فروش، برگشت، فاکتور، هزینه، حقوق، تولید).
+     * GET/POST /api/accounting/flow-self-test?key=...&atelier_id=13
+     */
+    public function flowSelfTest(Request $request)
+    {
+        $expected = (string) config('app.accounting_flow_test_key', 'flow-test-shop-13-zarrin');
+        $given = (string) $request->query('key', $request->input('key', ''));
+        if ($expected === '' || ! hash_equals($expected, $given)) {
+            return response()->json(['message' => 'کلید نامعتبر است.'], 403);
+        }
+
+        @set_time_limit(180);
+        $atelierId = (int) $request->query('atelier_id', $request->input('atelier_id', 13));
+        $cleanup = $request->boolean('cleanup');
+
+        try {
+            $result = app(AccountingFlowSelfTest::class)->runFor($atelierId, $cleanup);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'ok' => false,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+
+        if (! empty($result['error'])) {
+            return response()->json($result, 422);
+        }
+
+        return response()->json($result, ! empty($result['ok']) ? 200 : 422);
     }
 
     /**

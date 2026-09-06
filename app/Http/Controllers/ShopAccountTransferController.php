@@ -173,8 +173,8 @@ class ShopAccountTransferController extends Controller
         if (! $from->is_active || ! $to->is_active) {
             return 'حساب‌های غیرفعال قابل استفاده نیستند.';
         }
-        if ($from->isPettyCash()) {
-            return 'شارژ فقط از حساب‌های اصلی فروشگاه امکان‌پذیر است، نه از تنخواه.';
+        if ($from->isPettyCash() || $from->isTill()) {
+            return 'شارژ فقط از حساب‌های اصلی فروشگاه امکان‌پذیر است، نه از تنخواه یا صندوق نقد.';
         }
         if (! $to->isPettyCash()) {
             return 'مقصد شارژ باید یک حساب تنخواه باشد.';

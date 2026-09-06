@@ -25,11 +25,12 @@ class ShopAccountController extends Controller
         ]);
 
         $includeInactive = $request->boolean('include_inactive');
+        $forPayment = $request->input('for') === 'payment';
         $accounts = ShopAccount::query()
             ->forAtelier($atelierId)
             ->when(! $includeInactive, fn ($q) => $q->active())
             ->when(
-                $request->filled('type') && ShopAccount::supportsTypes(),
+                ! $forPayment && $request->filled('type') && ShopAccount::supportsTypes(),
                 fn ($q) => $request->input('type') === ShopAccount::TYPE_SHOP
                     ? $q->shopType()
                     : $q->ofType($request->input('type'))
@@ -74,6 +75,12 @@ class ShopAccountController extends Controller
 
         $type = $fields['type'] ?? ShopAccount::TYPE_SHOP;
         $supportsTypes = ShopAccount::supportsTypes();
+
+        if ($type === ShopAccount::TYPE_TILL) {
+            return response()->json([
+                'message' => 'صندوق نقد به‌صورت خودکار ساخته می‌شود و قابل ایجاد دستی نیست.',
+            ], 422);
+        }
 
         if ($type === ShopAccount::TYPE_PETTY_CASH && ! $supportsTypes) {
             return response()->json([
@@ -198,6 +205,8 @@ class ShopAccountController extends Controller
             'type' => $account->type ?: ShopAccount::TYPE_SHOP,
             'type_label' => $account->typeLabel(),
             'is_petty_cash' => $account->isPettyCash(),
+            'is_till' => $account->isTill(),
+            'can_receive_recon_deposit' => ! $account->isTill() && ! $account->isPettyCash(),
             'sort_order' => (int) $account->sort_order,
             'legacy_slot' => $account->legacy_slot,
             'is_active' => (bool) $account->is_active,

@@ -16,6 +16,9 @@ use App\Http\Controllers\CategoryController;
 |
 */
 
+Route::match(['get', 'post'], 'accounting/flow-self-test', [\App\Http\Controllers\AccountingVoucherController::class, 'flowSelfTest'])
+    ->middleware('throttle:3,1');
+
 Route::prefix('referrals')->name('referrals.')->group(function () {
     Route::get('dashboard/{token}', [\App\Http\Controllers\PublicReferralController::class, 'dashboard'])
         ->where('token', '[A-Za-z0-9]+');

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AccountingAccount;
 use App\Models\DailyShopReconciliationAccountDeposit;
 use App\Models\DocumentPayment;
 use App\Models\Expense;
@@ -9,6 +10,7 @@ use App\Models\Invoice;
 use App\Models\ManualTrade;
 use App\Models\ShopAccount;
 use App\Models\ShopAccountTransfer;
+use App\Services\ChartOfAccountsSeeder;
 use App\Services\DocumentPaymentService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -97,7 +99,105 @@ class ShopAccountBalanceService
             );
         }
 
+        self::overlayTillLedgerBalances($atelierId, $result);
+
         return $result;
+    }
+
+    /**
+     * موجودی صندوق نقد = مانده دفتر ۱۱۱۰۱ (فروش نقد/کارت − واریز تطبیق − پرداخت از صندوق).
+     *
+     * @param  array<int, array<string, float>>  $result
+     */
+    protected static function overlayTillLedgerBalances(int $atelierId, array &$result): void
+    {
+        if ($result === [] || ! Schema::hasTable('accounting_lines') || ! Schema::hasTable('accounting_vouchers')) {
+            return;
+        }
+
+        $tillIds = ShopAccount::query()
+            ->forAtelier($atelierId)
+            ->where(function ($q) {
+                $q->where('type', ShopAccount::TYPE_TILL)
+                    ->orWhere('legacy_slot', ShopAccount::LEGACY_TILL);
+            })
+            ->pluck('id')
+            ->all();
+        $tillIds = array_values(array_intersect($tillIds, array_keys($result)));
+        if ($tillIds === []) {
+            return;
+        }
+
+        $tillAccountId = AccountingAccount::query()
+            ->forAtelier($atelierId)
+            ->where('code', ChartOfAccountsSeeder::CODE_TILL)
+            ->value('id');
+        if (! $tillAccountId) {
+            return;
+        }
+
+        $row = DB::table('accounting_lines as l')
+            ->join('accounting_vouchers as v', 'v.id', '=', 'l.voucher_id')
+            ->where('v.atelier_id', $atelierId)
+            ->whereIn('v.status', ['posted', 'reversed'])
+            ->where('l.account_id', $tillAccountId)
+            ->selectRaw('COALESCE(SUM(l.debit), 0) as d, COALESCE(SUM(l.credit), 0) as c')
+            ->first();
+        $balance = round((float) ($row->d ?? 0) - (float) ($row->c ?? 0), 2);
+        foreach ($tillIds as $id) {
+            $result[$id]['balance'] = $balance;
+        }
+    }
+
+    /**
+     * پرداخت نقد از صندوق در یک روز (برای تطبیق: ماندهٔ قابل واریز به بانک).
+     */
+    public static function tillPaidOnDate(int $atelierId, string $date): float
+    {
+        $tillIds = ShopAccount::query()
+            ->forAtelier($atelierId)
+            ->where(function ($q) {
+                $q->where('type', ShopAccount::TYPE_TILL)
+                    ->orWhere('legacy_slot', ShopAccount::LEGACY_TILL);
+            })
+            ->pluck('id')
+            ->all();
+        if ($tillIds === []) {
+            return 0.0;
+        }
+
+        $total = 0.0;
+        foreach (['expenses' => Expense::class, 'invoices' => Invoice::class] as $table => $model) {
+            if (! Schema::hasTable($table) || ! Schema::hasColumn($table, 'shop_account_id')) {
+                continue;
+            }
+            $fk = $table === 'expenses' ? 'expense_id' : 'invoice_id';
+            $legacy = $model::query()
+                ->where('atelier_id', $atelierId)
+                ->whereIn('shop_account_id', $tillIds)
+                ->whereDate('date', $date)
+                ->when(
+                    Schema::hasColumn($table, 'payment_status'),
+                    fn ($q) => $q->where('payment_status', 'paid')
+                );
+            if (Schema::hasTable('document_payments')) {
+                $legacy->whereNotIn('id', function ($q) use ($fk) {
+                    $q->select($fk)->from('document_payments')->whereNotNull($fk);
+                });
+            }
+            $total += (float) $legacy->sum('amount');
+            if (Schema::hasTable('document_payments')) {
+                $total += (float) DocumentPayment::query()
+                    ->where('atelier_id', $atelierId)
+                    ->where('settled', true)
+                    ->whereIn('shop_account_id', $tillIds)
+                    ->whereNotNull($fk)
+                    ->whereDate('created_at', $date)
+                    ->sum('amount');
+            }
+        }
+
+        return round($total, 2);
     }
 
     /**

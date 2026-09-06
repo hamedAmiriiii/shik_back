@@ -32,6 +32,10 @@ class AccountingLedger
     public static function shopCashAccountId(int $atelierId, int $shopAccountId): int
     {
         ChartOfAccountsSeeder::ensureForAtelier($atelierId);
+        $shop = ShopAccount::query()->find($shopAccountId);
+        if ($shop && (int) $shop->atelier_id === $atelierId && $shop->isTill()) {
+            return self::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL);
+        }
         $id = self::linkedShopAccountId($atelierId, $shopAccountId);
         if ($id) {
             return $id;
