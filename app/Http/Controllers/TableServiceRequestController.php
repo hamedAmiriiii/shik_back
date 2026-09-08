@@ -36,11 +36,13 @@ class TableServiceRequestController extends Controller
             'shop_service_id' => 'required|integer',
             'note' => 'nullable|string|max:500',
             'phone' => ['nullable', 'string', 'regex:/^09\d{9}$/'],
+            'kind' => 'nullable|string|in:table,room,میز,اتاق',
         ]);
 
-        $shopTable = ShopTable::firstOrCreate(
-            ['atelier_id' => $atelierId, 'table_number' => $request->table_number],
-            ['is_active' => true]
+        $shopTable = ShopTable::resolveFor(
+            $atelierId,
+            (int) $request->table_number,
+            $request->input('kind')
         );
 
         $service = ShopService::where('atelier_id', $atelierId)
@@ -127,7 +129,8 @@ class TableServiceRequestController extends Controller
 
         if ($request->filled('table_number')) {
             $query->whereHas('shopTable', function ($q) use ($request) {
-                $q->where('table_number', $request->table_number);
+                $q->where('table_number', $request->table_number)
+                    ->where('kind', ShopTable::normalizeKind($request->input('kind', $request->query('kind'))));
             });
         }
 
@@ -181,6 +184,9 @@ class TableServiceRequestController extends Controller
         if ($request->filled('table_number')) {
             $query->whereHas('shopTable', function ($q) use ($request) {
                 $q->where('table_number', $request->table_number);
+                if ($request->filled('kind')) {
+                    $q->where('kind', ShopTable::normalizeKind($request->input('kind')));
+                }
             });
         }
 

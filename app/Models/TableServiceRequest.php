@@ -79,6 +79,7 @@ class TableServiceRequest extends Model
             'price' => 0,
             'table_label' => $this->shopTable ? $this->shopTable->display_name : null,
             'table_number' => $this->shopTable ? (int) $this->shopTable->table_number : null,
+            'kind' => $this->shopTable ? $this->shopTable->kind : ShopTable::KIND_TABLE,
             'created_at' => $this->created_at,
             'scheduled_at' => $this->scheduled_at,
             'done_at' => $this->done_at,

@@ -133,6 +133,7 @@ class TableOrder extends Model
             'note' => $this->note,
             'table_label' => $this->table_label,
             'table_number' => $this->shopTable ? (int) $this->shopTable->table_number : null,
+            'kind' => $this->shopTable ? $this->shopTable->kind : ShopTable::KIND_TABLE,
             'purchase_id' => $this->purchase_id,
             'items' => $items,
         ];

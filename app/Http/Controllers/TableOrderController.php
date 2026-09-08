@@ -51,15 +51,17 @@ class TableOrderController extends Controller
             'products.*.size' => 'nullable|string|max:100',
             'products.*.color' => 'nullable|string|max:100',
             'note' => 'nullable|string|max:500',
+            'kind' => 'nullable|string|in:table,room,میز,اتاق',
         ]);
 
         if ($this->requestHasReceipt($request) && $request->input('payment_method') !== TableOrder::METHOD_CARD_TO_CARD) {
             return response()->json(['message' => 'ارسال رسید فقط برای کارت به کارت است.'], 422);
         }
 
-        $shopTable = ShopTable::firstOrCreate(
-            ['atelier_id' => $atelierId, 'table_number' => $request->table_number],
-            ['is_active' => true]
+        $shopTable = ShopTable::resolveFor(
+            $atelierId,
+            (int) $request->table_number,
+            $request->input('kind')
         );
 
         $productIds = array_column($request->products, 'product_id');
@@ -194,6 +196,9 @@ class TableOrderController extends Controller
         if ($request->filled('table_number')) {
             $query->whereHas('shopTable', function ($q) use ($request) {
                 $q->where('table_number', $request->table_number);
+                if ($request->filled('kind')) {
+                    $q->where('kind', ShopTable::normalizeKind($request->input('kind')));
+                }
             });
         }
 
@@ -387,7 +392,8 @@ class TableOrderController extends Controller
 
         if ($request->filled('table_number')) {
             $query->whereHas('shopTable', function ($q) use ($request) {
-                $q->where('table_number', $request->table_number);
+                $q->where('table_number', $request->table_number)
+                    ->where('kind', ShopTable::normalizeKind($request->input('kind', $request->query('kind'))));
             });
         }
 
@@ -450,8 +456,10 @@ class TableOrderController extends Controller
         $atelierId = $this->shopAtelierIdOrAbort($request);
         Setting::setShopContext($atelierId);
 
+        $kind = ShopTable::normalizeKind($request->query('kind'));
         $shopTable = ShopTable::where('atelier_id', $atelierId)
             ->where('table_number', $tableNumber)
+            ->where('kind', $kind)
             ->where('is_active', true)
             ->firstOrFail();
 
@@ -468,6 +476,8 @@ class TableOrderController extends Controller
             'pending_orders' => $pending,
             'payment_methods' => TableOrder::paymentMethodsForApi(),
             'room_services_enabled' => Setting::isEnabled('room_services_enabled', false),
+            'allow_menu' => $shopTable->isRoom() || ! Setting::isEnabled('room_services_enabled', false),
+            'allow_services' => Setting::isEnabled('room_services_enabled', false),
         ]);
     }
 

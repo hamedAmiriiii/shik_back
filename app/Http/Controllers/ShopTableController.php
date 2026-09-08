@@ -17,9 +17,11 @@ class ShopTableController extends Controller
      */
     public function index()
     {
-        $tables = ShopTable::where('atelier_id', $this->atelierId())
-            ->orderBy('table_number')
-            ->get();
+        $query = ShopTable::where('atelier_id', $this->atelierId());
+        if (request()->filled('kind')) {
+            $query->where('kind', ShopTable::normalizeKind(request('kind')));
+        }
+        $tables = $query->orderBy('kind')->orderBy('table_number')->get();
 
         return response()->json($tables);
     }
@@ -33,21 +35,30 @@ class ShopTableController extends Controller
 
         $request->validate([
             'table_number' => 'required|integer|min:1|max:999',
+            'kind' => 'nullable|string|in:table,room,میز,اتاق',
             'label' => 'nullable|string|max:100',
             'is_active' => 'nullable|boolean',
         ]);
 
+        $kind = ShopTable::normalizeKind($request->input('kind'));
+
         $exists = ShopTable::where('atelier_id', $atelierId)
             ->where('table_number', $request->table_number)
+            ->where('kind', $kind)
             ->exists();
 
         if ($exists) {
-            return response()->json(['message' => 'این شماره میز قبلاً ثبت شده است'], 422);
+            return response()->json([
+                'message' => $kind === ShopTable::KIND_ROOM
+                    ? 'این شماره اتاق قبلاً ثبت شده است'
+                    : 'این شماره میز قبلاً ثبت شده است',
+            ], 422);
         }
 
         $table = ShopTable::create([
             'atelier_id' => $atelierId,
             'table_number' => $request->table_number,
+            'kind' => $kind,
             'label' => $request->label,
             'is_active' => $request->input('is_active', true),
         ]);
@@ -92,21 +103,28 @@ class ShopTableController extends Controller
 
         $request->validate([
             'count' => 'required|integer|min:1|max:50',
+            'kind' => 'nullable|string|in:table,room,میز,اتاق',
         ]);
 
+        $kind = ShopTable::normalizeKind($request->input('kind'));
         $count = $request->count;
         $created = [];
 
         for ($i = 1; $i <= $count; $i++) {
             $table = ShopTable::firstOrCreate(
-                ['atelier_id' => $atelierId, 'table_number' => $i],
-                ['is_active' => true]
+                ['atelier_id' => $atelierId, 'table_number' => $i, 'kind' => $kind],
+                [
+                    'is_active' => true,
+                    'label' => $kind === ShopTable::KIND_ROOM ? 'اتاق ' . $i : null,
+                ]
             );
             $created[] = $table;
         }
 
+        $noun = $kind === ShopTable::KIND_ROOM ? 'اتاق' : 'میز';
+
         return response()->json([
-            'message' => "{$count} میز با موفقیت ایجاد شد",
+            'message' => "{$count} {$noun} با موفقیت ایجاد شد",
             'tables' => $created,
         ]);
     }
