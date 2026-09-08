@@ -37,6 +37,10 @@ Route::get('payments/zarinpal/callback', [\App\Http\Controllers\GatewayPaymentCo
     ->middleware('throttle:60,1');
 Route::post('payments/zarinpal/callback', [\App\Http\Controllers\GatewayPaymentController::class, 'zarinpalCallback'])
     ->middleware('throttle:60,1');
+Route::get('product-plans', [\App\Http\Controllers\ProductPlanController::class, 'index'])
+    ->middleware('throttle:60,1');
+Route::post('product-plans/purchase', [\App\Http\Controllers\ProductPlanController::class, 'purchase'])
+    ->middleware('throttle:20,1');
 
 Route::prefix('oil')->name('oil.')->group(function () {
     Route::post('login', [\App\Http\Controllers\Oil\OilAuthController::class, 'login']);
@@ -397,6 +401,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('shop-plans', [\App\Http\Controllers\Admin\ShopPlanController::class, 'index']);
         Route::post('shop-plans', [\App\Http\Controllers\Admin\ShopPlanController::class, 'store']);
         Route::put('shop-plans/{shopPlan}', [\App\Http\Controllers\Admin\ShopPlanController::class, 'update']);
+
+        Route::get('product-plans', [\App\Http\Controllers\Admin\ProductPlanController::class, 'index']);
+        Route::post('product-plans', [\App\Http\Controllers\Admin\ProductPlanController::class, 'store']);
+        Route::put('product-plans/{productPlan}', [\App\Http\Controllers\Admin\ProductPlanController::class, 'update']);
+        Route::get('product-plan-orders', [\App\Http\Controllers\Admin\ProductPlanOrderController::class, 'index']);
 
         Route::resource("cameraman", \App\Http\Controllers\Admin\CameramanController::class);
         Route::post("/cameraman/confirm/{cameraman}", [\App\Http\Controllers\Admin\CameramanController::class, "confirm"]);

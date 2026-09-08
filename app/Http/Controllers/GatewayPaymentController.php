@@ -3,9 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\GatewayPayment;
+use App\Models\ProductPlanOrder;
 use App\Models\User;
 use App\Services\GatewayPaymentService;
+use App\Services\ProductPlanOrderService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
 class GatewayPaymentController extends Controller
@@ -63,8 +66,19 @@ class GatewayPaymentController extends Controller
         return response(['payment' => $row], 200);
     }
 
-    public function zarinpalCallback(Request $request, GatewayPaymentService $payments)
+    public function zarinpalCallback(Request $request, GatewayPaymentService $payments, ProductPlanOrderService $planOrders)
     {
+        $orderId = $request->query('oid') ? (int) $request->query('oid') : null;
+        if ($orderId || $this->looksLikeProductPlanOrder($request->query('Authority', $request->query('authority')))) {
+            $result = $planOrders->handleCallback(
+                $request->query('Authority', $request->query('authority')),
+                $request->query('Status', $request->query('status')),
+                $orderId
+            );
+
+            return redirect()->away($result['redirect']);
+        }
+
         $result = $payments->handleCallback(
             $request->query('Authority', $request->query('authority')),
             $request->query('Status', $request->query('status')),
@@ -72,5 +86,15 @@ class GatewayPaymentController extends Controller
         );
 
         return redirect()->away($result['redirect']);
+    }
+
+    protected function looksLikeProductPlanOrder($authority): bool
+    {
+        if (! is_string($authority) || $authority === '') {
+            return false;
+        }
+
+        return Schema::hasTable('product_plan_orders')
+            && ProductPlanOrder::query()->where('authority', $authority)->exists();
     }
 }
