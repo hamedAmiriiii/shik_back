@@ -177,6 +177,21 @@ Route::middleware('auth:sanctum')->prefix('table-orders')->name('table-orders.')
     Route::post('/{tableOrder}/cancel', [\App\Http\Controllers\TableOrderController::class, 'cancel']);
 });
 
+Route::middleware('auth:sanctum')->prefix('shop-services')->name('shop-services.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\ShopServiceController::class, 'index']);
+    Route::post('/', [\App\Http\Controllers\ShopServiceController::class, 'store']);
+    Route::put('/{shopService}', [\App\Http\Controllers\ShopServiceController::class, 'update']);
+    Route::delete('/{shopService}', [\App\Http\Controllers\ShopServiceController::class, 'destroy']);
+});
+
+Route::middleware('auth:sanctum')->prefix('table-service-requests')->name('table-service-requests.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\TableServiceRequestController::class, 'index']);
+    Route::get('/pending-count', [\App\Http\Controllers\TableServiceRequestController::class, 'pendingCount']);
+    Route::post('/{tableServiceRequest}/schedule', [\App\Http\Controllers\TableServiceRequestController::class, 'schedule']);
+    Route::post('/{tableServiceRequest}/done', [\App\Http\Controllers\TableServiceRequestController::class, 'done']);
+    Route::post('/{tableServiceRequest}/cancel', [\App\Http\Controllers\TableServiceRequestController::class, 'cancel']);
+});
+
 Route::group(['middleware' => ['auth:sanctum']], function () {
     // Store/Shop related routes - require authentication
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
@@ -391,7 +406,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('shop-sms-quota', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'index']);
         Route::get('shop-sms-quota/{atelier}', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'show']);
         Route::put('shop-sms-quota/{atelier}', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'update']);
-        Route::post('shop-sms-quota/{atelier}/charge', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'charge']);
+        Route::get('shop-service-access', [\App\Http\Controllers\Admin\ShopRoomServiceAccessController::class, 'index']);
+        Route::put('shop-service-access/{atelier}', [\App\Http\Controllers\Admin\ShopRoomServiceAccessController::class, 'update']);
 
         Route::get('sms-package-orders', [\App\Http\Controllers\Admin\SmsPackageOrderController::class, 'index']);
         Route::get('sms-package-orders/{smsPackageOrder}', [\App\Http\Controllers\Admin\SmsPackageOrderController::class, 'show']);

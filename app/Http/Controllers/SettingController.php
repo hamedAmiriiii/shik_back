@@ -9,8 +9,8 @@ use InvalidArgumentException;
 
 class SettingController extends Controller
 {
-    /** فقط ادمین از API جداگانه می‌تواند شارژ کند */
-    private const ADMIN_ONLY_KEYS = ['shop_sms_quota'];
+    /** فقط ادمین سامانه می‌تواند شارژ پیامک یا دسترسی خدمات را عوض کند */
+    private const ADMIN_ONLY_KEYS = ['shop_sms_quota', 'room_services_enabled'];
 
     /**
      * دریافت همه تنظیمات
@@ -55,7 +55,7 @@ class SettingController extends Controller
 
         if (in_array($key, self::ADMIN_ONLY_KEYS, true)) {
             return response()->json([
-                'message' => 'اعتبار پیامک فقط توسط ادمین قابل شارژ است.',
+                'message' => 'این تنظیم فقط توسط ادمین سامانه قابل تغییر است.',
             ], 403);
         }
 

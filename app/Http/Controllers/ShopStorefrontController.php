@@ -31,6 +31,7 @@ class ShopStorefrontController extends Controller
             'settings' => [
                 'enable_loyalty_credit' => Setting::isEnabled('enable_loyalty_credit', true),
                 'loyalty_credit_tiers' => ShopLoyaltyCreditTierService::tiersForApi($atelierId),
+                'room_services_enabled' => Setting::isEnabled('room_services_enabled', false),
             ],
             'payment_methods' => TableOrder::paymentMethodsForApi(),
         ]);

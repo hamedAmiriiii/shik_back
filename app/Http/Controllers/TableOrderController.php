@@ -464,6 +464,7 @@ class TableOrderController extends Controller
             'table' => $shopTable,
             'pending_orders' => $pending,
             'payment_methods' => TableOrder::paymentMethodsForApi(),
+            'room_services_enabled' => Setting::isEnabled('room_services_enabled', false),
         ]);
     }
 

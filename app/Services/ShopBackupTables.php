@@ -138,6 +138,19 @@ class ShopBackupTables
                 'fks' => [],
             ],
             [
+                'name' => 'shop_services',
+                'scope' => 'atelier',
+                'fks' => [],
+            ],
+            [
+                'name' => 'table_service_requests',
+                'scope' => 'atelier',
+                'fks' => [
+                    'shop_table_id' => 'shop_tables',
+                    'shop_service_id' => 'shop_services',
+                ],
+            ],
+            [
                 'name' => 'customers',
                 'scope' => 'atelier',
                 'fks' => [],

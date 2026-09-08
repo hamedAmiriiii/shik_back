@@ -60,6 +60,15 @@ Route::prefix('{shop}')
         Route::post('table-order/{tableOrder}/cancel', [\App\Http\Controllers\TableOrderController::class, 'guestCancel'])
             ->name('table-order.cancel');
 
+        Route::get('shop-services', [\App\Http\Controllers\ShopServiceController::class, 'publicIndex'])
+            ->name('shop-services.index');
+        Route::post('table-service-request', [\App\Http\Controllers\TableServiceRequestController::class, 'guestStore'])
+            ->name('table-service-request.store');
+        Route::get('table-service-requests', [\App\Http\Controllers\TableServiceRequestController::class, 'guestIndex'])
+            ->name('table-service-request.index');
+        Route::post('table-service-request/{tableServiceRequest}/cancel', [\App\Http\Controllers\TableServiceRequestController::class, 'guestCancel'])
+            ->name('table-service-request.cancel');
+
         // اعتبار و سفارش‌های قبلی با شماره موبایل — بدون لاگین
         Route::match(['get', 'post'], 'guest/lookup', [\App\Http\Controllers\GuestCustomerController::class, 'lookup'])
             ->name('guest.lookup');
