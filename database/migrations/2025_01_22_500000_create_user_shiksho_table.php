@@ -6,13 +6,12 @@ use Illuminate\Support\Facades\Schema;
 
 class CreateUserShikshoTable extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up()
     {
+        if (Schema::hasTable('user_shiksho')) {
+            return;
+        }
+
         Schema::create('user_shiksho', function (Blueprint $table) {
             $table->id();
             $table->string('phone', 11)->unique();
@@ -21,14 +20,8 @@ class CreateUserShikshoTable extends Migration
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down()
     {
         Schema::dropIfExists('user_shiksho');
     }
 }
-

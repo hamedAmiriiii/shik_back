@@ -7,42 +7,57 @@ use Illuminate\Support\Facades\DB;
 
 class AddCreditExpiryFieldsToUserShikshoTable extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up()
     {
-        Schema::table('user_shiksho', function (Blueprint $table) {
-            $table->timestamp('credit_last_updated_at')->nullable()->after('credit');
-            $table->timestamp('last_warning_sent_at')->nullable()->after('credit_last_updated_at');
-        });
+        if (! Schema::hasTable('user_shiksho')) {
+            return;
+        }
 
-        // برای رکوردهای موجود، credit_last_updated_at را برابر updated_at قرار بده
-        DB::table('user_shiksho')->whereNull('credit_last_updated_at')->update([
-            'credit_last_updated_at' => DB::raw('updated_at')
-        ]);
+        if (! Schema::hasColumn('user_shiksho', 'credit_last_updated_at')) {
+            Schema::table('user_shiksho', function (Blueprint $table) {
+                $table->timestamp('credit_last_updated_at')->nullable()->after('credit');
+            });
+        }
 
-        // ایجاد Setting پیش‌فرض برای تعداد روز انقضا
-        DB::table('settings')->insertOrIgnore([
-            'key' => 'credit_expiry_days',
-            'value' => '60',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        if (! Schema::hasColumn('user_shiksho', 'last_warning_sent_at')) {
+            Schema::table('user_shiksho', function (Blueprint $table) {
+                $table->timestamp('last_warning_sent_at')->nullable()->after('credit_last_updated_at');
+            });
+        }
+
+        if (Schema::hasColumn('user_shiksho', 'credit_last_updated_at')) {
+            DB::table('user_shiksho')->whereNull('credit_last_updated_at')->update([
+                'credit_last_updated_at' => DB::raw('updated_at'),
+            ]);
+        }
+
+        if (Schema::hasTable('settings')) {
+            DB::table('settings')->insertOrIgnore([
+                'key' => 'credit_expiry_days',
+                'value' => '60',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down()
     {
+        if (! Schema::hasTable('user_shiksho')) {
+            return;
+        }
+
         Schema::table('user_shiksho', function (Blueprint $table) {
-            $table->dropColumn(['credit_last_updated_at', 'last_warning_sent_at']);
+            $cols = [];
+            if (Schema::hasColumn('user_shiksho', 'credit_last_updated_at')) {
+                $cols[] = 'credit_last_updated_at';
+            }
+            if (Schema::hasColumn('user_shiksho', 'last_warning_sent_at')) {
+                $cols[] = 'last_warning_sent_at';
+            }
+            if ($cols !== []) {
+                $table->dropColumn($cols);
+            }
         });
     }
 }
-

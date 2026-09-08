@@ -74,6 +74,19 @@ class Atelier extends Model
      */
     public function isShopAccessActive(): bool
     {
+        if (config('app.desktop_mode')) {
+            if (config('desktop_license.bypass') || env('WEBINOO_LICENSE_BYPASS') === '1') {
+                return true;
+            }
+            try {
+                $guard = app(\App\Services\DesktopLicense\DesktopLicenseLocalGuard::class);
+                $check = $guard->check();
+                return !empty($check['ok']);
+            } catch (\Throwable $e) {
+                return false;
+            }
+        }
+
         if ($this->shop_access_suspended) {
             return false;
         }
@@ -107,6 +120,38 @@ class Atelier extends Model
      */
     public function accessStatusForApi(): array
     {
+        if (config('app.desktop_mode')) {
+            $guardOk = true;
+            $expiresAt = null;
+            $daysRemaining = null;
+            try {
+                $check = app(\App\Services\DesktopLicense\DesktopLicenseLocalGuard::class)->check();
+                $guardOk = !empty($check['ok']);
+                if (!empty($check['payload']['expires_at'])) {
+                    $expiresAt = \Carbon\Carbon::parse($check['payload']['expires_at']);
+                    $daysRemaining = max(0, (int) now()->diffInDays($expiresAt, false));
+                }
+            } catch (\Throwable $e) {
+                $guardOk = false;
+            }
+
+            return [
+                'shop_access_starts_at' => $this->shop_access_starts_at?->format('Y-m-d H:i:s'),
+                'shop_access_ends_at' => $expiresAt?->format('Y-m-d H:i:s'),
+                'shop_access_suspended' => false,
+                'shop_access_active' => $guardOk,
+                'shop_access_days_remaining' => $daysRemaining,
+                'subscription_status' => $guardOk ? self::SUBSCRIPTION_PAID : self::SUBSCRIPTION_TRIAL,
+                'subscription_status_label' => self::subscriptionStatusLabel(
+                    $guardOk ? self::SUBSCRIPTION_PAID : self::SUBSCRIPTION_TRIAL
+                ),
+                'is_paid_plan' => $guardOk,
+                'paid_plan_activated_at' => $this->paid_plan_activated_at?->format('Y-m-d H:i:s') ?? now()->format('Y-m-d H:i:s'),
+                'desktop_mode' => true,
+                'desktop_license_ok' => $guardOk,
+            ];
+        }
+
         $ends = $this->shop_access_ends_at;
         $daysRemaining = null;
         if ($ends !== null) {

@@ -6,28 +6,25 @@ use Illuminate\Support\Facades\Schema;
 
 class AddPasswordToCustomersTable extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up()
     {
+        if (! Schema::hasTable('customers') || Schema::hasColumn('customers', 'password')) {
+            return;
+        }
+
         Schema::table('customers', function (Blueprint $table) {
             $table->string('password')->after('phone');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down()
     {
+        if (! Schema::hasTable('customers') || ! Schema::hasColumn('customers', 'password')) {
+            return;
+        }
+
         Schema::table('customers', function (Blueprint $table) {
             $table->dropColumn('password');
         });
     }
 }
-

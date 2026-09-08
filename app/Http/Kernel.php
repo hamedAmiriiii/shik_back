@@ -49,6 +49,7 @@ class Kernel extends HttpKernel
             'throttle:api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
             'shop.staff.permission',
+            'desktop.license',
         ],
     ];
 
@@ -73,5 +74,6 @@ class Kernel extends HttpKernel
         'shop.from.route' => \App\Http\Middleware\BindShopFromRoute::class,
         'shop.staff.permission' => \App\Http\Middleware\EnforceShopStaffPermission::class,
         'oil.project' => \App\Http\Middleware\EnsureOilProject::class,
+        'desktop.license' => \App\Http\Middleware\EnsureDesktopLicense::class,
     ];
 }

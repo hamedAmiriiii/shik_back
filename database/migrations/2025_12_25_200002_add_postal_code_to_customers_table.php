@@ -6,28 +6,25 @@ use Illuminate\Support\Facades\Schema;
 
 class AddPostalCodeToCustomersTable extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up()
     {
+        if (! Schema::hasTable('customers') || Schema::hasColumn('customers', 'postal_code')) {
+            return;
+        }
+
         Schema::table('customers', function (Blueprint $table) {
             $table->string('postal_code', 10)->nullable()->after('address');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down()
     {
+        if (! Schema::hasTable('customers') || ! Schema::hasColumn('customers', 'postal_code')) {
+            return;
+        }
+
         Schema::table('customers', function (Blueprint $table) {
             $table->dropColumn('postal_code');
         });
     }
 }
-

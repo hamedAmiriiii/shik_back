@@ -20,5 +20,9 @@ class DatabaseSeeder extends Seeder
             ->count(sizeof(User::USER_TYPE))
             ->sequence(fn($sequence) => ['name' => User::USER_TYPE[$sequence->index + 1]])
             ->create();
+
+        if (config('app.desktop_mode')) {
+            $this->call(DesktopSeeder::class);
+        }
     }
 }

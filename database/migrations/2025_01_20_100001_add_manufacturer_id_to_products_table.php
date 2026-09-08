@@ -6,29 +6,29 @@ use Illuminate\Support\Facades\Schema;
 
 class AddManufacturerIdToProductsTable extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up()
     {
+        if (! Schema::hasTable('products') || Schema::hasColumn('products', 'manufacturer_id')) {
+            return;
+        }
+        if (! Schema::hasTable('manufacturers')) {
+            return;
+        }
+
         Schema::table('products', function (Blueprint $table) {
             $table->foreignId('manufacturer_id')->nullable()->after('name')->constrained('manufacturers')->onDelete('set null');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down()
     {
+        if (! Schema::hasTable('products') || ! Schema::hasColumn('products', 'manufacturer_id')) {
+            return;
+        }
+
         Schema::table('products', function (Blueprint $table) {
             $table->dropForeign(['manufacturer_id']);
             $table->dropColumn('manufacturer_id');
         });
     }
 }
-

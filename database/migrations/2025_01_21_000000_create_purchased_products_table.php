@@ -6,13 +6,12 @@ use Illuminate\Support\Facades\Schema;
 
 class CreatePurchasedProductsTable extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up()
     {
+        if (Schema::hasTable('purchased_products')) {
+            return;
+        }
+
         Schema::create('purchased_products', function (Blueprint $table) {
             $table->id();
             $table->foreignId('product_id')->constrained()->onDelete('cascade');
@@ -22,11 +21,6 @@ class CreatePurchasedProductsTable extends Migration
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down()
     {
         Schema::dropIfExists('purchased_products');

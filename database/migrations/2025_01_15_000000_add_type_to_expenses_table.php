@@ -6,28 +6,25 @@ use Illuminate\Support\Facades\Schema;
 
 class AddTypeToExpensesTable extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up()
     {
+        if (! Schema::hasTable('expenses') || Schema::hasColumn('expenses', 'type')) {
+            return;
+        }
+
         Schema::table('expenses', function (Blueprint $table) {
             $table->enum('type', ['جاری', 'سرمایه'])->default('جاری')->after('title');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down()
     {
+        if (! Schema::hasTable('expenses') || ! Schema::hasColumn('expenses', 'type')) {
+            return;
+        }
+
         Schema::table('expenses', function (Blueprint $table) {
             $table->dropColumn('type');
         });
     }
 }
-

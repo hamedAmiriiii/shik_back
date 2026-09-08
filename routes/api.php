@@ -19,6 +19,11 @@ use App\Http\Controllers\CategoryController;
 Route::match(['get', 'post'], 'accounting/flow-self-test', [\App\Http\Controllers\AccountingVoucherController::class, 'flowSelfTest'])
     ->middleware('throttle:3,1');
 
+Route::prefix('desktop-license')->name('desktop-license.')->middleware('throttle:30,1')->group(function () {
+    Route::post('activate', [\App\Http\Controllers\DesktopLicenseController::class, 'activate']);
+    Route::post('validate', [\App\Http\Controllers\DesktopLicenseController::class, 'validateLicense']);
+});
+
 Route::prefix('referrals')->name('referrals.')->group(function () {
     Route::get('dashboard/{token}', [\App\Http\Controllers\PublicReferralController::class, 'dashboard'])
         ->where('token', '[A-Za-z0-9]+');

@@ -6,28 +6,25 @@ use Illuminate\Support\Facades\Schema;
 
 class AddSalePriceToPurchasedProductsTable extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up()
     {
+        if (! Schema::hasTable('purchased_products') || Schema::hasColumn('purchased_products', 'sale_price')) {
+            return;
+        }
+
         Schema::table('purchased_products', function (Blueprint $table) {
             $table->decimal('sale_price', 15, 2)->after('purchase_price');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down()
     {
+        if (! Schema::hasTable('purchased_products') || ! Schema::hasColumn('purchased_products', 'sale_price')) {
+            return;
+        }
+
         Schema::table('purchased_products', function (Blueprint $table) {
             $table->dropColumn('sale_price');
         });
     }
 }
-

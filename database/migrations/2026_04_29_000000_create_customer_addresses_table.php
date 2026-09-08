@@ -21,15 +21,16 @@ class CreateCustomerAddressesTable extends Migration
             $table->string('last_name');
             $table->string('phone', 11);
             $table->text('address');
-            $table->integer('state_id');
+            $table->unsignedBigInteger('state_id');
             $table->string('state_name')->nullable();
-            $table->integer('city_id');
+            $table->unsignedBigInteger('city_id');
             $table->string('city_name')->nullable();
             $table->string('postal_code', 10);
             $table->boolean('is_default')->default(false);
             $table->timestamps();
             
             $table->foreign('customer_id')->references('id')->on('customers')->onDelete('cascade');
+            // states/cities.id are bigIncrements; keep unsignedBigInteger to avoid errno 150
             $table->foreign('state_id')->references('id')->on('states')->onDelete('cascade');
             $table->foreign('city_id')->references('id')->on('cities')->onDelete('cascade');
             

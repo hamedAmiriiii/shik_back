@@ -30,6 +30,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Desktop Mode (local Electron / offline install)
+    |--------------------------------------------------------------------------
+    |
+    | When true, shop subscription / trial locks are bypassed so the local
+    | install keeps working offline without cloud billing.
+    |
+    */
+
+    'desktop_mode' => filter_var(env('DESKTOP_MODE', false), FILTER_VALIDATE_BOOLEAN)
+        || env('APP_ENV') === 'desktop',
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Debug Mode
     |--------------------------------------------------------------------------
     |
