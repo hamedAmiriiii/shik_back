@@ -3,7 +3,7 @@
  * فرمول‌ها با AccountingSalePoster / DocumentPoster / ReturnPoster / ReportService هم‌خوان است.
  */
 const NATURE = {
-  '11101': 'debit', '11111': 'debit', '11112': 'debit', '11120': 'debit',
+  '11101': 'debit', '11102': 'debit', '11111': 'debit', '11112': 'debit', '11120': 'debit',
   '11201': 'debit', '11301': 'debit', '11302': 'debit', '11303': 'debit',
   '11401': 'debit', '12101': 'debit',
   '21101': 'credit', '21201': 'credit',
@@ -13,7 +13,7 @@ const NATURE = {
   '611': 'debit', '612': 'debit', '613': 'debit',
 };
 const KIND = {
-  '11101': 'asset', '11111': 'asset', '11112': 'asset', '11120': 'asset',
+  '11101': 'asset', '11102': 'asset', '11111': 'asset', '11112': 'asset', '11120': 'asset',
   '11201': 'asset', '11301': 'asset', '11302': 'asset', '11303': 'asset',
   '11401': 'asset', '12101': 'asset',
   '21101': 'liability', '21201': 'liability',
@@ -103,20 +103,23 @@ function saleLines(p) {
   let sales = round2(p.sales);
   const discount = round2(p.discount || 0);
   const credit = round2(p.credit || 0);
-  let till = round2((p.cash || 0) + (p.card || 0));
+  let cash = round2(p.cash || 0);
+  let card = round2(p.card || 0);
   const cheque = p.kind === 'cheque' ? round2(p.cheque || 0) : 0;
   let ar = 0;
   if (p.kind === 'debt' || p.kind === 'installment') {
-    ar = round2(Math.max(0, sales - discount - credit - till - cheque));
+    ar = round2(Math.max(0, sales - discount - credit - cash - card - cheque));
   }
-  const left = round2(till + cheque + ar + discount + credit);
+  const left = round2(cash + card + cheque + ar + discount + credit);
   const diff = round2(sales - left);
   if (Math.abs(diff) >= 0.01) {
     if (p.kind === 'debt' || p.kind === 'installment') ar = round2(Math.max(0, ar + diff));
-    else till = round2(Math.max(0, till + diff));
+    else if (cash >= 0.01 || card < 0.01) cash = round2(Math.max(0, cash + diff));
+    else card = round2(Math.max(0, card + diff));
   }
   const lines = [];
-  push(lines, '11101', till, 0, 'نقد/کارت');
+  push(lines, '11101', cash, 0, 'نقد صندوق');
+  push(lines, '11102', card, 0, 'کارتخوان در راه');
   push(lines, '11401', cheque, 0, 'چک');
   push(lines, '11201', ar, 0, 'دریافتنی');
   push(lines, '412', discount, 0, 'تخفیف');
@@ -522,7 +525,8 @@ check('فروش نمونه نقشه راه (تخفیف+اعتبار+چک)', () =
   const lines = vouchers.find((v) => v.sourceType === 'purchase' && v.sourceId === 99).lines;
   const got = Object.fromEntries(lines.map((l) => [l.code, { d: l.debit, c: l.credit }]));
   const expect = {
-    '11101': { d: 70000, c: 0 },
+    '11101': { d: 30000, c: 0 },
+    '11102': { d: 40000, c: 0 },
     '11401': { d: 35000, c: 0 },
     '412': { d: 10000, c: 0 },
     '613': { d: 5000, c: 0 },

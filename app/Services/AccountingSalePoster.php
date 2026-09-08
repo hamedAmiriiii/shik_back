@@ -108,13 +108,17 @@ class AccountingSalePoster
     public static function postDebtSettle(Purchase $purchase): ?AccountingVoucher
     {
         $atelierId = (int) $purchase->atelier_id;
-        $amount = round(
-            (float) $purchase->debt_settled_card_amount + (float) $purchase->debt_settled_cash_amount,
-            2
-        );
+        $cash = round((float) $purchase->debt_settled_cash_amount, 2);
+        $card = round((float) $purchase->debt_settled_card_amount, 2);
+        $amount = round($cash + $card, 2);
         if ($atelierId <= 0 || $amount < 0.01 || ! AccountingLedger::ready()) {
             return null;
         }
+
+        $lines = [];
+        AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL), $cash, 0, 'وصول نقد نسیه');
+        AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_POS), $card, 0, 'وصول کارت نسیه');
+        AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AR), 0, $amount, 'بستن طلب مشتری');
 
         return AccountingVoucherService::post(
             $atelierId,
@@ -122,10 +126,7 @@ class AccountingSalePoster
             'تسویه نسیه فروش #'.$purchase->id,
             AccountingVoucher::SOURCE_DEBT_SETTLE,
             (int) $purchase->id,
-            [
-                ['account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL), 'debit' => $amount, 'credit' => 0],
-                ['account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AR), 'debit' => 0, 'credit' => $amount],
-            ]
+            $lines
         );
     }
 
@@ -184,25 +185,29 @@ class AccountingSalePoster
 
         $discount = round(ShopSalesReportService::discountGivenForPurchase($purchase), 2);
         $credit = round((float) $purchase->credit_used, 2);
-        $till = round((float) $purchase->cash_amount + (float) $purchase->card_amount, 2);
+        $cash = round((float) $purchase->cash_amount, 2);
+        $card = round((float) $purchase->card_amount, 2);
         $cheque = $purchase->isCheque() ? round($purchase->chequeAmount(), 2) : 0.0;
         $ar = 0.0;
         if ($purchase->isDebt() || $purchase->isInstallment()) {
-            $ar = round(max(0, $sales - $discount - $credit - $till - $cheque), 2);
+            $ar = round(max(0, $sales - $discount - $credit - $cash - $card - $cheque), 2);
         }
 
-        $left = round($till + $cheque + $ar + $discount + $credit, 2);
+        $left = round($cash + $card + $cheque + $ar + $discount + $credit, 2);
         $diff = round($sales - $left, 2);
         if (abs($diff) >= 0.01) {
             if ($purchase->isDebt() || $purchase->isInstallment()) {
                 $ar = round(max(0, $ar + $diff), 2);
+            } elseif ($cash >= 0.01 || $card < 0.01) {
+                $cash = round(max(0, $cash + $diff), 2);
             } else {
-                $till = round(max(0, $till + $diff), 2);
+                $card = round(max(0, $card + $diff), 2);
             }
         }
 
         $lines = [];
-        self::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL), $till, 0, 'نقد/کارت');
+        self::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL), $cash, 0, 'نقد صندوق');
+        self::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_POS), $card, 0, 'کارتخوان در راه');
         self::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_CHEQUE_RECEIVABLE), $cheque, 0, 'چک دریافتنی');
         self::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AR), $ar, 0, 'حساب دریافتنی');
         self::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_DISCOUNT), $discount, 0, 'تخفیف');

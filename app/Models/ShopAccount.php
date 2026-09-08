@@ -21,7 +21,7 @@ class ShopAccount extends Model
     /** تنخواه — فقط از حساب‌های اصلی شارژ می‌شود */
     public const TYPE_PETTY_CASH = 'petty_cash';
 
-    /** صندوق نقد فروش — همان وجوه در راه (۱۱۱۰۱) */
+    /** صندوق نقد فروش — فقط پول نقد داخل کشو (۱۱۱۰۱)، نه کارت */
     public const TYPE_TILL = 'till';
 
     public const LEGACY_TILL = 'till';
@@ -143,7 +143,7 @@ class ShopAccount extends Model
     }
 
     /**
-     * صندوق نقد فروشگاه — برای پرداخت فاکتور و هزینه از پول نقد همان روز.
+     * صندوق نقد فروشگاه — برای پرداخت فاکتور و هزینه فقط از پول نقد همان روز (نه کارت).
      */
     public static function ensureTillForAtelier(int $atelierId): ?self
     {

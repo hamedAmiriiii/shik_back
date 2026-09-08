@@ -271,6 +271,21 @@
 
   async function bootRoute() {
     const r = state.route;
+    const pay = window.AtelierZarinpal && window.AtelierZarinpal.readReturn();
+    if (pay) {
+      if (pay.ok) {
+        alert(pay.type === "shop_plan" ? "اکانت با موفقیت تمدید شد." : "پرداخت موفق بود. موجودی پیامک شارژ شد.");
+      } else {
+        alert(pay.message || "پرداخت انجام نشد.");
+      }
+      if (typeof history !== "undefined" && history.replaceState) {
+        history.replaceState({}, "", location.pathname + location.hash);
+      }
+      if (pay.ok) {
+        state.smsTab = "quota";
+        if (state.token) go("#/sms");
+      }
+    }
     if (!state.token) {
       if (r.name !== "login") go("#/login");
       else render();
@@ -890,17 +905,19 @@
         const label = pack
           ? (pack.name + " — " + fmtKm(pack.sms_count) + " پیامک — " + fmtToman(pack.price_toman))
           : "این بسته";
-        if (!confirm("درخواست خرید «" + label + "» ثبت شود؟ بعد از تأیید ادمین موجودی شارژ می‌شود.")) {
+        if (!confirm("پرداخت «" + label + "» از طریق زرین‌پال انجام شود؟")) {
           return;
         }
-        state.busy = "در حال ثبت درخواست…";
+        state.busy = "در حال اتصال به درگاه…";
         render();
         try {
-          const data = await api("/sms-packages/" + id + "/purchase", { method: "POST" });
-          state.busy = "";
-          state.smsTab = "quota";
-          alert(data.message || "درخواست ثبت شد.");
-          await loadSmsHub();
+          await window.AtelierZarinpal.start({
+            apiBase: API,
+            token: state.token,
+            type: "sms_package",
+            itemId: id,
+            returnUrl: location.href.split("#")[0],
+          });
         } catch (err) {
           state.busy = "";
           state.error = err.message;

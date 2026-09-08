@@ -21,6 +21,7 @@
         };
     </script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="{{ asset('js/atelier-zarinpal.js') }}?v={{ filemtime(public_path('js/atelier-zarinpal.js')) }}"></script>
     <script src="{{ asset('oil/app.js') }}?v={{ filemtime(public_path('oil/app.js')) }}"></script>
 </body>
 </html>

@@ -210,23 +210,36 @@ class CustomerController extends Controller
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
 
-       // دریافت لیست شماره تلفن‌های مشتریان همان فروشگاه
-       $select = ['user_shiksho.phone'];
-       if (Schema::hasColumn('user_shiksho', 'name')) {
-           $select[] = 'user_shiksho.name';
-       }
+        $select = [
+            'user_shiksho.phone',
+            DB::raw('COALESCE(pc.total_purchases, 0) as total_purchases'),
+        ];
+        if (Schema::hasColumn('user_shiksho', 'name')) {
+            $select[] = 'user_shiksho.name';
+        }
 
-       $query = DB::table('user_shiksho')
-       ->select($select)
-       ->where('user_shiksho.atelier_id', $atelierId)
-      ;
+        $purchaseCounts = DB::table('purchases')
+            ->select('phone', DB::raw('COUNT(id) as total_purchases'))
+            ->where('atelier_id', $atelierId)
+            ->whereNotNull('phone')
+            ->where('phone', '!=', '')
+            ->groupBy('phone');
 
-   $customers = $query->get()->map(function($item) {
-       return [
-           'phone' => $item->phone,
-           'name' => $item->name ?? null,
-       ];
-   })->values();
+        $customers = DB::table('user_shiksho')
+            ->leftJoinSub($purchaseCounts, 'pc', function ($join) {
+                $join->on('pc.phone', '=', 'user_shiksho.phone');
+            })
+            ->select($select)
+            ->where('user_shiksho.atelier_id', $atelierId)
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'phone' => $item->phone,
+                    'name' => $item->name ?? null,
+                    'total_purchases' => (int) ($item->total_purchases ?? 0),
+                ];
+            })
+            ->values();
 
         return response([
             'customers' => $customers

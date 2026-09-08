@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\AccountingAccount;
 use App\Models\DailyShopReconciliationAccountDeposit;
 use App\Models\DocumentPayment;
 use App\Models\Expense;
@@ -105,7 +104,8 @@ class ShopAccountBalanceService
     }
 
     /**
-     * موجودی صندوق نقد = مانده دفتر ۱۱۱۰۱ (فروش نقد/کارت − واریز تطبیق − پرداخت از صندوق).
+     * موجودی صندوق نقد = مانده دفتر ۱۱۱۰۱ (فقط فروش/وصول نقد − واریز نقد تطبیق − پرداخت از صندوق).
+     * مبلغ کارت در ۱۱۱۰۲ می‌ماند تا به حساب فروشگاه واریز شود.
      *
      * @param  array<int, array<string, float>>  $result
      */
@@ -128,22 +128,7 @@ class ShopAccountBalanceService
             return;
         }
 
-        $tillAccountId = AccountingAccount::query()
-            ->forAtelier($atelierId)
-            ->where('code', ChartOfAccountsSeeder::CODE_TILL)
-            ->value('id');
-        if (! $tillAccountId) {
-            return;
-        }
-
-        $row = DB::table('accounting_lines as l')
-            ->join('accounting_vouchers as v', 'v.id', '=', 'l.voucher_id')
-            ->where('v.atelier_id', $atelierId)
-            ->whereIn('v.status', ['posted', 'reversed'])
-            ->where('l.account_id', $tillAccountId)
-            ->selectRaw('COALESCE(SUM(l.debit), 0) as d, COALESCE(SUM(l.credit), 0) as c')
-            ->first();
-        $balance = round((float) ($row->d ?? 0) - (float) ($row->c ?? 0), 2);
+        $balance = AccountingLedger::netDebit($atelierId, ChartOfAccountsSeeder::CODE_TILL);
         foreach ($tillIds as $id) {
             $result[$id]['balance'] = $balance;
         }

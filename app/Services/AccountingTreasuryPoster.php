@@ -55,26 +55,49 @@ class AccountingTreasuryPoster
                 : Carbon::now('Asia/Tehran')->toDateString();
         }
 
+        $credits = [];
+        $posBalance = max(0, AccountingLedger::netDebit($atelierId, ChartOfAccountsSeeder::CODE_POS));
+        $fromPos = round(min($amount, $posBalance), 2);
+        $fromTill = round($amount - $fromPos, 2);
+        if ($fromPos >= 0.01) {
+            $credits[] = [
+                'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_POS),
+                'debit' => 0,
+                'credit' => $fromPos,
+                'description' => 'واریز کارتخوان به حساب',
+            ];
+        }
+        if ($fromTill >= 0.01) {
+            $credits[] = [
+                'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL),
+                'debit' => 0,
+                'credit' => $fromTill,
+                'description' => 'خروج نقد از صندوق',
+            ];
+        }
+        if ($credits === []) {
+            $credits[] = [
+                'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL),
+                'debit' => 0,
+                'credit' => $amount,
+                'description' => 'خروج از صندوق فروش',
+            ];
+        }
+
         return AccountingVoucherService::post(
             $atelierId,
             $voucherDate,
             'واریز تطبیق روزانه به حساب '.$shopAccountId,
             AccountingVoucher::SOURCE_RECON_DEPOSIT,
             $sourceId,
-            [
+            array_merge([
                 [
                     'account_id' => AccountingLedger::shopCashAccountId($atelierId, $shopAccountId),
                     'debit' => $amount,
                     'credit' => 0,
                     'description' => 'واریز به حساب فروشگاه',
                 ],
-                [
-                    'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL),
-                    'debit' => 0,
-                    'credit' => $amount,
-                    'description' => 'خروج از صندوق فروش',
-                ],
-            ]
+            ], $credits)
         );
     }
 

@@ -10,6 +10,9 @@ class ChartOfAccountsSeeder
 {
     public const CODE_TILL = '11101';
 
+    /** کارتخوان / کارت در راه — تا واریز به حساب فروشگاه قابل خرج از صندوق نیست */
+    public const CODE_POS = '11102';
+
     public const CODE_ACCOUNT_1 = '11111';
 
     public const CODE_ACCOUNT_2 = '11112';
@@ -69,7 +72,8 @@ class ChartOfAccountsSeeder
             ['code' => '11', 'parent' => '1', 'name' => 'دارایی جاری', 'level' => $k, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '12', 'parent' => '1', 'name' => 'دارایی غیرجاری', 'level' => $k, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '111', 'parent' => '11', 'name' => 'موجودی نقد و بانک', 'level' => $m, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
-            ['code' => '11101', 'parent' => '111', 'name' => 'صندوق فروش (وجوه در راه)', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
+            ['code' => '11101', 'parent' => '111', 'name' => 'صندوق نقد', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
+            ['code' => '11102', 'parent' => '111', 'name' => 'کارتخوان (در راه)', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '11111', 'parent' => '111', 'name' => 'حساب ۱', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '11112', 'parent' => '111', 'name' => 'حساب ۲', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '11120', 'parent' => '111', 'name' => 'تنخواه', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
@@ -255,6 +259,7 @@ class ChartOfAccountsSeeder
         $till->linked_type = AccountingAccount::LINK_TILL;
         $till->linked_id = null;
         $till->is_system = true;
+        $till->name = 'صندوق نقد';
         $till->save();
     }
 

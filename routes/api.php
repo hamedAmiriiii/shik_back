@@ -33,6 +33,11 @@ Route::name('auth.')->prefix('auth')->group(function () {
     Route::get('atelier', [\App\Http\Controllers\Auth\AtelierController::class, 'index']);
 });
 
+Route::get('payments/zarinpal/callback', [\App\Http\Controllers\GatewayPaymentController::class, 'zarinpalCallback'])
+    ->middleware('throttle:60,1');
+Route::post('payments/zarinpal/callback', [\App\Http\Controllers\GatewayPaymentController::class, 'zarinpalCallback'])
+    ->middleware('throttle:60,1');
+
 Route::prefix('oil')->name('oil.')->group(function () {
     Route::post('login', [\App\Http\Controllers\Oil\OilAuthController::class, 'login']);
     Route::post('register/send-code', [\App\Http\Controllers\Oil\OilAuthController::class, 'sendRegistrationPhoneCode']);
@@ -62,6 +67,10 @@ Route::prefix('oil')->name('oil.')->group(function () {
         Route::get('sms-packages', [\App\Http\Controllers\ShopSmsPackageController::class, 'index']);
         Route::post('sms-packages/{smsPackage}/purchase', [\App\Http\Controllers\ShopSmsPackageController::class, 'purchase']);
         Route::get('sms-package-orders', [\App\Http\Controllers\ShopSmsPackageController::class, 'orders']);
+        Route::get('payments/catalog', [\App\Http\Controllers\GatewayPaymentController::class, 'catalog']);
+        Route::post('payments/start', [\App\Http\Controllers\GatewayPaymentController::class, 'start']);
+        Route::get('payments/{authority}', [\App\Http\Controllers\GatewayPaymentController::class, 'show'])
+            ->where('authority', '[A-Za-z0-9\-]+');
     });
 });
 
@@ -277,6 +286,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     });
     Route::get('sms-package-orders', [\App\Http\Controllers\ShopSmsPackageController::class, 'orders'])
         ->name('sms-package-orders.index');
+
+    Route::get('payments/catalog', [\App\Http\Controllers\GatewayPaymentController::class, 'catalog']);
+    Route::post('payments/start', [\App\Http\Controllers\GatewayPaymentController::class, 'start']);
+    Route::get('payments/{authority}', [\App\Http\Controllers\GatewayPaymentController::class, 'show'])
+        ->where('authority', '[A-Za-z0-9\-]+');
     
     // Manufacturer routes - require authentication (POST/PUT/DELETE)
     Route::post('manufacturers', [\App\Http\Controllers\ManufacturerController::class, 'store']);
@@ -379,6 +393,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('sms-package-orders/{smsPackageOrder}', [\App\Http\Controllers\Admin\SmsPackageOrderController::class, 'show']);
         Route::post('sms-package-orders/{smsPackageOrder}/approve', [\App\Http\Controllers\Admin\SmsPackageOrderController::class, 'approve']);
         Route::post('sms-package-orders/{smsPackageOrder}/reject', [\App\Http\Controllers\Admin\SmsPackageOrderController::class, 'reject']);
+
+        Route::get('shop-plans', [\App\Http\Controllers\Admin\ShopPlanController::class, 'index']);
+        Route::post('shop-plans', [\App\Http\Controllers\Admin\ShopPlanController::class, 'store']);
+        Route::put('shop-plans/{shopPlan}', [\App\Http\Controllers\Admin\ShopPlanController::class, 'update']);
 
         Route::resource("cameraman", \App\Http\Controllers\Admin\CameramanController::class);
         Route::post("/cameraman/confirm/{cameraman}", [\App\Http\Controllers\Admin\CameramanController::class, "confirm"]);

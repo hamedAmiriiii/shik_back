@@ -6,6 +6,8 @@ use App\Models\AccountingAccount;
 use App\Models\AccountingVoucher;
 use App\Models\ShopAccount;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
 class AccountingLedger
@@ -62,6 +64,32 @@ class AccountingLedger
             ->value('id');
 
         return $id ? (int) $id : null;
+    }
+
+    /** مانده بدهکار خالص یک حساب تفصیلی (بدهکار − بستانکار). */
+    public static function netDebit(int $atelierId, string $code): float
+    {
+        if ($atelierId <= 0 || ! self::ready() || ! Schema::hasTable('accounting_lines')) {
+            return 0.0;
+        }
+
+        $accountId = AccountingAccount::query()
+            ->forAtelier($atelierId)
+            ->where('code', $code)
+            ->value('id');
+        if (! $accountId) {
+            return 0.0;
+        }
+
+        $row = DB::table('accounting_lines as l')
+            ->join('accounting_vouchers as v', 'v.id', '=', 'l.voucher_id')
+            ->where('v.atelier_id', $atelierId)
+            ->whereIn('v.status', ['posted', 'reversed'])
+            ->where('l.account_id', $accountId)
+            ->selectRaw('COALESCE(SUM(l.debit), 0) as d, COALESCE(SUM(l.credit), 0) as c')
+            ->first();
+
+        return round((float) ($row->d ?? 0) - (float) ($row->c ?? 0), 2);
     }
 
     public static function eventDate($value): string

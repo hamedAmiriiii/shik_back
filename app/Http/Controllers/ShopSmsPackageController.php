@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\SmsPackage;
 use App\Models\SmsPackageOrder;
 use App\Services\ShopSmsQuotaService;
-use App\Services\SmsPackageOrderService;
 use Illuminate\Http\Request;
 
 class ShopSmsPackageController extends Controller
@@ -38,11 +37,28 @@ class ShopSmsPackageController extends Controller
         $user = $this->requireStaffShopUser($request);
         $atelierId = $this->shopAtelierIdOrAbort($request);
 
-        $order = SmsPackageOrderService::createOrder($atelierId, $smsPackage, $user->id);
+        $fields = $request->validate([
+            'return_url' => 'nullable|string|max:1024',
+        ]);
+
+        try {
+            $payload = app(\App\Services\GatewayPaymentService::class)->start(
+                $atelierId,
+                (int) $user->id,
+                \App\Models\GatewayPayment::TYPE_SMS_PACKAGE,
+                (int) $smsPackage->id,
+                $fields['return_url'] ?? null,
+                $user->phone ?? null
+            );
+        } catch (\RuntimeException $e) {
+            return response(['message' => $e->getMessage()], 422);
+        }
 
         return response([
-            'message' => 'درخواست خرید با موفقیت ثبت شد. پس از تأیید ادمین، اعتبار پیامک شما شارژ می‌شود.',
-            'order' => $this->formatOrder($order),
+            'message' => 'به درگاه زرین‌پال هدایت شوید.',
+            'payment' => $payload,
+            'payment_url' => $payload['payment_url'],
+            'authority' => $payload['authority'],
         ], 201);
     }
 
