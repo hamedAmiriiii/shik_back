@@ -31,6 +31,8 @@ class Purchase extends Model
         'installment_amount',
         'atelier_id',
         'client_id',
+        'daily_ticket_number',
+        'daily_ticket_date',
         'oil_visit_id',
         'shop_table_id',
         'table_label',
@@ -48,6 +50,8 @@ class Purchase extends Model
         'debt_settled_card_amount' => 'decimal:2',
         'debt_settled_cash_amount' => 'decimal:2',
         'installment_amount' => 'decimal:2',
+        'daily_ticket_number' => 'integer',
+        'daily_ticket_date' => 'date',
     ];
 
     public function getCreatedAtAttribute($value): string

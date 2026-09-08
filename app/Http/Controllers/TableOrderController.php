@@ -233,7 +233,7 @@ class TableOrderController extends Controller
 
         $count = (clone $base)->count();
         $withReceipt = (clone $base)->whereNotNull('receipt_path')->count();
-        $latest = (clone $base)->orderByDesc('id')->first(['id', 'created_at', 'updated_at']);
+        $latest = (clone $base)->with('shopTable')->orderByDesc('id')->first();
 
         $byMethod = (clone $base)
             ->selectRaw('payment_method, COUNT(*) as total')
@@ -259,6 +259,9 @@ class TableOrderController extends Controller
             'with_receipt' => $withReceipt,
             'latest_id' => $latest ? (int) $latest->id : null,
             'latest_at' => $latest ? $latest->updated_at : null,
+            'latest_label' => $latest
+                ? ($latest->table_label ?: optional($latest->shopTable)->display_name)
+                : null,
             'by_payment_method' => [
                 TableOrder::METHOD_ONLINE => (int) ($byMethod[TableOrder::METHOD_ONLINE] ?? 0),
                 TableOrder::METHOD_CARD_TO_CARD => (int) ($byMethod[TableOrder::METHOD_CARD_TO_CARD] ?? 0),

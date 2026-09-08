@@ -88,6 +88,7 @@ class TableOrderCheckoutService
                 'is_debt_settled' => false,
                 'debt_settlement_note' => $request->input('note', $order->note),
             ]);
+            \App\Services\DailyTicketNumberService::assign($purchase);
             CustomerCreditExpenseService::recordCreditUsed($purchase);
 
             foreach ($order->items as $line) {

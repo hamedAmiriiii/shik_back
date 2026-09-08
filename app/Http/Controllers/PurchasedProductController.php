@@ -151,6 +151,8 @@ class PurchasedProductController extends Controller
                 : 'چکی';
             $purchaseData['cheque_id'] = $purchase->cheque_id;
         }
+        $purchaseData['daily_ticket_number'] = $purchase?->daily_ticket_number;
+        $purchaseData['dailyTicketNumber'] = $purchase?->daily_ticket_number;
     }
     unset($purchaseData);
 
@@ -522,6 +524,7 @@ class PurchasedProductController extends Controller
             } else {
                 $purchasePayload['client_id'] = $clientId;
                 $purchase = Purchase::create($purchasePayload);
+                \App\Services\DailyTicketNumberService::assign($purchase);
             }
 
             if ($paymentType === 'cheque' && $linkedCheque) {
@@ -672,6 +675,8 @@ class PurchasedProductController extends Controller
 
         $payload = $purchase->toArray();
         $payload['id'] = $purchase->id;
+        $payload['daily_ticket_number'] = $purchase->daily_ticket_number;
+        $payload['dailyTicketNumber'] = $purchase->daily_ticket_number;
         $payload['already_exists'] = $alreadyExists;
         $payload['replaced'] = $replaced;
 

@@ -402,6 +402,7 @@ class CartController extends Controller
                 'credit_earned' => $creditEarned,
                 'atelier_id' => $atelierId,
             ]);
+            \App\Services\DailyTicketNumberService::assign($purchase);
             \App\Services\CustomerCreditExpenseService::recordCreditUsed($purchase);
 
             // ذخیره محصولات خریداری شده

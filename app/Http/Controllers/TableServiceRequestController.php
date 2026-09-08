@@ -204,12 +204,13 @@ class TableServiceRequestController extends Controller
             ->whereIn('status', [TableServiceRequest::STATUS_PENDING, TableServiceRequest::STATUS_SCHEDULED]);
 
         $count = (clone $base)->count();
-        $latest = (clone $base)->orderByDesc('id')->first(['id', 'created_at']);
+        $latest = (clone $base)->with('shopTable')->orderByDesc('id')->first();
 
         return response()->json([
             'count' => $count,
             'latest_id' => $latest ? (int) $latest->id : null,
             'latest_at' => $latest ? $latest->created_at : null,
+            'latest_label' => $latest && $latest->shopTable ? $latest->shopTable->display_name : null,
         ]);
     }
 

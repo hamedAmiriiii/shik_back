@@ -77,6 +77,7 @@ class OilVisitSaleService
         }
 
         $purchase = Purchase::create($payload);
+        \App\Services\DailyTicketNumberService::assign($purchase);
 
         foreach ($lines as $line) {
             $row = [

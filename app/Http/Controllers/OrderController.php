@@ -342,6 +342,7 @@ class OrderController extends Controller
                                 'credit_earned' => $creditEarned,
                                 'atelier_id' => $cart->atelier_id,
                             ]);
+                            \App\Services\DailyTicketNumberService::assign($purchase);
 
                             // ذخیره محصولات خریداری شده
                             foreach ($cart->items as $item) {
