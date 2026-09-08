@@ -33,34 +33,30 @@ class FixSettingsUniqueIndexForMultitenancy extends Migration
             DB::table('settings')->whereNull('atelier_id')->update(['atelier_id' => $defaultAtelierId]);
         }
 
-        $alreadyComposite = collect(DB::select('SHOW INDEX FROM `settings`'))
-            ->pluck('Key_name')
-            ->contains('settings_atelier_id_key_unique');
-
-        if ($alreadyComposite) {
-            $this->ensureSettingsForeignKey();
-
-            return;
-        }
-
         $grouped = collect(DB::select('SHOW INDEX FROM `settings`'))->groupBy('Key_name');
         foreach ($grouped as $indexName => $rows) {
             if ($indexName === 'PRIMARY') {
                 continue;
             }
+            $first = $rows->first();
+            if ((int) ($first->Non_unique ?? 1) === 1) {
+                continue;
+            }
             $cols = collect($rows)->sortBy('Seq_in_index')->pluck('Column_name')->values()->all();
             if ($cols === ['key']) {
-                Schema::table('settings', function (Blueprint $table) use ($indexName) {
-                    $table->dropUnique($indexName);
-                });
-
-                break;
+                DB::statement('ALTER TABLE `settings` DROP INDEX `'.str_replace('`', '', (string) $indexName).'`');
             }
         }
 
-        Schema::table('settings', function (Blueprint $table) {
-            $table->unique(['atelier_id', 'key'], 'settings_atelier_id_key_unique');
-        });
+        $alreadyComposite = collect(DB::select('SHOW INDEX FROM `settings`'))
+            ->pluck('Key_name')
+            ->contains('settings_atelier_id_key_unique');
+
+        if (! $alreadyComposite) {
+            Schema::table('settings', function (Blueprint $table) {
+                $table->unique(['atelier_id', 'key'], 'settings_atelier_id_key_unique');
+            });
+        }
 
         $this->ensureSettingsForeignKey();
     }

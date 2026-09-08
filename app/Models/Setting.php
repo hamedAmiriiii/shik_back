@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Services\ShopLoyaltyCreditTierService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\QueryException;
 
 class Setting extends Model
 {
@@ -55,10 +56,17 @@ class Setting extends Model
         ];
 
         foreach ($defaults as $key => $value) {
-            static::query()->firstOrCreate(
-                ['key' => $key, 'atelier_id' => $atelierId],
-                ['value' => $value]
-            );
+            try {
+                static::query()->firstOrCreate(
+                    ['key' => $key, 'atelier_id' => $atelierId],
+                    ['value' => $value]
+                );
+            } catch (QueryException $e) {
+                // ایندکس قدیمی UNIQUE روی `key` برای فروشگاه دوم insert را رد می‌کند.
+                if (! static::isDuplicateKeyException($e)) {
+                    throw $e;
+                }
+            }
         }
 
         ShopLoyaltyCreditTierService::ensureDefaultsForAtelier($atelierId);
@@ -100,7 +108,40 @@ class Setting extends Model
             $attrs['atelier_id'] = null;
         }
 
-        return self::updateOrCreate($attrs, ['value' => $value]);
+        try {
+            return self::updateOrCreate($attrs, ['value' => $value]);
+        } catch (QueryException $e) {
+            if (! static::isDuplicateKeyException($e)) {
+                throw $e;
+            }
+
+            $row = static::query()
+                ->where('key', $key)
+                ->when(
+                    $attrs['atelier_id'] !== null,
+                    fn ($q) => $q->where('atelier_id', $attrs['atelier_id']),
+                    fn ($q) => $q->whereNull('atelier_id')
+                )
+                ->first();
+
+            if (! $row) {
+                $row = static::query()->where('key', $key)->first();
+            }
+
+            if (! $row) {
+                throw $e;
+            }
+
+            $row->value = $value;
+            $row->save();
+
+            return $row;
+        }
+    }
+
+    private static function isDuplicateKeyException(QueryException $e): bool
+    {
+        return $e->getCode() === '23000' || strpos($e->getMessage(), 'Duplicate entry') !== false;
     }
 
     /**

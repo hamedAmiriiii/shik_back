@@ -397,8 +397,13 @@ class PurchasedProductController extends Controller
         }
 
         // ایجاد سبد خرید (Purchase)
+        $saleAttempts = 4;
+        for ($saleAttempt = 1; $saleAttempt <= $saleAttempts; $saleAttempt++) {
         try {
             DB::beginTransaction();
+            if ($purchaseAtelierId) {
+                \App\Services\AccountingVoucherService::lockAtelier((int) $purchaseAtelierId);
+            }
 
             if ($creditUsed > 0 || $installmentReserve > 0) {
                 $lockedQuery = UserShiksho::where('phone', $phone);
@@ -489,8 +494,13 @@ class PurchasedProductController extends Controller
                 $this->createInstallments($purchase, $installmentCount, $installmentAmount, $finalTotalAmount);
             }
             DB::commit();
+            break;
         } catch (QueryException $e) {
             DB::rollBack();
+            if ($saleAttempt < $saleAttempts && \App\Services\AccountingVoucherService::isDeadlockException($e)) {
+                usleep(50000 * $saleAttempt);
+                continue;
+            }
             if ($clientId !== null && $this->isDuplicateClientIdException($e)) {
                 $existingPurchase = $this->findPurchaseByClientId($purchaseAtelierId, $clientId);
                 if ($existingPurchase) {
@@ -503,6 +513,7 @@ class PurchasedProductController extends Controller
             DB::rollBack();
 
             return response(['error' => $e->getMessage()], 400);
+        }
         }
 
         // اگر شماره تلفن وجود دارد

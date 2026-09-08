@@ -6,6 +6,7 @@ use App\Models\AccountingAccount;
 use App\Models\AccountingLine;
 use App\Models\AccountingVoucher;
 use Carbon\Carbon;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -73,7 +74,7 @@ class AccountingVoucherService
             self::insertLines($voucher, $normalized);
 
             return $voucher->load(['lines.account']);
-        });
+        }, 5);
     }
 
     public static function reverse(AccountingVoucher $voucher, ?string $description = null): AccountingVoucher
@@ -133,7 +134,7 @@ class AccountingVoucherService
             $locked->save();
 
             return $storno->load(['lines.account']);
-        });
+        }, 5);
     }
 
     public static function findPosted(int $atelierId, string $sourceType, int $sourceId): ?AccountingVoucher
@@ -259,11 +260,26 @@ class AccountingVoucherService
         }
     }
 
-    protected static function lockAtelier(int $atelierId): void
+    public static function isDeadlockException(QueryException $e): bool
     {
-        if (Schema::hasTable('ateliers')) {
-            DB::table('ateliers')->where('id', $atelierId)->lockForUpdate()->first();
+        $sqlState = (string) $e->getCode();
+        $message = $e->getMessage();
+
+        return $sqlState === '40001'
+            || (strpos($message, '1213') !== false && stripos($message, 'Deadlock') !== false);
+    }
+
+    /**
+     * قفل ردیف فروشگاه تا شماره سند دو فروش هم‌زمان تکراری نشود.
+     * باید اولِ تراکنش فروش گرفته شود تا ترتیب قفل‌ها ثابت بماند.
+     */
+    public static function lockAtelier(int $atelierId): void
+    {
+        if ($atelierId <= 0 || ! Schema::hasTable('ateliers')) {
+            return;
         }
+
+        DB::table('ateliers')->where('id', $atelierId)->lockForUpdate()->first();
     }
 
     protected static function nextNumber(int $atelierId): int

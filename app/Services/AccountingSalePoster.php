@@ -36,6 +36,10 @@ class AccountingSalePoster
                 $lines
             );
         } catch (RuntimeException $e) {
+            if ($e instanceof \Illuminate\Database\QueryException
+                && AccountingVoucherService::isDeadlockException($e)) {
+                throw $e;
+            }
             Log::error('سند فروش ثبت نشد', [
                 'purchase_id' => $purchase->id,
                 'message' => $e->getMessage(),

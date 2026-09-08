@@ -23,6 +23,9 @@ class TableOrderCheckoutService
     public function pay(TableOrder $tableOrder, Request $request): Purchase
     {
         return DB::transaction(function () use ($tableOrder, $request) {
+            $atelierId = (int) $tableOrder->atelier_id;
+            AccountingVoucherService::lockAtelier($atelierId);
+
             $order = TableOrder::query()->where('id', $tableOrder->id)->lockForUpdate()->first();
             if (! $order || ! $order->isPending()) {
                 abort(response()->json(['message' => 'این سفارش قابل پرداخت نیست.'], 422));
@@ -126,7 +129,7 @@ class TableOrderCheckoutService
             AccountingSalePoster::post($purchase);
 
             return $purchase;
-        });
+        }, 5);
     }
 
     /**
