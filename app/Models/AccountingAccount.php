@@ -68,7 +68,12 @@ class AccountingAccount extends Model
 
     public static function tableReady(): bool
     {
-        return Schema::hasTable('accounting_accounts');
+        static $ready = null;
+        if ($ready === null) {
+            $ready = Schema::hasTable('accounting_accounts');
+        }
+
+        return $ready;
     }
 
     public function parent(): BelongsTo

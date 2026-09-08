@@ -8,6 +8,12 @@ use Illuminate\Support\Facades\Schema;
 
 class ChartOfAccountsSeeder
 {
+    /** @var array<int, true> */
+    protected static $atelierReady = [];
+
+    /** @var array<int, true> */
+    protected static $treeReady = [];
+
     public const CODE_TILL = '11101';
 
     /** کارتخوان / کارت در راه — تا واریز به حساب فروشگاه قابل خرج از صندوق نیست */
@@ -119,18 +125,21 @@ class ChartOfAccountsSeeder
         if ($atelierId <= 0 || ! AccountingAccount::tableReady()) {
             return;
         }
+        if (isset(self::$atelierReady[$atelierId])) {
+            return;
+        }
 
         self::seedTree($atelierId);
         self::linkTill($atelierId);
 
-        if (! Schema::hasTable('shop_accounts')) {
-            return;
+        if (Schema::hasTable('shop_accounts')) {
+            $accounts = ShopAccount::query()->forAtelier($atelierId)->orderBy('id')->get();
+            foreach ($accounts as $account) {
+                self::syncShopAccount($account);
+            }
         }
 
-        $accounts = ShopAccount::query()->forAtelier($atelierId)->orderBy('id')->get();
-        foreach ($accounts as $account) {
-            self::syncShopAccount($account);
-        }
+        self::$atelierReady[$atelierId] = true;
     }
 
     public static function syncShopAccount(ShopAccount $account): ?AccountingAccount
@@ -156,9 +165,12 @@ class ChartOfAccountsSeeder
         }
 
         if ($existing) {
-            $existing->name = $account->name;
-            $existing->is_active = (bool) $account->is_active;
-            $existing->save();
+            $active = (bool) $account->is_active;
+            if ($existing->name !== $account->name || (bool) $existing->is_active !== $active) {
+                $existing->name = $account->name;
+                $existing->is_active = $active;
+                $existing->save();
+            }
 
             return $existing;
         }
@@ -219,31 +231,64 @@ class ChartOfAccountsSeeder
 
     protected static function seedTree(int $atelierId): void
     {
+        if (isset(self::$treeReady[$atelierId])) {
+            return;
+        }
+
         $ids = AccountingAccount::query()
             ->forAtelier($atelierId)
             ->pluck('id', 'code');
 
-        foreach (self::blueprint() as $node) {
+        $blueprint = self::blueprint();
+        $missing = false;
+        foreach ($blueprint as $node) {
+            if (! isset($ids[$node['code']])) {
+                $missing = true;
+                break;
+            }
+        }
+        if (! $missing) {
+            self::$treeReady[$atelierId] = true;
+
+            return;
+        }
+
+        foreach ($blueprint as $node) {
             $parentId = $node['parent'] ? ($ids[$node['parent']] ?? null) : null;
             $row = AccountingAccount::query()->firstOrNew([
                 'atelier_id' => $atelierId,
                 'code' => $node['code'],
             ]);
 
-            $row->parent_id = $parentId;
-            $row->level = $node['level'];
-            $row->nature = $node['nature'];
-            $row->kind = $node['kind'];
-            $row->is_system = true;
+            $dirty = ! $row->exists
+                || (int) $row->parent_id !== (int) $parentId
+                || $row->level !== $node['level']
+                || $row->nature !== $node['nature']
+                || $row->kind !== $node['kind']
+                || ! $row->is_system;
             if (! $row->exists || ! $row->linked_type) {
-                $row->name = $node['name'];
+                if ($row->name !== $node['name']) {
+                    $row->name = $node['name'];
+                    $dirty = true;
+                }
             }
             if (! $row->exists) {
                 $row->is_active = true;
+                $dirty = true;
             }
-            $row->save();
+
+            if ($dirty) {
+                $row->parent_id = $parentId;
+                $row->level = $node['level'];
+                $row->nature = $node['nature'];
+                $row->kind = $node['kind'];
+                $row->is_system = true;
+                $row->save();
+            }
             $ids[$node['code']] = $row->id;
         }
+
+        self::$treeReady[$atelierId] = true;
     }
 
     protected static function linkTill(int $atelierId): void
@@ -253,6 +298,15 @@ class ChartOfAccountsSeeder
             ->where('code', self::CODE_TILL)
             ->first();
         if (! $till) {
+            return;
+        }
+
+        if (
+            $till->linked_type === AccountingAccount::LINK_TILL
+            && $till->linked_id === null
+            && $till->is_system
+            && $till->name === 'صندوق نقد'
+        ) {
             return;
         }
 

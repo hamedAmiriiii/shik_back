@@ -75,7 +75,12 @@ class AccountingVoucher extends Model
 
     public static function tablesReady(): bool
     {
-        return Schema::hasTable('accounting_vouchers') && Schema::hasTable('accounting_lines');
+        static $ready = null;
+        if ($ready === null) {
+            $ready = Schema::hasTable('accounting_vouchers') && Schema::hasTable('accounting_lines');
+        }
+
+        return $ready;
     }
 
     public static function activeSourceKey(string $sourceType, int $sourceId): string

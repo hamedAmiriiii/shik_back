@@ -67,6 +67,11 @@ class Purchase extends Model
         return $this->hasMany(PurchasedProduct::class);
     }
 
+    public function itemReturns()
+    {
+        return $this->hasMany(PurchaseItemReturn::class);
+    }
+
     /**
      * خریدهای متعلق به یک فروشگاه (ستون atelier_id یا استنباط از محصولات خرید).
      */

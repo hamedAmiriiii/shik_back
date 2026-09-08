@@ -12,6 +12,7 @@ use App\Models\CustomerPhone;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
+use App\Services\PurchaseReplaceService;
 use App\Services\ShopPosSaleService;
 use App\Tools\PriceTools;
 use App\Tools\PhoneTools;
@@ -43,8 +44,11 @@ class PurchasedProductController extends Controller
             'purchasedProducts.rawMaterial',
             'installments',
             'cheque',
-        ])
-        ->where('atelier_id', $atelierId)
+        ]);
+    if (Schema::hasTable('purchase_item_returns')) {
+        $query->withCount('itemReturns');
+    }
+    $query->where('atelier_id', $atelierId)
         ->where('total_amount', '>', 0) // فقط خریدهایی که مجموع مبلغشان بیشتر از 0 است
         ->where(function($q) {
             $q->whereNull('cart_id') // فروش فیزیکی
@@ -198,6 +202,7 @@ class PurchasedProductController extends Controller
             'card_amount' => 'nullable|numeric|min:0',
             'cash_amount' => 'nullable|numeric|min:0',
             'payment_settlement' => 'nullable|string|in:card,cash',
+            'replace_purchase_id' => 'nullable|integer',
         ]);
 
         $phone = $request->input('phone');
@@ -208,9 +213,28 @@ class PurchasedProductController extends Controller
 
         $staffAtelierId = $this->staffShopAtelierId($request);
         $posSale = app(ShopPosSaleService::class);
+
+        $replacePurchase = null;
+        if ($request->filled('replace_purchase_id')) {
+            $replacePurchase = Purchase::query()->find($request->input('replace_purchase_id'));
+            if (! $replacePurchase) {
+                return response(['error' => 'فاکتور برای ویرایش یافت نشد.'], 404);
+            }
+            if ($staffAtelierId !== null && (int) $replacePurchase->atelier_id !== (int) $staffAtelierId) {
+                return response(['error' => 'این فاکتور متعلق به فروشگاه شما نیست'], 403);
+            }
+            try {
+                PurchaseReplaceService::assertCanReplace($replacePurchase);
+            } catch (\InvalidArgumentException $e) {
+                return response(['error' => $e->getMessage(), 'message' => $e->getMessage()], 422);
+            }
+        }
+
         try {
             $preparedLines = $posSale->prepareLines($request->input('products'), $staffAtelierId);
-            $posSale->assertStock($preparedLines);
+            if (! $replacePurchase) {
+                $posSale->assertStock($preparedLines);
+            }
         } catch (\RuntimeException $e) {
             $status = strpos($e->getMessage(), 'یافت نشد') !== false ? 404 : 422;
             if (strpos($e->getMessage(), 'موجودی') !== false) {
@@ -220,10 +244,12 @@ class PurchasedProductController extends Controller
             return response(['error' => $e->getMessage()], $status);
         }
 
-        $purchaseAtelierId = $posSale->purchaseAtelierId($preparedLines, $staffAtelierId);
+        $purchaseAtelierId = $replacePurchase && $replacePurchase->atelier_id
+            ? (int) $replacePurchase->atelier_id
+            : $posSale->purchaseAtelierId($preparedLines, $staffAtelierId);
 
         $clientId = $this->normalizeClientId($request->input('client_id'));
-        if ($clientId !== null) {
+        if ($clientId !== null && ! $replacePurchase) {
             $existingPurchase = $this->findPurchaseByClientId($purchaseAtelierId, $clientId);
             if ($existingPurchase) {
                 return $this->storePurchaseResponse($existingPurchase, true);
@@ -355,7 +381,8 @@ class PurchasedProductController extends Controller
             if ($linkedCheque->status !== Cheque::STATUS_PENDING) {
                 return response(['error' => 'فقط چک در انتظار وصول قابل اتصال به فروش است.'], 422);
             }
-            if ($linkedCheque->purchase_id) {
+            if ($linkedCheque->purchase_id
+                && (! $replacePurchase || (int) $linkedCheque->purchase_id !== (int) $replacePurchase->id)) {
                 return response(['error' => 'این چک قبلاً به فروش دیگری وصل شده است.'], 422);
             }
             if ($purchaseAtelierId !== null && (int) $linkedCheque->atelier_id !== (int) $purchaseAtelierId) {
@@ -405,6 +432,36 @@ class PurchasedProductController extends Controller
                 \App\Services\AccountingVoucherService::lockAtelier((int) $purchaseAtelierId);
             }
 
+            if ($replacePurchase) {
+                PurchaseReplaceService::voidContents($replacePurchase);
+                $preparedLines = $posSale->prepareLines($request->input('products'), $staffAtelierId);
+                $posSale->assertStock($preparedLines);
+                $replanned = $this->planPosSaleAmounts(
+                    $request,
+                    $preparedLines,
+                    $purchaseAtelierId,
+                    $phone,
+                    $useCredit,
+                    $paymentType,
+                    $installmentCount,
+                    $chequeId,
+                    $replacePurchase
+                );
+                $productsData = $replanned['productsData'];
+                $originalTotalAmount = $replanned['originalTotalAmount'];
+                $discountAmount = $replanned['discountAmount'];
+                $grossTotal = $replanned['grossTotal'];
+                $creditUsed = $replanned['creditUsed'];
+                $creditEarned = $replanned['creditEarned'];
+                $payableAmount = $replanned['payableAmount'];
+                $installmentAmount = $replanned['installmentAmount'];
+                $finalTotalAmount = $replanned['finalTotalAmount'];
+                $amountPaidNow = $replanned['amountPaidNow'];
+                $installmentReserve = $replanned['installmentReserve'];
+                $settlement = $replanned['settlement'];
+                $linkedCheque = $replanned['linkedCheque'];
+            }
+
             if ($creditUsed > 0 || $installmentReserve > 0) {
                 $lockedQuery = UserShiksho::where('phone', $phone);
                 if ($purchaseAtelierId !== null) {
@@ -442,7 +499,7 @@ class PurchasedProductController extends Controller
                 }
             }
 
-            $purchase = Purchase::create([
+            $purchasePayload = [
                 'phone' => $phone,
                 'total_amount' => $paymentType === 'installment' ? $finalTotalAmount : $grossTotal,
                 'discount_amount' => round((float) $discountAmount, 2),
@@ -456,8 +513,16 @@ class PurchasedProductController extends Controller
                 'installment_count' => $paymentType === 'installment' ? $installmentCount : null,
                 'installment_amount' => $installmentAmount,
                 'atelier_id' => $purchaseAtelierId,
-                'client_id' => $clientId,
-            ]);
+            ];
+
+            if ($replacePurchase) {
+                $replacePurchase->fill($purchasePayload);
+                $replacePurchase->save();
+                $purchase = $replacePurchase;
+            } else {
+                $purchasePayload['client_id'] = $clientId;
+                $purchase = Purchase::create($purchasePayload);
+            }
 
             if ($paymentType === 'cheque' && $linkedCheque) {
                 $linkedCheque->update(['purchase_id' => $purchase->id]);
@@ -516,8 +581,8 @@ class PurchasedProductController extends Controller
         }
         }
 
-        // اگر شماره تلفن وجود دارد
-        if ($phone) {
+        // اگر شماره تلفن وجود دارد (ویرایش فاکتور پیامک جدید نمی‌فرستد)
+        if ($phone && ! $replacePurchase) {
             $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
             
             if ($enableLoyaltyCredit && $creditEarned > 0) {
@@ -548,7 +613,7 @@ class PurchasedProductController extends Controller
             CustomerPhone::createNewPhone($phone);
         }
 
-        return $this->storePurchaseResponse($purchase, false);
+        return $this->storePurchaseResponse($purchase, false, (bool) $replacePurchase);
     }
 
     protected function normalizeClientId($clientId): ?string
@@ -582,7 +647,7 @@ class PurchasedProductController extends Controller
         return $errorCode === 1062 || strpos(strtolower($e->getMessage()), 'duplicate') !== false;
     }
 
-    protected function storePurchaseResponse(Purchase $purchase, bool $alreadyExists)
+    protected function storePurchaseResponse(Purchase $purchase, bool $alreadyExists, bool $replaced = false)
     {
         $purchase->load(['purchasedProducts.product', 'purchasedProducts.producedGood', 'purchasedProducts.rawMaterial']);
         if ($purchase->isInstallment()) {
@@ -608,18 +673,24 @@ class PurchasedProductController extends Controller
         $payload = $purchase->toArray();
         $payload['id'] = $purchase->id;
         $payload['already_exists'] = $alreadyExists;
+        $payload['replaced'] = $replaced;
 
         if ($alreadyExists) {
             $payload['code'] = 'duplicate_client_id';
             $payload['message'] = 'این فاکتور قبلاً با همین client_id ثبت شده است.';
+        } elseif ($replaced) {
+            $payload['message'] = 'فاکتور با سبد جدید جایگزین شد.';
         }
 
-        return response($payload, $alreadyExists ? 200 : 201);
+        return response($payload, ($alreadyExists || $replaced) ? 200 : 201);
     }
 
     public function show(Purchase $purchase)
     {
         $purchase->load(['purchasedProducts.product', 'purchasedProducts.producedGood', 'purchasedProducts.rawMaterial']);
+        if (Schema::hasTable('purchase_item_returns')) {
+            $purchase->loadCount('itemReturns');
+        }
         if ($purchase->isInstallment()) {
             $purchase->load('installments');
         }
@@ -767,6 +838,162 @@ class PurchasedProductController extends Controller
     private function roundToThreeZeroEnding($number)
     {
         return PriceTools::roundSalePrice((float) $number);
+    }
+
+    /**
+     * محاسبه مبالغ فروش پس از آماده‌سازی خطوط (مثلاً بعد از خالی کردن فاکتور قبلی).
+     *
+     * @param  array<int, array<string, mixed>>  $preparedLines
+     * @return array<string, mixed>
+     */
+    protected function planPosSaleAmounts(
+        Request $request,
+        array $preparedLines,
+        ?int $purchaseAtelierId,
+        $phone,
+        $useCredit,
+        $paymentType,
+        $installmentCount,
+        $chequeId,
+        ?Purchase $replacePurchase = null
+    ): array {
+        $originalTotalAmount = 0;
+        $productsData = [];
+        foreach ($preparedLines as $line) {
+            $originalTotalAmount += $line['quantity'] * $line['sale_price'];
+            $productsData[] = [
+                'product_id' => $line['product_id'],
+                'produced_good_id' => $line['produced_good_id'],
+                'raw_material_id' => $line['raw_material_id'],
+                'item_name' => $line['item_name'],
+                'quantity' => $line['quantity'],
+                'sale_price' => $line['sale_price'],
+                'purchase_price' => $line['purchase_price'],
+                'size' => $line['size'] ?? null,
+                'color' => $line['color'] ?? null,
+            ];
+        }
+
+        $discountAmount = $request->input('discount_amount', 0);
+        if ($discountAmount < 0) {
+            $discountAmount = 0;
+        }
+
+        $grossTotal = $originalTotalAmount;
+        $amountAfterDiscount = max(0, $grossTotal - $discountAmount);
+        $creditUsed = 0;
+        if ($phone && $useCredit) {
+            $userShikshoQuery = UserShiksho::where('phone', $phone);
+            if ($purchaseAtelierId !== null) {
+                $userShikshoQuery->where('atelier_id', $purchaseAtelierId);
+            }
+            $userShiksho = $userShikshoQuery->lockForUpdate()->first();
+            if ($userShiksho && $userShiksho->credit > 0) {
+                $creditUsed = PriceTools::roundToman(min($userShiksho->credit, $amountAfterDiscount));
+            }
+        }
+
+        $payableAmount = max(0, PriceTools::roundToman($amountAfterDiscount - $creditUsed));
+        $creditEarned = 0;
+        $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
+        if ($phone && $enableLoyaltyCredit && $discountAmount == 0) {
+            $creditEarned = UserShiksho::calculateCredit($originalTotalAmount, $purchaseAtelierId);
+        }
+
+        $installmentAmount = null;
+        $finalTotalAmount = $grossTotal;
+        if ($paymentType === 'installment' && $installmentCount) {
+            $monthlyInterestRate = (float) \App\Models\Setting::get('installment_monthly_interest_rate', 0);
+            $firstInstallmentAmount = $this->roundToThreeZeroEnding($payableAmount / 3);
+            $remainingAmount = $payableAmount - $firstInstallmentAmount;
+            $remainingMonths = $installmentCount - 1;
+            if ($monthlyInterestRate > 0 && $remainingMonths > 0) {
+                $totalInterest = $remainingAmount * ($monthlyInterestRate / 100) * $remainingMonths;
+                $remainingAmountWithInterest = $remainingAmount + $totalInterest;
+                $finalTotalAmount = $this->roundToThreeZeroEnding($firstInstallmentAmount + $remainingAmountWithInterest);
+                $installmentAmount = $this->roundToThreeZeroEnding($remainingAmountWithInterest / $remainingMonths);
+            } else {
+                $finalTotalAmount = $this->roundToThreeZeroEnding($payableAmount);
+                $installmentAmount = $this->roundToThreeZeroEnding($remainingAmount / $remainingMonths);
+            }
+        }
+
+        $amountPaidNow = $paymentType === 'installment'
+            ? $this->roundToThreeZeroEnding($finalTotalAmount / 3)
+            : ($paymentType === 'debt' ? 0.0 : (float) $payableAmount);
+
+        $installmentReserve = 0.0;
+        if ($paymentType === 'installment' && $installmentCount && $installmentAmount) {
+            $installmentReserve = max(0, round($finalTotalAmount - $amountPaidNow, 2));
+            if (! $phone) {
+                throw new \RuntimeException('برای فروش اقساطی شماره موبایل الزامی است.');
+            }
+        }
+
+        $settlement = ['card_amount' => 0.0, 'cash_amount' => 0.0];
+        $linkedCheque = null;
+        if ($paymentType === 'cheque') {
+            if (! $chequeId) {
+                throw new \RuntimeException('برای فروش چکی، cheque_id الزامی است.');
+            }
+            $linkedCheque = Cheque::find($chequeId);
+            if (! $linkedCheque) {
+                throw new \RuntimeException('چک یافت نشد.');
+            }
+            if ($linkedCheque->type !== Cheque::TYPE_RECEIVED) {
+                throw new \RuntimeException('فقط چک دریافتی قابل اتصال به فروش است.');
+            }
+            if ($linkedCheque->status !== Cheque::STATUS_PENDING) {
+                throw new \RuntimeException('فقط چک در انتظار وصول قابل اتصال به فروش است.');
+            }
+            if ($linkedCheque->purchase_id
+                && (! $replacePurchase || (int) $linkedCheque->purchase_id !== (int) $replacePurchase->id)) {
+                throw new \RuntimeException('این چک قبلاً به فروش دیگری وصل شده است.');
+            }
+            if ($purchaseAtelierId !== null && (int) $linkedCheque->atelier_id !== (int) $purchaseAtelierId) {
+                throw new \RuntimeException('چک متعلق به این فروشگاه نیست.');
+            }
+            $chequeAmount = round((float) $linkedCheque->amount, 2);
+            if ($chequeAmount <= 0) {
+                throw new \RuntimeException('مبلغ چک نامعتبر است.');
+            }
+            if ($chequeAmount > $payableAmount + 0.02) {
+                throw new \RuntimeException('مبلغ چک بیشتر از مبلغ قابل پرداخت فروش است.');
+            }
+            $immediateDue = round(max(0, (float) $payableAmount - $chequeAmount), 2);
+            if ($immediateDue > 0.02) {
+                try {
+                    $settlement = $this->resolvePurchaseSettlement($request, $immediateDue);
+                } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+                    throw new \RuntimeException('جمع مبلغ کارت و نقد باید برابر مبلغ پرداختی باشد.');
+                }
+            }
+            if (abs($chequeAmount + $settlement['card_amount'] + $settlement['cash_amount'] - (float) $payableAmount) > 0.02) {
+                throw new \RuntimeException('جمع نقد + کارت + چک باید برابر مبلغ قابل پرداخت باشد.');
+            }
+        } elseif ($paymentType !== 'debt') {
+            try {
+                $settlement = $this->resolvePurchaseSettlement($request, $amountPaidNow);
+            } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+                throw new \RuntimeException('جمع مبلغ کارت و نقد باید برابر مبلغ پرداختی باشد.');
+            }
+        }
+
+        return [
+            'productsData' => $productsData,
+            'originalTotalAmount' => $originalTotalAmount,
+            'discountAmount' => $discountAmount,
+            'grossTotal' => $grossTotal,
+            'creditUsed' => $creditUsed,
+            'creditEarned' => $creditEarned,
+            'payableAmount' => $payableAmount,
+            'installmentAmount' => $installmentAmount,
+            'finalTotalAmount' => $finalTotalAmount,
+            'amountPaidNow' => $amountPaidNow,
+            'installmentReserve' => $installmentReserve,
+            'settlement' => $settlement,
+            'linkedCheque' => $linkedCheque,
+        ];
     }
      
 

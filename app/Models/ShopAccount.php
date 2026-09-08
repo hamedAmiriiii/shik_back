@@ -55,7 +55,12 @@ class ShopAccount extends Model
      */
     public static function supportsTypes(): bool
     {
-        return Schema::hasTable('shop_accounts') && Schema::hasColumn('shop_accounts', 'type');
+        static $ready = null;
+        if ($ready === null) {
+            $ready = Schema::hasTable('shop_accounts') && Schema::hasColumn('shop_accounts', 'type');
+        }
+
+        return $ready;
     }
 
     public function isPettyCash(): bool
@@ -112,7 +117,11 @@ class ShopAccount extends Model
      */
     public static function ensureDefaultsForAtelier(int $atelierId): void
     {
+        static $done = [];
         if ($atelierId <= 0 || ! Schema::hasTable('shop_accounts')) {
+            return;
+        }
+        if (isset($done[$atelierId])) {
             return;
         }
 
@@ -140,6 +149,7 @@ class ShopAccount extends Model
         self::ensureTillForAtelier($atelierId);
         self::backfillLegacyDepositsForAtelier($atelierId);
         ChartOfAccountsSeeder::ensureForAtelier($atelierId);
+        $done[$atelierId] = true;
     }
 
     /**
