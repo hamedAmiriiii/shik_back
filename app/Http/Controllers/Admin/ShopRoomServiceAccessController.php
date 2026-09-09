@@ -5,10 +5,9 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Atelier;
 use App\Models\Customer;
-use App\Models\Setting;
 use App\Models\User;
+use App\Services\ShopFeatureFlags;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class ShopRoomServiceAccessController extends Controller
 {
@@ -17,15 +16,10 @@ class ShopRoomServiceAccessController extends Controller
         $this->requirePlatformAdmin($request);
 
         $query = Atelier::query()
-            ->leftJoin('settings as room_services_setting', function ($join) {
-                $join->on('room_services_setting.atelier_id', '=', 'ateliers.id')
-                    ->where('room_services_setting.key', 'room_services_enabled');
-            })
             ->select([
                 'ateliers.id as atelier_id',
                 'ateliers.name as shop_name',
                 'ateliers.code as shop_code',
-                DB::raw("COALESCE(room_services_setting.value, '0') as room_services_enabled"),
             ])
             ->orderByDesc('ateliers.id');
 
@@ -54,20 +48,21 @@ class ShopRoomServiceAccessController extends Controller
 
         $atelierIds = collect($paginator->items())->pluck('atelier_id')->filter()->map(fn ($id) => (int) $id)->all();
         $owners = $this->loadShopOwnersByAtelierIds($atelierIds);
+        $flags = ShopFeatureFlags::forAteliers($atelierIds);
 
-        $paginator->getCollection()->transform(function ($row) use ($owners) {
+        $paginator->getCollection()->transform(function ($row) use ($owners, $flags) {
             $id = (int) $row->atelier_id;
             $owner = $owners[$id] ?? null;
+            $shopFlags = $flags[$id] ?? ShopFeatureFlags::forAtelier(null);
 
-            return [
+            return array_merge([
                 'id' => $id,
                 'atelier_id' => $id,
                 'shop_name' => $row->shop_name,
                 'shop_code' => $row->shop_code,
                 'phone' => $owner['phone'] ?? null,
                 'owner_name' => $owner['name'] ?? null,
-                'room_services_enabled' => $this->isEnabled($row->room_services_enabled),
-            ];
+            ], $shopFlags);
         });
 
         return response($paginator->toArray(), 200);
@@ -78,26 +73,20 @@ class ShopRoomServiceAccessController extends Controller
         $this->requirePlatformAdmin($request);
 
         $fields = $request->validate([
+            'feature' => 'required|string|in:restaurant_cafe,room_services,produced_goods,accounting,restaurant_cafe_enabled,room_services_enabled,produced_goods_enabled,accounting_enabled',
             'enabled' => 'required|boolean',
         ]);
 
-        Setting::setContextAtelierId((int) $atelier->id);
-        Setting::set('room_services_enabled', $fields['enabled'] ? '1' : '0');
+        $key = ShopFeatureFlags::set((int) $atelier->id, $fields['feature'], (bool) $fields['enabled']);
+        $all = ShopFeatureFlags::forAtelier((int) $atelier->id);
 
-        return response([
-            'message' => $fields['enabled']
-                ? 'دسترسی خدمات برای این فروشگاه فعال شد'
-                : 'دسترسی خدمات این فروشگاه خاموش شد',
+        return response(array_merge([
+            'message' => $fields['enabled'] ? 'دسترسی فعال شد' : 'دسترسی خاموش شد',
             'atelier_id' => (int) $atelier->id,
             'shop_name' => $atelier->name,
             'shop_code' => $atelier->code,
-            'room_services_enabled' => (bool) $fields['enabled'],
-        ], 200);
-    }
-
-    private function isEnabled($value): bool
-    {
-        return in_array(strtolower((string) $value), ['1', 'true', 'yes', 'on'], true);
+            'feature' => $key,
+        ], $all), 200);
     }
 
     /**
@@ -139,7 +128,7 @@ class ShopRoomServiceAccessController extends Controller
             abort(response()->json(['message' => 'لطفاً وارد شوید.'], 401));
         }
         if (! $actor->roles()->where('id', User::USER_TYPE_KEY['ادمین'])->exists()) {
-            abort(response()->json(['message' => 'فقط ادمین سامانه می‌تواند دسترسی خدمات را بدهد.'], 403));
+            abort(response()->json(['message' => 'فقط ادمین سامانه می‌تواند این دسترسی‌ها را بدهد.'], 403));
         }
 
         return $actor;

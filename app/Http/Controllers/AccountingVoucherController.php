@@ -19,7 +19,7 @@ class AccountingVoucherController extends Controller
      */
     public function index(Request $request)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::ACCOUNTING, 'حسابداری برای این فروشگاه فعال نیست.');
         if (! AccountingVoucher::tablesReady()) {
             return response()->json([
                 'message' => 'جدول سند حسابداری وجود ندارد. migration یا فایل SQL را اجرا کنید.',

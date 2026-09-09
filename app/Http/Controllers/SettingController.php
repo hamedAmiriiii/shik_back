@@ -10,7 +10,13 @@ use InvalidArgumentException;
 class SettingController extends Controller
 {
     /** فقط ادمین سامانه می‌تواند شارژ پیامک یا دسترسی خدمات را عوض کند */
-    private const ADMIN_ONLY_KEYS = ['shop_sms_quota', 'room_services_enabled'];
+    private const ADMIN_ONLY_KEYS = [
+        'shop_sms_quota',
+        'room_services_enabled',
+        'restaurant_cafe_enabled',
+        'produced_goods_enabled',
+        'accounting_enabled',
+    ];
 
     /**
      * دریافت همه تنظیمات

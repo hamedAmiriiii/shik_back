@@ -24,7 +24,7 @@ class TableOrderController extends Controller
      */
     public function store(Request $request, $shop = null)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::RESTAURANT_CAFE, 'سفارش حضوری برای این فروشگاه فعال نیست.');
         Setting::setShopContext($atelierId);
 
         if ($request->filled('phone')) {
@@ -178,7 +178,7 @@ class TableOrderController extends Controller
     public function index(Request $request)
     {
         $this->requireStaffShopUser($request);
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::RESTAURANT_CAFE, 'سفارش حضوری برای این فروشگاه فعال نیست.');
 
         $query = TableOrder::where('atelier_id', $atelierId)
             ->with(['items.product', 'shopTable', 'purchase']);
@@ -230,7 +230,7 @@ class TableOrderController extends Controller
     public function pendingCount(Request $request)
     {
         $this->requireStaffShopUser($request);
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::RESTAURANT_CAFE, 'سفارش حضوری برای این فروشگاه فعال نیست.');
 
         $base = TableOrder::query()
             ->where('atelier_id', $atelierId)
@@ -476,7 +476,9 @@ class TableOrderController extends Controller
             'pending_orders' => $pending,
             'payment_methods' => TableOrder::paymentMethodsForApi(),
             'room_services_enabled' => Setting::isEnabled('room_services_enabled', false),
-            'allow_menu' => $shopTable->isRoom() || ! Setting::isEnabled('room_services_enabled', false),
+            'restaurant_cafe_enabled' => Setting::isEnabled('restaurant_cafe_enabled', false),
+            'allow_menu' => Setting::isEnabled('restaurant_cafe_enabled', false)
+                && ($shopTable->isRoom() || ! Setting::isEnabled('room_services_enabled', false)),
             'allow_services' => Setting::isEnabled('room_services_enabled', false),
         ]);
     }

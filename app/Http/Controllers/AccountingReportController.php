@@ -15,7 +15,7 @@ class AccountingReportController extends Controller
      */
     public function trialBalance(Request $request)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::ACCOUNTING, 'حسابداری برای این فروشگاه فعال نیست.');
         if ($fail = $this->tablesGuard()) {
             return $fail;
         }
@@ -40,7 +40,7 @@ class AccountingReportController extends Controller
      */
     public function ledger(Request $request)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::ACCOUNTING, 'حسابداری برای این فروشگاه فعال نیست.');
         if ($fail = $this->tablesGuard()) {
             return $fail;
         }
@@ -73,7 +73,7 @@ class AccountingReportController extends Controller
      */
     public function profitLoss(Request $request)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::ACCOUNTING, 'حسابداری برای این فروشگاه فعال نیست.');
         if ($fail = $this->tablesGuard()) {
             return $fail;
         }
@@ -97,7 +97,7 @@ class AccountingReportController extends Controller
      */
     public function balanceSheet(Request $request)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::ACCOUNTING, 'حسابداری برای این فروشگاه فعال نیست.');
         if ($fail = $this->tablesGuard()) {
             return $fail;
         }

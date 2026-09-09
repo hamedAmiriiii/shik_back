@@ -25,7 +25,7 @@ class ProducedGoodController extends Controller
             ], 503);
         }
 
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::PRODUCED_GOODS, 'کالای تولیدی برای این فروشگاه فعال نیست.');
 
         $with = ['ingredients.rawMaterial'];
         if (Schema::hasTable('category_produced_good')) {
@@ -104,7 +104,7 @@ class ProducedGoodController extends Controller
 
     public function show(Request $request, ProducedGood $producedGood, ProducedGoodCostService $costService)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::PRODUCED_GOODS, 'کالای تولیدی برای این فروشگاه فعال نیست.');
         if ((int) $producedGood->atelier_id !== $atelierId) {
             return response(['message' => 'یافت نشد'], 404);
         }
@@ -227,7 +227,7 @@ class ProducedGoodController extends Controller
 
     public function productions(Request $request, ProducedGood $producedGood)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::PRODUCED_GOODS, 'کالای تولیدی برای این فروشگاه فعال نیست.');
         if ((int) $producedGood->atelier_id !== $atelierId) {
             return response(['message' => 'یافت نشد'], 404);
         }

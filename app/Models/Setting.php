@@ -53,6 +53,9 @@ class Setting extends Model
             'shop_card_holder' => '',
             'shop_bank_name' => '',
             'room_services_enabled' => '0',
+            'restaurant_cafe_enabled' => '0',
+            'produced_goods_enabled' => '0',
+            'accounting_enabled' => '0',
         ];
 
         foreach ($defaults as $key => $value) {

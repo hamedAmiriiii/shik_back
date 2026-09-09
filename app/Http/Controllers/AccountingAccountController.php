@@ -17,7 +17,7 @@ class AccountingAccountController extends Controller
      */
     public function index(Request $request)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::ACCOUNTING, 'حسابداری برای این فروشگاه فعال نیست.');
 
         if (! AccountingAccount::tableReady()) {
             return response()->json([

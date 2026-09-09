@@ -19,6 +19,7 @@ class RawMaterialController extends Controller
 {
     public function index(Request $request, RawMaterialFifoService $fifo)
     {
+        $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::PRODUCED_GOODS, 'کالای تولیدی برای این فروشگاه فعال نیست.');
         if (! Schema::hasTable('raw_materials')) {
             return response()->json([
                 'message' => 'جدول raw_materials وجود ندارد. migration یا SQL را اجرا کنید.',

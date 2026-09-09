@@ -222,10 +222,11 @@ class AuthController extends Controller
         $user->load(['roles', 'atelier']);
         $token = $user->createToken('myapptoken')->plainTextToken;
 
-        $payload = [
-            'user' => $user,
+        $shopFields = \App\Services\ShopStaffAccess::sessionFields($user);
+        $payload = array_merge([
+            'user' => array_merge($user->toArray(), $shopFields),
             'token' => $token,
-        ];
+        ], $shopFields);
         if ($user->atelier) {
             $payload['shop_access'] = $user->atelier->accessStatusForApi();
         }

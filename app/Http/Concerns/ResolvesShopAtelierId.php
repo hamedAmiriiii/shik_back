@@ -169,6 +169,16 @@ trait ResolvesShopAtelierId
         return $atelierId;
     }
 
+    protected function assertShopFeature(Request $request, string $feature, string $message = 'این بخش برای فروشگاه شما فعال نیست.'): int
+    {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        if (! \App\Services\ShopFeatureFlags::enabled($atelierId, $feature)) {
+            abort(response()->json(['message' => $message], 403));
+        }
+
+        return $atelierId;
+    }
+
     /**
      * @return int شناسهٔ atelier بدون بررسی تاریخ اعتبار
      */

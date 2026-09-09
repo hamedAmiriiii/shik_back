@@ -131,6 +131,7 @@ class ShopStaffAccess
             'shop_is_owner' => $owner,
             'shop_permissions' => $keys,
             'shop_employee_id' => $employee ? (int) $employee->id : null,
+            'shop_features' => ShopFeatureFlags::forAtelier($user->atelier_id ? (int) $user->atelier_id : null),
         ];
     }
 }
