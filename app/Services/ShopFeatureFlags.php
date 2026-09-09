@@ -40,24 +40,26 @@ class ShopFeatureFlags
     /**
      * @return array<string, bool>
      */
-    public static function forAtelier(?int $atelierId): array
+    public static function empty(): array
     {
-        $flags = [
+        return [
             self::RESTAURANT_CAFE => false,
             self::ROOM_SERVICES => false,
             self::PRODUCED_GOODS => false,
             self::ACCOUNTING => false,
         ];
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    public static function forAtelier(?int $atelierId): array
+    {
         if (! $atelierId) {
-            return $flags;
+            return self::empty();
         }
 
-        Setting::setContextAtelierId($atelierId);
-        foreach (self::KEYS as $key) {
-            $flags[$key] = Setting::isEnabled($key, false);
-        }
-
-        return $flags;
+        return self::forAteliers([$atelierId])[$atelierId] ?? self::empty();
     }
 
     /**
@@ -66,10 +68,9 @@ class ShopFeatureFlags
      */
     public static function forAteliers(array $atelierIds): array
     {
-        $empty = self::forAtelier(null);
         $map = [];
         foreach ($atelierIds as $id) {
-            $map[(int) $id] = $empty;
+            $map[(int) $id] = self::empty();
         }
         if ($atelierIds === []) {
             return $map;
@@ -83,7 +84,7 @@ class ShopFeatureFlags
         foreach ($rows as $row) {
             $id = (int) $row->atelier_id;
             if (! isset($map[$id])) {
-                $map[$id] = $empty;
+                $map[$id] = self::empty();
             }
             $map[$id][$row->key] = self::isTruthy($row->value);
         }
@@ -97,9 +98,8 @@ class ShopFeatureFlags
         if (! $key || ! $atelierId) {
             return false;
         }
-        Setting::setContextAtelierId($atelierId);
 
-        return Setting::isEnabled($key, false);
+        return self::forAtelier($atelierId)[$key] ?? false;
     }
 
     public static function set(int $atelierId, string $feature, bool $enabled): string

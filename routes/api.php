@@ -408,6 +408,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::put('shop-sms-quota/{atelier}', [\App\Http\Controllers\Admin\ShopSmsQuotaController::class, 'update']);
         Route::get('shop-service-access', [\App\Http\Controllers\Admin\ShopRoomServiceAccessController::class, 'index']);
         Route::put('shop-service-access/{atelier}', [\App\Http\Controllers\Admin\ShopRoomServiceAccessController::class, 'update']);
+        Route::post('shop-service-access/{atelier}', [\App\Http\Controllers\Admin\ShopRoomServiceAccessController::class, 'update']);
 
         Route::get('sms-package-orders', [\App\Http\Controllers\Admin\SmsPackageOrderController::class, 'index']);
         Route::get('sms-package-orders/{smsPackageOrder}', [\App\Http\Controllers\Admin\SmsPackageOrderController::class, 'show']);
@@ -473,8 +474,12 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     }
     $user->load(['roles', 'atelier']);
     $shopFields = \App\Services\ShopStaffAccess::sessionFields($user);
+    $userArr = $user->toArray();
+    if (isset($userArr['atelier']) && is_array($userArr['atelier'])) {
+        $userArr['atelier']['shop_features'] = $shopFields['shop_features'];
+    }
 
-    return response(array_merge($user->toArray(), $shopFields), 200);
+    return response(array_merge($userArr, $shopFields), 200);
 });
 
 // Customer logout route - requires authentication

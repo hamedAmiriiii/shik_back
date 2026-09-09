@@ -223,8 +223,12 @@ class AuthController extends Controller
         $token = $user->createToken('myapptoken')->plainTextToken;
 
         $shopFields = \App\Services\ShopStaffAccess::sessionFields($user);
+        $userArr = $user->toArray();
+        if (isset($userArr['atelier']) && is_array($userArr['atelier'])) {
+            $userArr['atelier']['shop_features'] = $shopFields['shop_features'];
+        }
         $payload = array_merge([
-            'user' => array_merge($user->toArray(), $shopFields),
+            'user' => array_merge($userArr, $shopFields),
             'token' => $token,
         ], $shopFields);
         if ($user->atelier) {
@@ -338,8 +342,12 @@ class AuthController extends Controller
         $user->load(['roles', 'atelier']);
 
         $shopFields = \App\Services\ShopStaffAccess::sessionFields($user);
+        $userArr = $user->toArray();
+        if (isset($userArr['atelier']) && is_array($userArr['atelier'])) {
+            $userArr['atelier']['shop_features'] = $shopFields['shop_features'];
+        }
         $payload = array_merge([
-            'user' => array_merge($user->toArray(), $shopFields),
+            'user' => array_merge($userArr, $shopFields),
             'token' => $token,
         ], $shopFields);
         if ($shopAccess !== null) {

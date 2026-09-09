@@ -104,41 +104,42 @@ class Setting extends Model
      */
     public static function set($key, $value)
     {
-        $attrs = ['key' => $key];
-        if (static::$contextAtelierId !== null) {
-            $attrs['atelier_id'] = static::$contextAtelierId;
+        $atelierId = static::$contextAtelierId;
+        $rowQuery = static::query()->where('key', $key);
+        if ($atelierId !== null) {
+            $rowQuery->where('atelier_id', $atelierId);
         } else {
-            $attrs['atelier_id'] = null;
+            $rowQuery->whereNull('atelier_id');
+        }
+
+        $row = $rowQuery->first();
+        if ($row) {
+            $row->value = $value;
+            $row->save();
+
+            return $row;
         }
 
         try {
-            return self::updateOrCreate($attrs, ['value' => $value]);
+            return static::query()->create([
+                'key' => $key,
+                'value' => $value,
+                'atelier_id' => $atelierId,
+            ]);
         } catch (QueryException $e) {
             if (! static::isDuplicateKeyException($e)) {
                 throw $e;
             }
 
-            $row = static::query()
-                ->where('key', $key)
-                ->when(
-                    $attrs['atelier_id'] !== null,
-                    fn ($q) => $q->where('atelier_id', $attrs['atelier_id']),
-                    fn ($q) => $q->whereNull('atelier_id')
-                )
-                ->first();
+            $retry = $rowQuery->first();
+            if ($retry) {
+                $retry->value = $value;
+                $retry->save();
 
-            if (! $row) {
-                $row = static::query()->where('key', $key)->first();
+                return $retry;
             }
 
-            if (! $row) {
-                throw $e;
-            }
-
-            $row->value = $value;
-            $row->save();
-
-            return $row;
+            throw $e;
         }
     }
 

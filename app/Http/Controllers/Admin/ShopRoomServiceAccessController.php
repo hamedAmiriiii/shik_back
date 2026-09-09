@@ -74,14 +74,35 @@ class ShopRoomServiceAccessController extends Controller
 
         $fields = $request->validate([
             'feature' => 'required|string|in:restaurant_cafe,room_services,produced_goods,accounting,restaurant_cafe_enabled,room_services_enabled,produced_goods_enabled,accounting_enabled',
-            'enabled' => 'required|boolean',
+            'enabled' => 'required',
         ]);
 
-        $key = ShopFeatureFlags::set((int) $atelier->id, $fields['feature'], (bool) $fields['enabled']);
+        $enabled = $this->parseEnabledFlag($fields['enabled']);
+        if ($enabled === null) {
+            return response()->json(['message' => 'مقدار enabled باید true یا false باشد.'], 422);
+        }
+
+        try {
+            $key = ShopFeatureFlags::set((int) $atelier->id, $fields['feature'], $enabled);
+        } catch (\Illuminate\Database\QueryException $e) {
+            return response()->json([
+                'message' => 'ذخیره انجام نشد. ایندکس یکتای قدیمی جدول settings مانع تنظیم جدا برای هر فروشگاه است. فایل SQL اصلاح ایندکس را روی دیتابیس اجرا کنید.',
+                'code' => 'settings_unique_key',
+            ], 422);
+        }
+
         $all = ShopFeatureFlags::forAtelier((int) $atelier->id);
+        if (($all[$key] ?? false) !== $enabled) {
+            return response()->json([
+                'message' => 'ذخیره روی این فروشگاه اعمال نشد. ایندکس settings را اصلاح کنید تا هر فروشگاه ردیف جدا داشته باشد.',
+                'code' => 'settings_unique_key',
+                'atelier_id' => (int) $atelier->id,
+                'feature' => $key,
+            ], 422);
+        }
 
         return response(array_merge([
-            'message' => $fields['enabled'] ? 'دسترسی فعال شد' : 'دسترسی خاموش شد',
+            'message' => $enabled ? 'دسترسی فعال شد' : 'دسترسی خاموش شد',
             'atelier_id' => (int) $atelier->id,
             'shop_name' => $atelier->name,
             'shop_code' => $atelier->code,
@@ -132,5 +153,24 @@ class ShopRoomServiceAccessController extends Controller
         }
 
         return $actor;
+    }
+
+    private function parseEnabledFlag(mixed $value): ?bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value) || (is_string($value) && is_numeric($value))) {
+            if ((string) $value === '1') {
+                return true;
+            }
+            if ((string) $value === '0') {
+                return false;
+            }
+        }
+
+        $parsed = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+        return $parsed;
     }
 }
