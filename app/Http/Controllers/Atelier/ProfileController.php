@@ -23,6 +23,12 @@ class ProfileController extends Controller
             'new_confirm_password' => ['same:new_password'],
         ]);
 
-        return User::find(auth()->user()->id)->update(['password'=> Hash::make($request->new_password)]);
+        User::find(auth()->user()->id)->update([
+            'password' => Hash::make($request->new_password),
+        ]);
+
+        return response()->json([
+            'message' => 'رمز عبور با موفقیت تغییر کرد',
+        ]);
     }
 }
