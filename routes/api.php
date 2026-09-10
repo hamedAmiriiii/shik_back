@@ -177,6 +177,8 @@ Route::middleware('auth:sanctum')->prefix('table-orders')->name('table-orders.')
     Route::post('/{tableOrder}/cancel', [\App\Http\Controllers\TableOrderController::class, 'cancel']);
 });
 
+Route::middleware('auth:sanctum')->get('speech/announcement', [\App\Http\Controllers\SpeechAnnouncementController::class, 'speak']);
+
 Route::middleware('auth:sanctum')->prefix('shop-services')->name('shop-services.')->group(function () {
     Route::get('/', [\App\Http\Controllers\ShopServiceController::class, 'index']);
     Route::post('/', [\App\Http\Controllers\ShopServiceController::class, 'store']);
