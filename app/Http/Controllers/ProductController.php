@@ -135,6 +135,7 @@ class ProductController extends Controller
         $request->validate([
             'products' => 'required|array|min:1|max:200',
             'products.*.name' => 'required|string|max:255',
+            'products.*.description' => 'nullable|string|max:500',
             'products.*.purchase_price' => 'required|numeric|min:0',
             'products.*.sale_price' => 'required|numeric|min:0',
             'products.*.quantity' => 'required|numeric|min:0',
@@ -248,6 +249,7 @@ class ProductController extends Controller
 
         return [
             'name' => 'required|string|max:255',
+            'description' => 'nullable|string|max:500',
             'purchase_price' => 'required|numeric|min:0',
             'sale_price' => 'required|numeric|min:0',
             'quantity' => 'required|numeric|min:0',
@@ -671,6 +673,7 @@ class ProductController extends Controller
             'products' => 'required|array|min:1|max:200',
             'products.*.id' => 'required|integer|distinct',
             'products.*.name' => 'required|string|max:255',
+            'products.*.description' => 'nullable|string|max:500',
             'products.*.purchase_price' => 'required|numeric|min:0',
             'products.*.sale_price' => 'required|numeric|min:0',
             'products.*.quantity' => 'required|numeric|min:0',
@@ -760,6 +763,7 @@ class ProductController extends Controller
      */
     private function prepareProductFieldsForUpdate(array $fields, Product $product)
     {
+        $fields = $this->normalizeProductDescriptionField($fields);
         $fields['unit_type'] = $fields['unit_type'] ?? ($product->unit_type ?? Product::UNIT_PIECE);
         if ($error = ProductQuantityTools::validateProductStockQuantity($fields['quantity'], $fields['unit_type'])) {
             return $error;
@@ -800,6 +804,7 @@ class ProductController extends Controller
      */
     private function prepareProductFieldsForCreate(array $fields)
     {
+        $fields = $this->normalizeProductDescriptionField($fields);
         $fields['unit_type'] = $fields['unit_type'] ?? Product::UNIT_PIECE;
         if ($error = ProductQuantityTools::validateProductStockQuantity($fields['quantity'], $fields['unit_type'])) {
             return $error;
@@ -829,6 +834,24 @@ class ProductController extends Controller
                 unset($fields['barcode']);
             }
         }
+
+        return $fields;
+    }
+
+    /**
+     * توضیح منو اختیاری است؛ رشتهٔ خالی به null تبدیل می‌شود.
+     *
+     * @param  array<string, mixed>  $fields
+     * @return array<string, mixed>
+     */
+    private function normalizeProductDescriptionField(array $fields): array
+    {
+        if (! array_key_exists('description', $fields)) {
+            return $fields;
+        }
+
+        $trimmed = trim((string) ($fields['description'] ?? ''));
+        $fields['description'] = $trimmed === '' ? null : $trimmed;
 
         return $fields;
     }

@@ -14,7 +14,7 @@ class Product extends Model
 
     public const UNIT_KG = 'kg';
 
-    protected $fillable = ["name", "price_buy", "quantity", "unit_type", "barcode", "sale_price", "purchase_price", "original_sale_price", "sizes", "colors", "manufacturer_id", "atelier_id"];
+    protected $fillable = ["name", "description", "price_buy", "quantity", "unit_type", "barcode", "sale_price", "purchase_price", "original_sale_price", "sizes", "colors", "manufacturer_id", "atelier_id"];
 
     protected $casts = [
         'purchase_price' => 'decimal:2',
