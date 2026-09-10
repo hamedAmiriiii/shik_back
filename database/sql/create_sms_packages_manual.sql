@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS `sms_packages` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+
 CREATE TABLE IF NOT EXISTS `sms_package_orders` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `atelier_id` BIGINT UNSIGNED NOT NULL,
