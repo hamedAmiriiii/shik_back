@@ -213,13 +213,18 @@ class CustomerController extends Controller
         $select = [
             'user_shiksho.phone',
             DB::raw('COALESCE(pc.total_purchases, 0) as total_purchases'),
+            DB::raw('COALESCE(pc.total_spent, 0) as total_spent'),
         ];
         if (Schema::hasColumn('user_shiksho', 'name')) {
             $select[] = 'user_shiksho.name';
         }
 
         $purchaseCounts = DB::table('purchases')
-            ->select('phone', DB::raw('COUNT(id) as total_purchases'))
+            ->select(
+                'phone',
+                DB::raw('COUNT(id) as total_purchases'),
+                DB::raw('COALESCE(SUM(total_amount), 0) as total_spent')
+            )
             ->where('atelier_id', $atelierId)
             ->whereNotNull('phone')
             ->where('phone', '!=', '')
@@ -237,6 +242,7 @@ class CustomerController extends Controller
                     'phone' => $item->phone,
                     'name' => $item->name ?? null,
                     'total_purchases' => (int) ($item->total_purchases ?? 0),
+                    'total_spent' => (float) ($item->total_spent ?? 0),
                 ];
             })
             ->values();
