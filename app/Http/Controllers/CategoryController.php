@@ -386,7 +386,13 @@ class CategoryController extends Controller
         
         $perPage = max(1, (int) $request->input('per_page', 10));
 
-        $products = $query->with(['images', 'categories'])->orderBy('id', 'desc')->get()->map(function ($product) {
+        $products = $query->with(['images', 'categories']);
+        if (Schema::hasColumn('products', 'display_order')) {
+            $products->orderBy('display_order')->orderBy('name')->orderBy('id');
+        } else {
+            $products->orderBy('id', 'desc');
+        }
+        $products = $products->get()->map(function ($product) {
             $product->item_type = 'product';
             $product->product_id = $product->id;
             $product->produced_good_id = null;
@@ -407,7 +413,7 @@ class CategoryController extends Controller
         });
 
         $produced = $this->producedGoodsForCategory($atelierId, $categoryIds, $searchDataModel);
-        $merged = $produced->concat($products)->values();
+        $merged = $this->sortMergedCatalogByDisplayOrder($produced->concat($products)->values());
         $page = max(1, (int) $request->input('page', 1));
         $paginator = new LengthAwarePaginator(
             $merged->forPage($page, $perPage)->values(),
@@ -418,6 +424,46 @@ class CategoryController extends Controller
         );
 
         return response($paginator);
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, mixed>  $merged
+     * @return \Illuminate\Support\Collection<int, mixed>
+     */
+    private function sortMergedCatalogByDisplayOrder($merged)
+    {
+        return $merged->sort(function ($a, $b) {
+            $orderA = $this->catalogItemDisplayOrder($a);
+            $orderB = $this->catalogItemDisplayOrder($b);
+            if ($orderA !== $orderB) {
+                return $orderA <=> $orderB;
+            }
+
+            $nameA = (string) (is_array($a) ? ($a['name'] ?? '') : ($a->name ?? ''));
+            $nameB = (string) (is_array($b) ? ($b['name'] ?? '') : ($b->name ?? ''));
+            $nameCmp = strcmp($nameA, $nameB);
+            if ($nameCmp !== 0) {
+                return $nameCmp;
+            }
+
+            $idA = (int) (is_array($a) ? ($a['id'] ?? 0) : ($a->id ?? 0));
+            $idB = (int) (is_array($b) ? ($b['id'] ?? 0) : ($b->id ?? 0));
+
+            return $idA <=> $idB;
+        })->values();
+    }
+
+    /**
+     * @param  mixed  $item
+     */
+    private function catalogItemDisplayOrder($item): int
+    {
+        $raw = is_array($item) ? ($item['display_order'] ?? null) : ($item->display_order ?? null);
+        if ($raw === null || $raw === '') {
+            return Product::DEFAULT_DISPLAY_ORDER;
+        }
+
+        return (int) $raw;
     }
 
     /**
@@ -436,8 +482,12 @@ class CategoryController extends Controller
             ->whereHas('categories', function ($q) use ($categoryIds) {
                 $q->whereIn('categories.id', $categoryIds);
             })
-            ->with(['ingredients.rawMaterial', 'categories'])
-            ->orderBy('name');
+            ->with(['ingredients.rawMaterial', 'categories']);
+        if (Schema::hasColumn('produced_goods', 'display_order')) {
+            $query->orderBy('display_order')->orderBy('name');
+        } else {
+            $query->orderBy('name');
+        }
 
         if ($searchDataModel) {
             $query->where(function ($q) use ($searchDataModel) {
@@ -466,6 +516,9 @@ class CategoryController extends Controller
                 'produced_good_id' => $good->id,
                 'product_id' => null,
                 'name' => $good->name,
+                'display_order' => Schema::hasColumn('produced_goods', 'display_order')
+                    ? (int) ($good->display_order ?? Product::DEFAULT_DISPLAY_ORDER)
+                    : Product::DEFAULT_DISPLAY_ORDER,
                 'sale_price' => $salePrice,
                 'original_sale_price' => $original,
                 'purchase_price' => (float) $good->cost_per_kg,

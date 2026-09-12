@@ -9,9 +9,12 @@ use App\Tools\PriceTools;
 
 class ProducedGood extends Model
 {
+    public const DEFAULT_DISPLAY_ORDER = 50;
+
     protected $fillable = [
         'atelier_id',
         'name',
+        'display_order',
         'sale_price',
         'original_sale_price',
         'markup_percent',
@@ -24,6 +27,7 @@ class ProducedGood extends Model
         'original_sale_price' => 'decimal:2',
         'markup_percent' => 'decimal:2',
         'round_sale_price' => 'boolean',
+        'display_order' => 'integer',
     ];
 
     protected $appends = [

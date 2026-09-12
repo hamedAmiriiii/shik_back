@@ -34,8 +34,12 @@ class ProducedGoodController extends Controller
 
         $query = ProducedGood::query()
             ->where('atelier_id', $atelierId)
-            ->with($with)
-            ->orderBy('name');
+            ->with($with);
+        if (Schema::hasColumn('produced_goods', 'display_order')) {
+            $query->orderBy('display_order')->orderBy('name');
+        } else {
+            $query->orderBy('name');
+        }
 
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         if ($searchDataModel) {
@@ -85,6 +89,7 @@ class ProducedGoodController extends Controller
             $good = ProducedGood::create([
                 'atelier_id' => $atelierId,
                 'name' => $fields['name'],
+                'display_order' => $this->normalizedDisplayOrder($fields['display_order'] ?? null, true),
                 'sale_price' => $pricing['sale_price'],
                 'markup_percent' => $pricing['markup_percent'],
                 'round_sale_price' => $this->boolField($fields, 'round_sale_price', false),
@@ -135,6 +140,9 @@ class ProducedGoodController extends Controller
             }
             if (array_key_exists('note', $fields)) {
                 $payload['note'] = $fields['note'];
+            }
+            if (array_key_exists('display_order', $fields)) {
+                $payload['display_order'] = $this->normalizedDisplayOrder($fields['display_order'], false);
             }
             if (array_key_exists('round_sale_price', $fields)) {
                 $payload['round_sale_price'] = $this->boolField($fields, 'round_sale_price', false);
@@ -299,6 +307,7 @@ class ProducedGoodController extends Controller
 
         return $request->validate([
             'name' => $nameRule,
+            'display_order' => 'nullable|integer|min:0|max:9999',
             'sale_price' => 'nullable|numeric|min:0',
             'markup_percent' => 'nullable|numeric|min:0|max:9999',
             'round_sale_price' => 'sometimes|boolean',
@@ -309,6 +318,22 @@ class ProducedGoodController extends Controller
             'category_ids' => 'nullable|array',
             'category_ids.*' => 'integer|exists:categories,id',
         ]);
+    }
+
+    /**
+     * @param  mixed  $value
+     */
+    private function normalizedDisplayOrder($value, bool $forCreate): int
+    {
+        if (! Schema::hasColumn('produced_goods', 'display_order')) {
+            return ProducedGood::DEFAULT_DISPLAY_ORDER;
+        }
+
+        if ($value === null || $value === '') {
+            return ProducedGood::DEFAULT_DISPLAY_ORDER;
+        }
+
+        return max(0, min(9999, (int) $value));
     }
 
     /**

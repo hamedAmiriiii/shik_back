@@ -14,13 +14,16 @@ class Product extends Model
 
     public const UNIT_KG = 'kg';
 
-    protected $fillable = ["name", "description", "price_buy", "quantity", "unit_type", "barcode", "sale_price", "purchase_price", "original_sale_price", "sizes", "colors", "manufacturer_id", "atelier_id"];
+    public const DEFAULT_DISPLAY_ORDER = 50;
+
+    protected $fillable = ["name", "description", "display_order", "price_buy", "quantity", "unit_type", "barcode", "sale_price", "purchase_price", "original_sale_price", "sizes", "colors", "manufacturer_id", "atelier_id"];
 
     protected $casts = [
         'purchase_price' => 'decimal:2',
         'sale_price' => 'decimal:2',
         'original_sale_price' => 'decimal:2',
         'quantity' => 'decimal:3',
+        'display_order' => 'integer',
         'sizes' => 'array',
         'colors' => 'array',
     ];

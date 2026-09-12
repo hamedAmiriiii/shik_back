@@ -77,10 +77,13 @@ class ProductController extends Controller
 
         $producedGoods = $this->producedGoodsForProductAll($request, $atelierId, $searchDataModel, $categoryId);
         $merged = $producedGoods->concat($products)->values();
+        if ($sort === '') {
+            $merged = $this->sortMergedCatalogByDisplayOrder($merged);
+        }
         $paginator = $this->paginateMergedCatalog($merged, $request, $perPage);
         $paginator->appends($request->only(['sort', 'order_by', 'search', 'searchFilterModel', 'per_page', 'category_id']));
 
-        return response($paginator)->header('X-Applied-Sort', $sort !== '' ? $sort : 'id_desc');
+        return response($paginator)->header('X-Applied-Sort', $sort !== '' ? $sort : 'display_order');
     }
 
     /**
@@ -136,6 +139,7 @@ class ProductController extends Controller
             'products' => 'required|array|min:1|max:200',
             'products.*.name' => 'required|string|max:255',
             'products.*.description' => 'nullable|string|max:500',
+            'products.*.display_order' => 'nullable|integer|min:0|max:9999',
             'products.*.purchase_price' => 'required|numeric|min:0',
             'products.*.sale_price' => 'required|numeric|min:0',
             'products.*.quantity' => 'required|numeric|min:0',
@@ -250,6 +254,7 @@ class ProductController extends Controller
         return [
             'name' => 'required|string|max:255',
             'description' => 'nullable|string|max:500',
+            'display_order' => 'nullable|integer|min:0|max:9999',
             'purchase_price' => 'required|numeric|min:0',
             'sale_price' => 'required|numeric|min:0',
             'quantity' => 'required|numeric|min:0',
@@ -340,7 +345,13 @@ class ProductController extends Controller
             });
         }
 
-        $products = $query->with(['images', 'categories', 'manufacturer'])->orderBy('id', 'desc')->get();
+        $products = $query->with(['images', 'categories', 'manufacturer']);
+        if (Schema::hasColumn('products', 'display_order')) {
+            $products->orderBy('display_order')->orderBy('name')->orderByDesc('id');
+        } else {
+            $products->orderBy('id', 'desc');
+        }
+        $products = $products->get();
 
         $products->transform(function ($product) {
             $product->item_type = 'product';
@@ -352,7 +363,7 @@ class ProductController extends Controller
 
         $producedGoods = $this->producedGoodsForProductAll($request, $atelierId, $searchDataModel, $categoryId);
 
-        return response($producedGoods->concat($products)->values());
+        return response($this->sortMergedCatalogByDisplayOrder($producedGoods->concat($products)->values()));
     }
 
     /**
@@ -674,6 +685,7 @@ class ProductController extends Controller
             'products.*.id' => 'required|integer|distinct',
             'products.*.name' => 'required|string|max:255',
             'products.*.description' => 'nullable|string|max:500',
+            'products.*.display_order' => 'nullable|integer|min:0|max:9999',
             'products.*.purchase_price' => 'required|numeric|min:0',
             'products.*.sale_price' => 'required|numeric|min:0',
             'products.*.quantity' => 'required|numeric|min:0',
@@ -764,6 +776,7 @@ class ProductController extends Controller
     private function prepareProductFieldsForUpdate(array $fields, Product $product)
     {
         $fields = $this->normalizeProductDescriptionField($fields);
+        $fields = $this->normalizeProductDisplayOrderField($fields, false);
         $fields['unit_type'] = $fields['unit_type'] ?? ($product->unit_type ?? Product::UNIT_PIECE);
         if ($error = ProductQuantityTools::validateProductStockQuantity($fields['quantity'], $fields['unit_type'])) {
             return $error;
@@ -805,6 +818,7 @@ class ProductController extends Controller
     private function prepareProductFieldsForCreate(array $fields)
     {
         $fields = $this->normalizeProductDescriptionField($fields);
+        $fields = $this->normalizeProductDisplayOrderField($fields, true);
         $fields['unit_type'] = $fields['unit_type'] ?? Product::UNIT_PIECE;
         if ($error = ProductQuantityTools::validateProductStockQuantity($fields['quantity'], $fields['unit_type'])) {
             return $error;
@@ -854,6 +868,77 @@ class ProductController extends Controller
         $fields['description'] = $trimmed === '' ? null : $trimmed;
 
         return $fields;
+    }
+
+    /**
+     * ترتیب نمایش منو؛ پیش‌فرض ۵۰. عدد کمتر بالاتر نشان داده می‌شود.
+     *
+     * @param  array<string, mixed>  $fields
+     * @return array<string, mixed>
+     */
+    private function normalizeProductDisplayOrderField(array $fields, bool $forCreate): array
+    {
+        if (! Schema::hasColumn('products', 'display_order')) {
+            unset($fields['display_order']);
+
+            return $fields;
+        }
+
+        if (! array_key_exists('display_order', $fields) || $fields['display_order'] === null || $fields['display_order'] === '') {
+            if ($forCreate) {
+                $fields['display_order'] = Product::DEFAULT_DISPLAY_ORDER;
+            } else {
+                unset($fields['display_order']);
+            }
+
+            return $fields;
+        }
+
+        $fields['display_order'] = max(0, min(9999, (int) $fields['display_order']));
+
+        return $fields;
+    }
+
+    /**
+     * مرتب‌سازی کاتالوگ ادغام‌شده بر اساس display_order (منوی میز/اتاق).
+     *
+     * @param  \Illuminate\Support\Collection<int, mixed>  $merged
+     * @return \Illuminate\Support\Collection<int, mixed>
+     */
+    private function sortMergedCatalogByDisplayOrder($merged)
+    {
+        return $merged->sort(function ($a, $b) {
+            $orderA = $this->catalogItemDisplayOrder($a);
+            $orderB = $this->catalogItemDisplayOrder($b);
+            if ($orderA !== $orderB) {
+                return $orderA <=> $orderB;
+            }
+
+            $nameA = (string) (is_array($a) ? ($a['name'] ?? '') : ($a->name ?? ''));
+            $nameB = (string) (is_array($b) ? ($b['name'] ?? '') : ($b->name ?? ''));
+            $nameCmp = strcmp($nameA, $nameB);
+            if ($nameCmp !== 0) {
+                return $nameCmp;
+            }
+
+            $idA = (int) (is_array($a) ? ($a['id'] ?? 0) : ($a->id ?? 0));
+            $idB = (int) (is_array($b) ? ($b['id'] ?? 0) : ($b->id ?? 0));
+
+            return $idA <=> $idB;
+        })->values();
+    }
+
+    /**
+     * @param  mixed  $item
+     */
+    private function catalogItemDisplayOrder($item): int
+    {
+        $raw = is_array($item) ? ($item['display_order'] ?? null) : ($item->display_order ?? null);
+        if ($raw === null || $raw === '') {
+            return Product::DEFAULT_DISPLAY_ORDER;
+        }
+
+        return (int) $raw;
     }
 
     /**
@@ -1259,8 +1344,21 @@ class ProductController extends Controller
             case 'least_discount':
                 $query->orderByRaw("{$discountAmountSql} ASC")->orderByDesc('products.id');
                 break;
+            case 'display_order':
+            case 'display_order_asc':
+            case 'menu_order':
+                if (Schema::hasColumn('products', 'display_order')) {
+                    $query->orderBy('products.display_order')->orderBy('products.name')->orderBy('products.id');
+                } else {
+                    $query->orderByDesc('products.id');
+                }
+                break;
             default:
-                $query->orderByDesc('products.id');
+                if (Schema::hasColumn('products', 'display_order')) {
+                    $query->orderBy('products.display_order')->orderBy('products.name')->orderBy('products.id');
+                } else {
+                    $query->orderByDesc('products.id');
+                }
                 break;
         }
     }
@@ -1279,8 +1377,12 @@ class ProductController extends Controller
 
         $query = ProducedGood::query()
             ->where('atelier_id', $atelierId)
-            ->with('ingredients.rawMaterial')
-            ->orderBy('name');
+            ->with('ingredients.rawMaterial');
+        if (Schema::hasColumn('produced_goods', 'display_order')) {
+            $query->orderBy('display_order')->orderBy('name');
+        } else {
+            $query->orderBy('name');
+        }
 
         if (Schema::hasTable('category_produced_good')) {
             $query->with('categories');
@@ -1340,6 +1442,9 @@ class ProductController extends Controller
             'produced_good_id' => $good->id,
             'product_id' => null,
             'name' => $good->name,
+            'display_order' => Schema::hasColumn('produced_goods', 'display_order')
+                ? (int) ($good->display_order ?? Product::DEFAULT_DISPLAY_ORDER)
+                : Product::DEFAULT_DISPLAY_ORDER,
             'sale_price' => $salePrice,
             'original_sale_price' => $original,
             'purchase_price' => $purchasePrice,
