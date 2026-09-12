@@ -83,7 +83,7 @@ class TableOrderController extends Controller
                 DB::rollBack();
 
                 return response()->json([
-                    'message' => 'این میز یک سفارش فعال دارد. تا پرداخت یا لغو آن نمی‌توان سفارش جدید ثبت کرد.',
+                    'message' => 'این میز یک سفارش فعال دارد. نمی‌توان سفارش جدید ثبت کرد.',
                     'code' => 'table_has_active_order',
                     'table_order' => $existing->toPublicArray(),
                 ], 409);

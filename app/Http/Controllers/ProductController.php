@@ -62,6 +62,10 @@ class ProductController extends Controller
             });
         }
 
+        if ($this->isPublicShopCatalogRequest($request)) {
+            $this->restrictProductQueryToActiveCategories($query);
+        }
+
         $sort = $this->resolveProductListSort($request);
         $this->applyProductListSort($query, $sort);
 
@@ -76,6 +80,11 @@ class ProductController extends Controller
         });
 
         $producedGoods = $this->producedGoodsForProductAll($request, $atelierId, $searchDataModel, $categoryId);
+        if ($this->isPublicShopCatalogRequest($request)) {
+            $producedGoods = $producedGoods->filter(function ($item) {
+                return $this->catalogItemHasActiveCategory($item);
+            })->values();
+        }
         $merged = $producedGoods->concat($products)->values();
         if ($sort === '') {
             $merged = $this->sortMergedCatalogByDisplayOrder($merged);
@@ -1232,6 +1241,54 @@ class ProductController extends Controller
             // حذف از دیتابیس
             $image->delete();
         }
+    }
+
+    /**
+     * مسیر عمومی api/{shop}/product — منوی میز/ویترین.
+     */
+    private function isPublicShopCatalogRequest(Request $request): bool
+    {
+        $shop = $request->route('shop');
+
+        return is_string($shop) && trim($shop) !== '';
+    }
+
+    /**
+     * فقط کالاهایی که دسته‌ای ندارند یا حداقل یک دستهٔ فعال دارند.
+     */
+    private function restrictProductQueryToActiveCategories($query): void
+    {
+        $query->where(function ($q) {
+            $q->whereDoesntHave('categories')
+                ->orWhereHas('categories', function ($cq) {
+                    $cq->where('categories.is_active', true);
+                });
+        });
+    }
+
+    /**
+     * @param  mixed  $item
+     */
+    private function catalogItemHasActiveCategory($item): bool
+    {
+        $categories = is_array($item)
+            ? ($item['categories'] ?? [])
+            : ($item->categories ?? []);
+
+        if (! is_iterable($categories)) {
+            return true;
+        }
+
+        $list = collect($categories);
+        if ($list->isEmpty()) {
+            return true;
+        }
+
+        return $list->contains(function ($cat) {
+            $active = is_array($cat) ? ($cat['is_active'] ?? true) : ($cat->is_active ?? true);
+
+            return $active !== false && $active !== 0 && $active !== '0';
+        });
     }
 
     /**

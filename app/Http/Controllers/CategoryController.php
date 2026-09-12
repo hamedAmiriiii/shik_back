@@ -355,6 +355,20 @@ class CategoryController extends Controller
         $category = $this->resolveShopCategory($request, $category);
         $atelierId = $this->categoryAtelierIdForShop($category, $request);
 
+        $routeShop = $request->route('shop');
+        if (is_string($routeShop) && trim($routeShop) !== '' && $category->is_active === false) {
+            $perPage = max(1, (int) $request->input('per_page', 10));
+            $page = max(1, (int) $request->input('page', 1));
+
+            return response(new LengthAwarePaginator(
+                collect(),
+                0,
+                $perPage,
+                $page,
+                ['path' => url()->current(), 'query' => $request->query()]
+            ));
+        }
+
         // دریافت تمام IDهای زیرمجموعه‌ها (شامل خود category)
         $categoryIds = $category->getAllDescendantIds();
 

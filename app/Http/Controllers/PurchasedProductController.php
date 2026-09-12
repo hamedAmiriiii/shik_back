@@ -692,7 +692,12 @@ class PurchasedProductController extends Controller
 
     public function show(Purchase $purchase)
     {
-        $purchase->load(['purchasedProducts.product', 'purchasedProducts.producedGood', 'purchasedProducts.rawMaterial']);
+        $purchase->load([
+            'purchasedProducts.product',
+            'purchasedProducts.producedGood',
+            'purchasedProducts.rawMaterial',
+            'shopTable',
+        ]);
         if (Schema::hasTable('purchase_item_returns')) {
             $purchase->loadCount('itemReturns');
         }
