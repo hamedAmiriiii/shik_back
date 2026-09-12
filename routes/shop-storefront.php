@@ -45,6 +45,18 @@ Route::prefix('{shop}')
         Route::get('category/{category}/children', [CategoryController::class, 'children'])->where('category', '[0-9]+')->name('category.children');
         Route::get('category/{category}/products', [CategoryController::class, 'products'])->where('category', '[0-9]+')->name('category.products');
 
+        Route::prefix('blog')->name('blog.')->group(function () {
+            Route::get('categories', [\App\Http\Controllers\BlogCategoryController::class, 'index']);
+            Route::get('categories/{blogCategory}', [\App\Http\Controllers\BlogCategoryController::class, 'show']);
+            Route::get('posts/featured', [\App\Http\Controllers\BlogPostController::class, 'featured']);
+            Route::get('posts', [\App\Http\Controllers\BlogPostController::class, 'index']);
+            Route::get('posts/{blogPost}', [\App\Http\Controllers\BlogPostController::class, 'show']);
+            Route::post('comments', [\App\Http\Controllers\BlogCommentController::class, 'store'])
+                ->middleware('throttle:20,1');
+            Route::get('sitemap', [\App\Http\Controllers\BlogSitemapController::class, 'index']);
+            Route::get('sitemap.xml', [\App\Http\Controllers\BlogSitemapController::class, 'index']);
+        });
+
         // ===== سفارش پای میز (QR) — بدون نیاز به لاگین =====
         Route::get('tables/{tableNumber}', [\App\Http\Controllers\TableOrderController::class, 'tableInfo'])
             ->where('tableNumber', '[0-9]+')

@@ -75,6 +75,7 @@ class ShopPermissionCatalog
             ['key' => 'debts', 'label' => 'نسیه و بدهی', 'prefixes' => ['purchase-debts']],
             ['key' => 'installments', 'label' => 'اقساط', 'prefixes' => ['installment-credits', 'installments']],
             ['key' => 'referral', 'label' => 'معرفی فروشگاه', 'prefixes' => ['referral']],
+            ['key' => 'blog', 'label' => 'وبلاگ', 'prefixes' => ['blog']],
         ];
     }
 

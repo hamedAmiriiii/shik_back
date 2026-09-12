@@ -131,6 +131,19 @@ Route::get("category/{category}", [CategoryController::class, 'show']);
 Route::get("category/{category}/children", [CategoryController::class, 'children']);
 Route::get("category/{category}/products", [CategoryController::class, 'products']);
 
+// Blog — public read + comment submit
+Route::prefix('blog')->name('blog.')->group(function () {
+    Route::get('categories', [\App\Http\Controllers\BlogCategoryController::class, 'index']);
+    Route::get('categories/{blogCategory}', [\App\Http\Controllers\BlogCategoryController::class, 'show']);
+    Route::get('posts/featured', [\App\Http\Controllers\BlogPostController::class, 'featured']);
+    Route::get('posts', [\App\Http\Controllers\BlogPostController::class, 'index']);
+    Route::get('posts/{blogPost}', [\App\Http\Controllers\BlogPostController::class, 'show']);
+    Route::post('comments', [\App\Http\Controllers\BlogCommentController::class, 'store'])
+        ->middleware('throttle:20,1');
+    Route::get('sitemap', [\App\Http\Controllers\BlogSitemapController::class, 'index']);
+    Route::get('sitemap.xml', [\App\Http\Controllers\BlogSitemapController::class, 'index']);
+});
+
 Route::prefix('purchased-products')->name('purchased-products.')->group(function () {
     Route::get('/', [\App\Http\Controllers\PurchasedProductController::class, 'index']);
     Route::post('/', [\App\Http\Controllers\PurchasedProductController::class, 'store']);
@@ -255,6 +268,21 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         ->middleware('throttle:2,1');
 
     Route::get('referral', [\App\Http\Controllers\ReferralController::class, 'show']);
+
+    // Blog — مدیریت از پنل ادمین فروشگاه
+    Route::prefix('blog')->name('blog.admin.')->group(function () {
+        Route::post('categories', [\App\Http\Controllers\BlogCategoryController::class, 'store']);
+        Route::put('categories/{blogCategory}', [\App\Http\Controllers\BlogCategoryController::class, 'update']);
+        Route::delete('categories/{blogCategory}', [\App\Http\Controllers\BlogCategoryController::class, 'destroy']);
+
+        Route::post('posts', [\App\Http\Controllers\BlogPostController::class, 'store']);
+        Route::put('posts/{blogPost}', [\App\Http\Controllers\BlogPostController::class, 'update']);
+        Route::delete('posts/{blogPost}', [\App\Http\Controllers\BlogPostController::class, 'destroy']);
+
+        Route::get('comments', [\App\Http\Controllers\BlogCommentController::class, 'index']);
+        Route::put('comments/{blogComment}', [\App\Http\Controllers\BlogCommentController::class, 'update']);
+        Route::delete('comments/{blogComment}', [\App\Http\Controllers\BlogCommentController::class, 'destroy']);
+    });
 
     Route::get('dashboard/summary', [\App\Http\Controllers\DashboardController::class, 'summary']);
     Route::get('dashboard/sales-by-day', [\App\Http\Controllers\DashboardController::class, 'salesByDay']);
