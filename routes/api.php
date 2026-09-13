@@ -254,6 +254,14 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('shop-access', [\App\Http\Controllers\ShopAccessController::class, 'show']);
     Route::get('shop-permissions', [\App\Http\Controllers\ShopEmployeeController::class, 'permissionOptions']);
 
+    Route::prefix('formal-invoice')->group(function () {
+        Route::get('seller', [\App\Http\Controllers\FormalInvoiceController::class, 'sellerShow']);
+        Route::put('seller', [\App\Http\Controllers\FormalInvoiceController::class, 'sellerUpdate']);
+        Route::get('buyer/{phone}', [\App\Http\Controllers\FormalInvoiceController::class, 'buyerShow']);
+        Route::put('buyer', [\App\Http\Controllers\FormalInvoiceController::class, 'buyerUpdate']);
+        Route::get('purchase/{purchase}', [\App\Http\Controllers\FormalInvoiceController::class, 'purchaseBundle']);
+    });
+
     Route::get('shop-backup', [\App\Http\Controllers\ShopBackupController::class, 'show']);
     Route::get('shop-backup/download', [\App\Http\Controllers\ShopBackupController::class, 'download'])
         ->middleware('throttle:5,1');
