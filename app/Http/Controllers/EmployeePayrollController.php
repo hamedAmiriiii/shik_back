@@ -114,7 +114,9 @@ class EmployeePayrollController extends Controller
             'shop_employee_id' => 'required|integer|exists:shop_employees,id',
             'payroll_year' => 'required|integer|min:1300|max:1700',
             'payroll_month' => 'required|integer|min:1|max:12',
-            'hours_worked' => 'required|numeric|min:0|max:744',
+            'hours_worked' => 'nullable|numeric|min:0|max:744',
+            'days_worked' => 'nullable|numeric|min:0|max:31',
+            'overtime_hours' => 'nullable|numeric|min:0|max:744',
             'hourly_wage' => 'nullable|numeric|min:0',
             'note' => 'nullable|string|max:2000',
         ]);
@@ -128,22 +130,43 @@ class EmployeePayrollController extends Controller
             return response()->json(['message' => 'کارمند متعلق به این فروشگاه نیست.'], 422);
         }
 
-        $hoursWorked = (float) $fields['hours_worked'];
-        $calc = $employee->calculateSalary($hoursWorked);
+        $hoursWorked = (float) ($fields['hours_worked'] ?? 0);
+        $daysWorked = (float) ($fields['days_worked'] ?? 0);
+        $overtimeHoursInput = (float) ($fields['overtime_hours'] ?? 0);
 
-        // نرخ ساعتی override در صورت ارسال دستی
+        if ($employee->isDailySalary()) {
+            if ($daysWorked <= 0) {
+                return response()->json(['message' => 'تعداد روز کارکرد را وارد کنید.'], 422);
+            }
+            $calc = $employee->calculateSalary(0, $daysWorked, $overtimeHoursInput);
+            $hoursWorked = 0;
+        } else {
+            if ($hoursWorked <= 0) {
+                return response()->json(['message' => 'ساعت کارکرد را وارد کنید.'], 422);
+            }
+            $calc = $employee->calculateSalary($hoursWorked);
+            $daysWorked = 0;
+        }
+
+        // نرخ ساعتی override در صورت ارسال دستی (فقط ماهانه / اضافه‌کار)
         if (array_key_exists('hourly_wage', $fields) && (float) $fields['hourly_wage'] > 0) {
             $hourlyWage = (float) $fields['hourly_wage'];
-            $calc = $employee->calculateSalary($hoursWorked);
-            // بازمحاسبه با نرخ override
-            $calc['overtime_amount'] = round($hourlyWage * $calc['overtime_hours'], 2);
-            $calc['salary_amount'] = round($calc['base_salary_snapshot'] > 0
-                ? (($hoursWorked >= $calc['base_work_hours_snapshot'] && $calc['base_work_hours_snapshot'] > 0)
-                    ? $calc['base_salary_snapshot'] + $calc['overtime_amount']
-                    : ($calc['base_work_hours_snapshot'] > 0
-                        ? round(($calc['base_salary_snapshot'] / $calc['base_work_hours_snapshot']) * $hoursWorked, 2) + $calc['overtime_amount']
-                        : $calc['overtime_amount']))
-                : $hourlyWage * $hoursWorked, 2);
+            if ($employee->isDailySalary()) {
+                $calc['overtime_amount'] = round($hourlyWage * $calc['overtime_hours'], 2);
+                $calc['salary_amount'] = round(
+                    ((float) $calc['base_salary_snapshot'] * (float) $calc['days_worked']) + $calc['overtime_amount'],
+                    2
+                );
+            } else {
+                $calc['overtime_amount'] = round($hourlyWage * $calc['overtime_hours'], 2);
+                $calc['salary_amount'] = round($calc['base_salary_snapshot'] > 0
+                    ? (($hoursWorked >= $calc['base_work_hours_snapshot'] && $calc['base_work_hours_snapshot'] > 0)
+                        ? $calc['base_salary_snapshot'] + $calc['overtime_amount']
+                        : ($calc['base_work_hours_snapshot'] > 0
+                            ? round(($calc['base_salary_snapshot'] / $calc['base_work_hours_snapshot']) * $hoursWorked, 2) + $calc['overtime_amount']
+                            : $calc['overtime_amount']))
+                    : $hourlyWage * $hoursWorked, 2);
+            }
         } else {
             $hourlyWage = (float) $employee->hourly_wage;
         }
@@ -157,8 +180,26 @@ class EmployeePayrollController extends Controller
         // مساعده مانع محاسبه مجدد حقوق نیست؛ فقط بعد از پرداخت «حقوق» قفل می‌شود
         if ($existing && ! $existing->canRecalculateSalary()) {
             return response()->json([
-                'message' => 'برای این ماه پرداخت حقوق ثبت شده و ساعت‌کاری قابل تغییر نیست. مساعده‌ها از مانده حقوق کسر می‌شوند.',
+                'message' => 'برای این ماه پرداخت حقوق ثبت شده و کارکرد قابل تغییر نیست. مساعده‌ها از مانده حقوق کسر می‌شوند.',
             ], 422);
+        }
+
+        $payload = [
+            'atelier_id' => $atelierId,
+            'hours_worked' => $hoursWorked,
+            'hourly_wage' => $hourlyWage,
+            'salary_amount' => $calc['salary_amount'],
+            'base_salary_snapshot' => $calc['base_salary_snapshot'],
+            'base_work_hours_snapshot' => $calc['base_work_hours_snapshot'],
+            'overtime_hours' => $calc['overtime_hours'],
+            'overtime_amount' => $calc['overtime_amount'],
+            'note' => $fields['note'] ?? null,
+        ];
+        if (Schema::hasColumn('employee_payrolls', 'days_worked')) {
+            $payload['days_worked'] = $calc['days_worked'];
+        }
+        if (Schema::hasColumn('employee_payrolls', 'salary_type_snapshot')) {
+            $payload['salary_type_snapshot'] = $calc['salary_type'];
         }
 
         $payroll = EmployeePayroll::updateOrCreate(
@@ -167,17 +208,7 @@ class EmployeePayrollController extends Controller
                 'payroll_year' => (int) $fields['payroll_year'],
                 'payroll_month' => (int) $fields['payroll_month'],
             ],
-            [
-                'atelier_id' => $atelierId,
-                'hours_worked' => $hoursWorked,
-                'hourly_wage' => $hourlyWage,
-                'salary_amount' => $calc['salary_amount'],
-                'base_salary_snapshot' => $calc['base_salary_snapshot'],
-                'base_work_hours_snapshot' => $calc['base_work_hours_snapshot'],
-                'overtime_hours' => $calc['overtime_hours'],
-                'overtime_amount' => $calc['overtime_amount'],
-                'note' => $fields['note'] ?? null,
-            ]
+            $payload
         );
 
         // بعد از محاسبه حقوق، مساعده‌های قبلی از مانده کسر و وضعیت همگام می‌شود
@@ -190,6 +221,8 @@ class EmployeePayrollController extends Controller
                 'base_work_hours' => $calc['base_work_hours_snapshot'],
                 'overtime_hours' => $calc['overtime_hours'],
                 'overtime_amount' => $calc['overtime_amount'],
+                'days_worked' => $calc['days_worked'],
+                'salary_type' => $calc['salary_type'],
             ],
         ]), 201);
     }
@@ -230,7 +263,9 @@ class EmployeePayrollController extends Controller
         $fields = $request->validate([
             'payroll_year' => 'sometimes|required|integer|min:1300|max:1700',
             'payroll_month' => 'sometimes|required|integer|min:1|max:12',
-            'hours_worked' => 'sometimes|required|numeric|min:0|max:744',
+            'hours_worked' => 'sometimes|nullable|numeric|min:0|max:744',
+            'days_worked' => 'sometimes|nullable|numeric|min:0|max:31',
+            'overtime_hours' => 'sometimes|nullable|numeric|min:0|max:744',
             'hourly_wage' => 'sometimes|nullable|numeric|min:0',
             'note' => 'sometimes|nullable|string|max:2000',
         ]);
@@ -259,16 +294,36 @@ class EmployeePayrollController extends Controller
         $hoursWorked = array_key_exists('hours_worked', $fields)
             ? (float) $fields['hours_worked']
             : (float) $employeePayroll->hours_worked;
+        $daysWorked = array_key_exists('days_worked', $fields)
+            ? (float) $fields['days_worked']
+            : (float) ($employeePayroll->days_worked ?? 0);
+        $overtimeHoursInput = array_key_exists('overtime_hours', $fields)
+            ? (float) $fields['overtime_hours']
+            : (float) ($employeePayroll->overtime_hours ?? 0);
 
-        $calc = $employee
-            ? $employee->calculateSalary($hoursWorked)
-            : [
+        if ($employee && $employee->isDailySalary()) {
+            if ($daysWorked <= 0) {
+                return response()->json(['message' => 'تعداد روز کارکرد را وارد کنید.'], 422);
+            }
+            $calc = $employee->calculateSalary(0, $daysWorked, $overtimeHoursInput);
+            $hoursWorked = 0;
+        } elseif ($employee) {
+            if ($hoursWorked <= 0) {
+                return response()->json(['message' => 'ساعت کارکرد را وارد کنید.'], 422);
+            }
+            $calc = $employee->calculateSalary($hoursWorked);
+            $daysWorked = 0;
+        } else {
+            $calc = [
                 'salary_amount' => round((float) $employeePayroll->hourly_wage * $hoursWorked, 2),
                 'base_salary_snapshot' => (float) $employeePayroll->base_salary_snapshot,
                 'base_work_hours_snapshot' => (float) $employeePayroll->base_work_hours_snapshot,
                 'overtime_hours' => 0,
                 'overtime_amount' => 0,
+                'days_worked' => 0,
+                'salary_type' => ShopEmployee::SALARY_TYPE_MONTHLY,
             ];
+        }
 
         $hourlyWage = array_key_exists('hourly_wage', $fields) && (float) $fields['hourly_wage'] > 0
             ? (float) $fields['hourly_wage']
@@ -276,22 +331,29 @@ class EmployeePayrollController extends Controller
 
         if (array_key_exists('hourly_wage', $fields) && (float) $fields['hourly_wage'] > 0) {
             $calc['overtime_amount'] = round($hourlyWage * $calc['overtime_hours'], 2);
-            $baseSnap = (float) $calc['base_salary_snapshot'];
-            $baseHoursSnap = (float) $calc['base_work_hours_snapshot'];
-            if ($baseSnap > 0) {
-                if ($hoursWorked >= $baseHoursSnap && $baseHoursSnap > 0) {
-                    $calc['salary_amount'] = round($baseSnap + $calc['overtime_amount'], 2);
-                } elseif ($baseHoursSnap > 0) {
-                    $calc['salary_amount'] = round(($baseSnap / $baseHoursSnap) * $hoursWorked + $calc['overtime_amount'], 2);
-                } else {
-                    $calc['salary_amount'] = round($calc['overtime_amount'], 2);
-                }
+            if (($calc['salary_type'] ?? '') === ShopEmployee::SALARY_TYPE_DAILY) {
+                $calc['salary_amount'] = round(
+                    ((float) $calc['base_salary_snapshot'] * (float) $calc['days_worked']) + $calc['overtime_amount'],
+                    2
+                );
             } else {
-                $calc['salary_amount'] = round($hourlyWage * $hoursWorked, 2);
+                $baseSnap = (float) $calc['base_salary_snapshot'];
+                $baseHoursSnap = (float) $calc['base_work_hours_snapshot'];
+                if ($baseSnap > 0) {
+                    if ($hoursWorked >= $baseHoursSnap && $baseHoursSnap > 0) {
+                        $calc['salary_amount'] = round($baseSnap + $calc['overtime_amount'], 2);
+                    } elseif ($baseHoursSnap > 0) {
+                        $calc['salary_amount'] = round(($baseSnap / $baseHoursSnap) * $hoursWorked + $calc['overtime_amount'], 2);
+                    } else {
+                        $calc['salary_amount'] = round($calc['overtime_amount'], 2);
+                    }
+                } else {
+                    $calc['salary_amount'] = round($hourlyWage * $hoursWorked, 2);
+                }
             }
         }
 
-        $employeePayroll->update([
+        $update = [
             'payroll_year' => $payrollYear,
             'payroll_month' => $payrollMonth,
             'hours_worked' => $hoursWorked,
@@ -302,7 +364,15 @@ class EmployeePayrollController extends Controller
             'overtime_hours' => $calc['overtime_hours'],
             'overtime_amount' => $calc['overtime_amount'],
             'note' => array_key_exists('note', $fields) ? $fields['note'] : $employeePayroll->note,
-        ]);
+        ];
+        if (Schema::hasColumn('employee_payrolls', 'days_worked')) {
+            $update['days_worked'] = $calc['days_worked'];
+        }
+        if (Schema::hasColumn('employee_payrolls', 'salary_type_snapshot')) {
+            $update['salary_type_snapshot'] = $calc['salary_type'];
+        }
+
+        $employeePayroll->update($update);
 
         $employeePayroll->syncStatus();
 

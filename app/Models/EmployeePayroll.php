@@ -17,6 +17,8 @@ class EmployeePayroll extends Model
         'payroll_year',
         'payroll_month',
         'hours_worked',
+        'days_worked',
+        'salary_type_snapshot',
         'hourly_wage',
         'salary_amount',
         'base_salary_snapshot',
@@ -32,6 +34,7 @@ class EmployeePayroll extends Model
 
     protected $casts = [
         'hours_worked' => 'decimal:2',
+        'days_worked' => 'decimal:2',
         'hourly_wage' => 'decimal:2',
         'salary_amount' => 'decimal:2',
         'base_salary_snapshot' => 'decimal:2',
@@ -127,7 +130,17 @@ class EmployeePayroll extends Model
      */
     public function isSalaryCalculated(): bool
     {
-        return (float) $this->hours_worked > 0.001 || (float) $this->salary_amount > 0.01;
+        return (float) $this->hours_worked > 0.001
+            || (float) ($this->days_worked ?? 0) > 0.001
+            || (float) $this->salary_amount > 0.01;
+    }
+
+    public function isDailySalary(): bool
+    {
+        $type = $this->salary_type_snapshot
+            ?: ($this->employee?->salary_type ?? ShopEmployee::SALARY_TYPE_MONTHLY);
+
+        return $type === ShopEmployee::SALARY_TYPE_DAILY;
     }
 
     /**

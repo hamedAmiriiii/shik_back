@@ -67,7 +67,16 @@ class ProductController extends Controller
         }
 
         $sort = $this->resolveProductListSort($request);
-        $this->applyProductListSort($query, $sort);
+        $isPublicCatalog = $this->isPublicShopCatalogRequest($request);
+        if ($sort !== '') {
+            $this->applyProductListSort($query, $sort);
+        } elseif ($isPublicCatalog) {
+            // منوی آنلاین / میز: اولویت نمایش
+            $this->applyProductListSort($query, 'display_order');
+        } else {
+            // پنل ادمین فروشگاه: جدیدترین‌ها اول
+            $query->orderByDesc('products.id');
+        }
 
         $perPage = max(1, (int) $request->input('per_page', 10));
 
@@ -87,12 +96,18 @@ class ProductController extends Controller
         }
         $merged = $producedGoods->concat($products)->values();
         if ($sort === '') {
-            $merged = $this->sortMergedCatalogByDisplayOrder($merged);
+            $merged = $isPublicCatalog
+                ? $this->sortMergedCatalogByDisplayOrder($merged)
+                : $this->sortMergedCatalogByLatest($merged);
         }
         $paginator = $this->paginateMergedCatalog($merged, $request, $perPage);
         $paginator->appends($request->only(['sort', 'order_by', 'search', 'searchFilterModel', 'per_page', 'category_id']));
 
-        return response($paginator)->header('X-Applied-Sort', $sort !== '' ? $sort : 'display_order');
+        $appliedSort = $sort !== ''
+            ? $sort
+            : ($isPublicCatalog ? 'display_order' : 'id_desc');
+
+        return response($paginator)->header('X-Applied-Sort', $appliedSort);
     }
 
     /**
@@ -355,11 +370,7 @@ class ProductController extends Controller
         }
 
         $products = $query->with(['images', 'categories', 'manufacturer']);
-        if (Schema::hasColumn('products', 'display_order')) {
-            $products->orderBy('display_order')->orderBy('name')->orderByDesc('id');
-        } else {
-            $products->orderBy('id', 'desc');
-        }
+        $products->orderByDesc('id');
         $products = $products->get();
 
         $products->transform(function ($product) {
@@ -372,7 +383,7 @@ class ProductController extends Controller
 
         $producedGoods = $this->producedGoodsForProductAll($request, $atelierId, $searchDataModel, $categoryId);
 
-        return response($this->sortMergedCatalogByDisplayOrder($producedGoods->concat($products)->values()));
+        return response($this->sortMergedCatalogByLatest($producedGoods->concat($products)->values()));
     }
 
     /**
@@ -938,6 +949,22 @@ class ProductController extends Controller
     }
 
     /**
+     * مرتب‌سازی کاتالوگ ادغام‌شده برای پنل ادمین: جدیدترین اول.
+     *
+     * @param  \Illuminate\Support\Collection<int, mixed>  $merged
+     * @return \Illuminate\Support\Collection<int, mixed>
+     */
+    private function sortMergedCatalogByLatest($merged)
+    {
+        return $merged->sort(function ($a, $b) {
+            $idA = (int) (is_array($a) ? ($a['id'] ?? 0) : ($a->id ?? 0));
+            $idB = (int) (is_array($b) ? ($b['id'] ?? 0) : ($b->id ?? 0));
+
+            return $idB <=> $idA;
+        })->values();
+    }
+
+    /**
      * @param  mixed  $item
      */
     private function catalogItemDisplayOrder($item): int
@@ -1410,12 +1437,14 @@ class ProductController extends Controller
                     $query->orderByDesc('products.id');
                 }
                 break;
+            case 'id_desc':
+            case 'latest':
+            case 'newest':
+                $query->orderByDesc('products.id');
+                break;
             default:
-                if (Schema::hasColumn('products', 'display_order')) {
-                    $query->orderBy('products.display_order')->orderBy('products.name')->orderBy('products.id');
-                } else {
-                    $query->orderByDesc('products.id');
-                }
+                // پیش‌فرض پنل ادمین: جدیدترین
+                $query->orderByDesc('products.id');
                 break;
         }
     }

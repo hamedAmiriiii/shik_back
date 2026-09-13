@@ -92,6 +92,12 @@ class ShopEmployeeController extends Controller
             'hourly_wage' => $fields['hourly_wage'] ?? 0,
             'note' => $fields['note'] ?? null,
         ];
+        if (Schema::hasColumn('shop_employees', 'salary_type')) {
+            $data['salary_type'] = $fields['salary_type'] ?? ShopEmployee::SALARY_TYPE_MONTHLY;
+            if ($data['salary_type'] === ShopEmployee::SALARY_TYPE_DAILY) {
+                $data['base_work_hours'] = 0;
+            }
+        }
         $permissions = $this->permissionsFromRequest($request, $fields);
         if ($permissions !== null && Schema::hasColumn('shop_employees', 'permissions')) {
             $data['permissions'] = $permissions;
@@ -127,6 +133,12 @@ class ShopEmployeeController extends Controller
 
         $payload = $fields;
         unset($payload['password'], $payload['permissions'], $payload['username']);
+
+        if (! Schema::hasColumn('shop_employees', 'salary_type')) {
+            unset($payload['salary_type']);
+        } elseif (($payload['salary_type'] ?? $shopEmployee->salary_type) === ShopEmployee::SALARY_TYPE_DAILY) {
+            $payload['base_work_hours'] = 0;
+        }
 
         if (array_key_exists('permissions', $fields)) {
             if (! ShopStaffAccess::isOwner($actor)) {
@@ -178,6 +190,7 @@ class ShopEmployeeController extends Controller
             'phone' => ($updating ? 'sometimes|' : '').'nullable|string|regex:/^09\d{9}$/',
             'username' => 'sometimes|nullable|string|regex:/^09\d{9}$/',
             'is_active' => ($updating ? 'sometimes|' : 'nullable|').'boolean',
+            'salary_type' => ($updating ? 'sometimes|' : 'nullable|').'in:monthly,daily',
             'base_salary' => ($updating ? 'sometimes|' : 'nullable|').'numeric|min:0',
             'base_work_hours' => ($updating ? 'sometimes|' : 'nullable|').'numeric|min:0',
             'hourly_wage' => ($updating ? 'sometimes|' : 'nullable|').'numeric|min:0',
@@ -194,6 +207,7 @@ class ShopEmployeeController extends Controller
     private function ruleMessages(): array
     {
         return [
+            'salary_type.in' => 'نوع حقوق باید ماهانه یا روزانه باشد.',
             'permissions.array' => 'لیست دسترسی باید آرایه باشد.',
             'permissions.*.in' => 'یکی از دسترسی‌های انتخاب‌شده معتبر نیست.',
             'permissions.*.string' => 'کلید دسترسی نامعتبر است.',
