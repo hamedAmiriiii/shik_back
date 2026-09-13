@@ -115,7 +115,11 @@ class SepClient
      */
     protected function postJson(string $url, array $payload): array
     {
-        $response = Http::timeout(30)->acceptJson()->asJson()->post($url, $payload);
+        $response = Http::withOptions(\App\Support\OutboundHttp::sslOptions())
+            ->timeout(30)
+            ->acceptJson()
+            ->asJson()
+            ->post($url, $payload);
         $json = $response->json();
         if (! is_array($json)) {
             throw new RuntimeException('پاسخ نامعتبر از درگاه سامان.');

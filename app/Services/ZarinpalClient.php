@@ -95,7 +95,23 @@ class ZarinpalClient
      */
     protected function post(string $url, array $payload): array
     {
-        $response = Http::timeout(25)->acceptJson()->asJson()->post($url, $payload);
+        try {
+            $response = Http::withOptions(\App\Support\OutboundHttp::sslOptions())
+                ->timeout(25)
+                ->acceptJson()
+                ->asJson()
+                ->post($url, $payload);
+        } catch (\Throwable $e) {
+            $msg = $e->getMessage();
+            if (stripos($msg, 'SSL') !== false || stripos($msg, 'certificate') !== false || stripos($msg, 'cURL error 60') !== false) {
+                throw new RuntimeException(
+                    'خطای SSL هنگام اتصال به زرین‌پال. فایل storage/certs/cacert.pem را روی سرور بگذارید یا HTTP_SSL_VERIFY=false تنظیم کنید.',
+                    0,
+                    $e
+                );
+            }
+            throw new RuntimeException('اتصال به زرین‌پال برقرار نشد: '.$msg, 0, $e);
+        }
         $json = $response->json();
         if (! is_array($json)) {
             throw new RuntimeException('پاسخ نامعتبر از زرین‌پال.');

@@ -1,0 +1,5 @@
+# گواهی‌های CA برای cURL/PHP (رفع خطای SSL 60)
+*
+!.gitignore
+!cacert.pem
+!README.md
