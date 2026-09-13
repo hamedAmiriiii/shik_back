@@ -56,6 +56,7 @@ class Setting extends Model
             'restaurant_cafe_enabled' => '0',
             'produced_goods_enabled' => '0',
             'accounting_enabled' => '0',
+            'receipt_print_settings' => '',
         ];
 
         foreach ($defaults as $key => $value) {
