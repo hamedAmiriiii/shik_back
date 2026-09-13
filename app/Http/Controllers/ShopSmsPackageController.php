@@ -39,6 +39,7 @@ class ShopSmsPackageController extends Controller
 
         $fields = $request->validate([
             'return_url' => 'nullable|string|max:1024',
+            'gateway' => 'nullable|string|in:'.implode(',', \App\Models\GatewayPayment::gateways()),
         ]);
 
         try {
@@ -48,17 +49,22 @@ class ShopSmsPackageController extends Controller
                 \App\Models\GatewayPayment::TYPE_SMS_PACKAGE,
                 (int) $smsPackage->id,
                 $fields['return_url'] ?? null,
-                $user->phone ?? null
+                $user->phone ?? null,
+                $fields['gateway'] ?? \App\Models\GatewayPayment::GATEWAY_ZARINPAL
             );
         } catch (\RuntimeException $e) {
             return response(['message' => $e->getMessage()], 422);
         }
 
+        $gateway = $payload['gateway'] ?? 'zarinpal';
+        $label = $gateway === 'sep' ? 'سامان کیش' : 'زرین‌پال';
+
         return response([
-            'message' => 'به درگاه زرین‌پال هدایت شوید.',
+            'message' => 'به درگاه '.$label.' هدایت شوید.',
             'payment' => $payload,
             'payment_url' => $payload['payment_url'],
-            'authority' => $payload['authority'],
+            'authority' => $payload['authority'] ?? null,
+            'gateway' => $gateway,
         ], 201);
     }
 

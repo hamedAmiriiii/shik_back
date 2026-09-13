@@ -30,9 +30,11 @@ class GatewayPaymentController extends Controller
             'item_id' => 'required|integer|min:1',
             'id' => 'nullable|integer|min:1',
             'return_url' => 'nullable|string|max:1024',
+            'gateway' => 'nullable|string|in:'.implode(',', GatewayPayment::gateways()),
         ]);
 
         $itemId = (int) ($fields['item_id'] ?? $fields['id'] ?? 0);
+        $gateway = $fields['gateway'] ?? GatewayPayment::GATEWAY_ZARINPAL;
 
         try {
             $payload = $payments->start(
@@ -41,17 +43,21 @@ class GatewayPaymentController extends Controller
                 $fields['type'],
                 $itemId,
                 $fields['return_url'] ?? null,
-                $user->phone ?? null
+                $user->phone ?? null,
+                $gateway
             );
         } catch (RuntimeException $e) {
             return response(['message' => $e->getMessage()], 422);
         }
 
+        $gatewayLabel = $gateway === GatewayPayment::GATEWAY_SEP ? 'سامان کیش' : 'زرین‌پال';
+
         return response([
-            'message' => 'به درگاه زرین‌پال هدایت شوید.',
+            'message' => 'به درگاه '.$gatewayLabel.' هدایت شوید.',
             'payment' => $payload,
             'payment_url' => $payload['payment_url'],
             'authority' => $payload['authority'],
+            'gateway' => $payload['gateway'] ?? $gateway,
         ], 201);
     }
 
@@ -84,6 +90,31 @@ class GatewayPaymentController extends Controller
             $request->query('Status', $request->query('status')),
             $request->query('pid') ? (int) $request->query('pid') : null
         );
+
+        return redirect()->away($result['redirect']);
+    }
+
+    public function sepGo(Request $request, GatewayPaymentService $payments)
+    {
+        $pid = (int) $request->query('pid');
+        if ($pid <= 0) {
+            return response('شناسه پرداخت نامعتبر است.', 400);
+        }
+
+        try {
+            return response($payments->sepGoHtml($pid), 200, [
+                'Content-Type' => 'text/html; charset=UTF-8',
+            ]);
+        } catch (RuntimeException $e) {
+            return response($e->getMessage(), 422);
+        }
+    }
+
+    public function sepCallback(Request $request, GatewayPaymentService $payments)
+    {
+        $payload = array_merge($request->query(), $request->request->all());
+        $pid = isset($payload['pid']) ? (int) $payload['pid'] : null;
+        $result = $payments->handleSepCallback($payload, $pid ?: null);
 
         return redirect()->away($result['redirect']);
     }

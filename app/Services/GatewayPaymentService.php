@@ -14,12 +14,14 @@ use RuntimeException;
 
 class GatewayPaymentService
 {
-    public function __construct(protected ZarinpalClient $zarinpal)
-    {
+    public function __construct(
+        protected ZarinpalClient $zarinpal,
+        protected SepClient $sep,
+    ) {
     }
 
     /**
-     * @return array{sms_packages: array<int, mixed>, shop_plans: array<int, mixed>}
+     * @return array{sms_packages: array<int, mixed>, shop_plans: array<int, mixed>, gateways: array<int, array<string, string>>, currency: string}
      */
     public function catalog(): array
     {
@@ -41,18 +43,32 @@ class GatewayPaymentService
             'sms_packages' => $sms,
             'shop_plans' => $plans,
             'currency' => 'IRR',
-            'gateway' => 'zarinpal',
+            'gateway' => GatewayPayment::GATEWAY_ZARINPAL,
+            'gateways' => [
+                ['id' => GatewayPayment::GATEWAY_ZARINPAL, 'name' => 'زرین‌پال'],
+                ['id' => GatewayPayment::GATEWAY_SEP, 'name' => 'سامان کیش (SEP)'],
+            ],
+            'default_gateway' => GatewayPayment::GATEWAY_ZARINPAL,
         ];
     }
 
     /**
      * @return array<string, mixed>
      */
-    public function start(int $atelierId, ?int $userId, string $type, int $itemId, ?string $returnUrl, ?string $mobile = null): array
-    {
+    public function start(
+        int $atelierId,
+        ?int $userId,
+        string $type,
+        int $itemId,
+        ?string $returnUrl,
+        ?string $mobile = null,
+        string $gateway = GatewayPayment::GATEWAY_ZARINPAL,
+    ): array {
         if (! Schema::hasTable('gateway_payments')) {
             throw new RuntimeException('جدول پرداخت ساخته نشده است. SQL درگاه را اجرا کنید.');
         }
+
+        $gateway = $this->normalizeGateway($gateway);
 
         [$amount, $description, $meta] = $this->resolveItem($type, $itemId);
         if ($amount < 1000) {
@@ -67,11 +83,23 @@ class GatewayPaymentService
             'amount_rial' => $amount,
             'description' => $description,
             'status' => GatewayPayment::STATUS_PENDING,
-            'gateway' => GatewayPayment::GATEWAY_ZARINPAL,
+            'gateway' => $gateway,
             'return_url' => $this->sanitizeReturnUrl($returnUrl),
             'meta' => $meta,
         ]);
 
+        if ($gateway === GatewayPayment::GATEWAY_SEP) {
+            return $this->startSep($payment, $mobile);
+        }
+
+        return $this->startZarinpal($payment, $mobile);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function startZarinpal(GatewayPayment $payment, ?string $mobile): array
+    {
         $callback = rtrim((string) (config('zarinpal.callback_url') ?: url('/api/payments/zarinpal/callback')), '/');
         $metadata = [];
         if (is_string($mobile) && $mobile !== '') {
@@ -79,15 +107,49 @@ class GatewayPaymentService
         }
 
         $authority = $this->zarinpal->request(
-            $amount,
+            (int) $payment->amount_rial,
             $callback.'?pid='.$payment->id,
-            $description,
+            (string) $payment->description,
             $metadata
         );
 
         $payment->update(['authority' => $authority]);
 
         return $this->formatPayment($payment->fresh(), $this->zarinpal->startPayUrl($authority));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function startSep(GatewayPayment $payment, ?string $mobile): array
+    {
+        $callback = rtrim((string) (config('sep.callback_url') ?: url('/api/payments/sep/callback')), '/');
+        $resNum = 'gp'.$payment->id;
+        $tokenResult = $this->sep->requestToken(
+            (int) $payment->amount_rial,
+            $resNum,
+            $callback.(str_contains($callback, '?') ? '&' : '?').'pid='.$payment->id,
+            $mobile
+        );
+
+        $meta = $payment->meta ?? [];
+        $meta['sep'] = [
+            'res_num' => $resNum,
+            'token' => $tokenResult['token'],
+        ];
+        $payment->update([
+            'authority' => $tokenResult['token'],
+            'meta' => $meta,
+        ]);
+
+        // صفحه میانی که فرم POST به درگاه سامان می‌فرستد (Referrer الزامی است)
+        $goUrl = url('/api/payments/sep/go?pid='.$payment->id);
+
+        return $this->formatPayment($payment->fresh(), $goUrl, [
+            'redirect_method' => 'GET',
+            'sep_pay_url' => $this->sep->payUrl(),
+            'sep_token' => $tokenResult['token'],
+        ]);
     }
 
     /**
@@ -130,7 +192,7 @@ class GatewayPaymentService
 
         try {
             $verified = $this->zarinpal->verify((string) $payment->authority, (int) $payment->amount_rial);
-            $this->fulfill($payment, $verified['ref_id'] ?? null, $verified);
+            $this->fulfill($payment, $verified['ref_id'] ?? null, $verified, 'zarinpal');
         } catch (RuntimeException $e) {
             $payment->update(['status' => GatewayPayment::STATUS_FAILED]);
 
@@ -149,6 +211,122 @@ class GatewayPaymentService
     }
 
     /**
+     * Callback درگاه سامان — معمولاً POST با State / RefNum / ResNum.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array{ok: bool, payment: array<string, mixed>, redirect: string}
+     */
+    public function handleSepCallback(array $payload, ?int $paymentId = null): array
+    {
+        $state = strtoupper((string) ($payload['State'] ?? $payload['state'] ?? ''));
+        $refNum = (string) ($payload['RefNum'] ?? $payload['refNum'] ?? '');
+        $resNum = (string) ($payload['ResNum'] ?? $payload['resNum'] ?? '');
+        $stateCode = (string) ($payload['StateCode'] ?? $payload['stateCode'] ?? '');
+
+        $payment = null;
+        if ($paymentId) {
+            $payment = GatewayPayment::query()->find($paymentId);
+        }
+        if (! $payment && $resNum !== '') {
+            $id = (int) preg_replace('/\D+/', '', $resNum);
+            if ($id > 0) {
+                $payment = GatewayPayment::query()->find($id);
+            }
+        }
+        if (! $payment && $resNum !== '' && str_starts_with($resNum, 'gp')) {
+            $payment = GatewayPayment::query()->find((int) substr($resNum, 2));
+        }
+
+        if (! $payment) {
+            return [
+                'ok' => false,
+                'payment' => [],
+                'redirect' => $this->redirectUrl(null, false, 'پرداخت یافت نشد.'),
+            ];
+        }
+
+        if ($payment->isPaid()) {
+            return [
+                'ok' => true,
+                'payment' => $this->formatPayment($payment),
+                'redirect' => $this->redirectUrl($payment, true),
+            ];
+        }
+
+        $okState = $state === 'OK' || $stateCode === '0' || $stateCode === '00';
+        if (! $okState || $refNum === '') {
+            $payment->update(['status' => GatewayPayment::STATUS_CANCELED]);
+
+            return [
+                'ok' => false,
+                'payment' => $this->formatPayment($payment),
+                'redirect' => $this->redirectUrl($payment, false, 'پرداخت لغو شد یا ناموفق بود.'),
+            ];
+        }
+
+        try {
+            $verified = $this->sep->verify($refNum);
+            if ($verified['amount'] !== null && (int) $verified['amount'] !== (int) $payment->amount_rial) {
+                throw new RuntimeException('مبلغ پرداخت با فاکتور هم‌خوانی ندارد.');
+            }
+            $metaExtra = [
+                'ref_num' => $refNum,
+                'res_num' => $resNum,
+                'state' => $state,
+                'trace_no' => $verified['trace_no'],
+                'card_pan' => $verified['card_pan'],
+            ];
+            $this->fulfill($payment, $verified['ref_id'] ?? $refNum, $metaExtra, 'sep');
+        } catch (RuntimeException $e) {
+            $payment->update(['status' => GatewayPayment::STATUS_FAILED]);
+
+            return [
+                'ok' => false,
+                'payment' => $this->formatPayment($payment->fresh()),
+                'redirect' => $this->redirectUrl($payment, false, $e->getMessage()),
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'payment' => $this->formatPayment($payment->fresh()),
+            'redirect' => $this->redirectUrl($payment->fresh(), true),
+        ];
+    }
+
+    public function sepGoHtml(int $paymentId): string
+    {
+        $payment = GatewayPayment::query()->find($paymentId);
+        if (! $payment || $payment->gateway !== GatewayPayment::GATEWAY_SEP) {
+            throw new RuntimeException('پرداخت سامان یافت نشد.');
+        }
+        $token = (string) ($payment->meta['sep']['token'] ?? $payment->authority ?? '');
+        if ($token === '') {
+            throw new RuntimeException('توکن پرداخت منقضی یا نامعتبر است.');
+        }
+        $action = htmlspecialchars($this->sep->payUrl(), ENT_QUOTES, 'UTF-8');
+        $tokenEsc = htmlspecialchars($token, ENT_QUOTES, 'UTF-8');
+
+        return '<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8"/><title>انتقال به درگاه سامان</title></head><body>'
+            .'<p style="font-family:Tahoma;text-align:center;margin-top:40px">در حال انتقال به درگاه سامان...</p>'
+            .'<form id="sepPay" method="post" action="'.$action.'">'
+            .'<input type="hidden" name="Token" value="'.$tokenEsc.'"/>'
+            .'<input type="hidden" name="GetMethod" value=""/>'
+            .'</form><script>document.getElementById("sepPay").submit();</script>'
+            .'</body></html>';
+    }
+
+    protected function normalizeGateway(string $gateway): string
+    {
+        $gateway = strtolower(trim($gateway));
+        if (! in_array($gateway, GatewayPayment::gateways(), true)) {
+            throw new RuntimeException('درگاه پرداخت نامعتبر است.');
+        }
+
+        return $gateway;
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     public function statusForAtelier(int $atelierId, string $authority): ?array
@@ -164,9 +342,9 @@ class GatewayPaymentService
     /**
      * @param  array<string, mixed>  $verified
      */
-    public function fulfill(GatewayPayment $payment, ?string $refId, array $verified = []): GatewayPayment
+    public function fulfill(GatewayPayment $payment, ?string $refId, array $verified = [], string $gatewayKey = 'zarinpal'): GatewayPayment
     {
-        return DB::transaction(function () use ($payment, $refId, $verified) {
+        return DB::transaction(function () use ($payment, $refId, $verified, $gatewayKey) {
             /** @var GatewayPayment $locked */
             $locked = GatewayPayment::query()->where('id', $payment->id)->lockForUpdate()->first();
             if ($locked->isPaid()) {
@@ -182,10 +360,12 @@ class GatewayPaymentService
             }
 
             $meta = $locked->meta ?? [];
-            $meta['zarinpal'] = [
+            $meta[$gatewayKey] = array_merge($meta[$gatewayKey] ?? [], [
                 'ref_id' => $refId,
                 'card_pan' => $verified['card_pan'] ?? null,
-            ];
+                'ref_num' => $verified['ref_num'] ?? null,
+                'trace_no' => $verified['trace_no'] ?? null,
+            ]);
             $locked->update([
                 'status' => GatewayPayment::STATUS_PAID,
                 'ref_id' => $refId,
@@ -198,9 +378,10 @@ class GatewayPaymentService
     }
 
     /**
+     * @param  array<string, mixed>  $extra
      * @return array<string, mixed>
      */
-    public function formatPayment(GatewayPayment $payment, ?string $paymentUrl = null): array
+    public function formatPayment(GatewayPayment $payment, ?string $paymentUrl = null, array $extra = []): array
     {
         $row = [
             'id' => $payment->id,
@@ -219,7 +400,7 @@ class GatewayPaymentService
             $row['payment_url'] = $paymentUrl;
         }
 
-        return $row;
+        return array_merge($row, $extra);
     }
 
     public function formatSmsPackage(SmsPackage $package): array
@@ -303,7 +484,7 @@ class GatewayPaymentService
             'status' => SmsPackageOrder::STATUS_APPROVED,
             'requested_by_user_id' => $payment->user_id,
             'reviewed_at' => now(),
-            'admin_note' => 'پرداخت زرین‌پال'.($payment->authority ? ' / '.$payment->authority : ''),
+            'admin_note' => 'پرداخت آنلاین ('.$payment->gateway.')'.($payment->authority ? ' / '.$payment->authority : ''),
         ]);
     }
 

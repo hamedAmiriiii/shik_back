@@ -37,6 +37,12 @@ Route::get('payments/zarinpal/callback', [\App\Http\Controllers\GatewayPaymentCo
     ->middleware('throttle:60,1');
 Route::post('payments/zarinpal/callback', [\App\Http\Controllers\GatewayPaymentController::class, 'zarinpalCallback'])
     ->middleware('throttle:60,1');
+Route::get('payments/sep/callback', [\App\Http\Controllers\GatewayPaymentController::class, 'sepCallback'])
+    ->middleware('throttle:60,1');
+Route::post('payments/sep/callback', [\App\Http\Controllers\GatewayPaymentController::class, 'sepCallback'])
+    ->middleware('throttle:60,1');
+Route::get('payments/sep/go', [\App\Http\Controllers\GatewayPaymentController::class, 'sepGo'])
+    ->middleware('throttle:60,1');
 Route::get('product-plans', [\App\Http\Controllers\ProductPlanController::class, 'index'])
     ->middleware('throttle:60,1');
 Route::post('product-plans/purchase', [\App\Http\Controllers\ProductPlanController::class, 'purchase'])

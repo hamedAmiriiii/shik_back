@@ -21,6 +21,14 @@ class GatewayPayment extends Model
 
     public const GATEWAY_ZARINPAL = 'zarinpal';
 
+    public const GATEWAY_SEP = 'sep';
+
+    /** @return list<string> */
+    public static function gateways(): array
+    {
+        return [self::GATEWAY_ZARINPAL, self::GATEWAY_SEP];
+    }
+
     protected $fillable = [
         'atelier_id',
         'user_id',
