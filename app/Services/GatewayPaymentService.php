@@ -123,9 +123,7 @@ class GatewayPaymentService
      */
     protected function startSep(GatewayPayment $payment, ?string $mobile): array
     {
-        // آدرس بازگشت باید دقیقاً همان دامنهٔ ثبت‌شده در پنل SEP باشد (معمولاً webinoo-plus.ir مثل زرین‌پال).
-        // به RedirectUrl کوئری (?pid=) اضافه نکنید؛ تطبیق دامنه/آدرس سخت‌گیرانه است.
-        $callback = rtrim((string) (config('sep.callback_url') ?: 'https://webinoo-plus.ir/sep-callback.php'), '/');
+        $callback = $this->sepRedirectUrl();
         $resNum = (string) $payment->id;
         $tokenResult = $this->sep->requestToken(
             (int) $payment->amount_rial,
@@ -153,6 +151,27 @@ class GatewayPaymentService
             'sep_pay_url' => $this->sep->payUrl(),
             'sep_token' => $tokenResult['token'],
         ]);
+    }
+
+    /**
+     * RedirectUrl ثبت‌شده در پنل SEP — باید دقیقاً همان باشد.
+     */
+    protected function sepRedirectUrl(): string
+    {
+        $fallback = 'https://webinoo-plus.ir/pay';
+        $callback = trim((string) config('sep.callback_url', $fallback));
+        if ($callback === '') {
+            return $fallback;
+        }
+
+        // اگر اشتباهاً آدرس API گذاشته شده، به دامنهٔ پذیرنده اصلاح کن
+        $host = parse_url($callback, PHP_URL_HOST) ?: '';
+        if ($host === 'api.webinoo-plus.ir' || $host === 'api.webinooplus.ir'
+            || stripos($callback, '/api/payments/sep') !== false) {
+            return $fallback;
+        }
+
+        return rtrim($callback, '/');
     }
 
     /**
