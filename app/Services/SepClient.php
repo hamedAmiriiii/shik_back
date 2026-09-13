@@ -22,14 +22,22 @@ class SepClient
             'RedirectUrl' => $redirectUrl,
         ];
         if (is_string($cellNumber) && $cellNumber !== '') {
-            $payload['CellNumber'] = preg_replace('/\D+/', '', $cellNumber) ?: $cellNumber;
+            // فقط رقم؛ بعضی ترمینال‌ها با فرمت اشتباه CellNumber خطا می‌دهند
+            $digits = preg_replace('/\D+/', '', $cellNumber);
+            if (is_string($digits) && strlen($digits) >= 10) {
+                $payload['CellNumber'] = $digits;
+            }
         }
 
         $json = $this->postJson($this->tokenUrl(), $payload);
         $status = (int) ($json['status'] ?? $json['Status'] ?? -1);
         $token = (string) ($json['token'] ?? $json['Token'] ?? '');
         if ($status !== 1 || $token === '') {
-            throw new RuntimeException($this->errorMessage($json, 'دریافت توکن درگاه سامان ناموفق بود.'));
+            $msg = $this->errorMessage($json, 'دریافت توکن درگاه سامان ناموفق بود.');
+            if ($status === -1 || stripos($msg, 'آدرس') !== false || stripos($msg, 'سرور') !== false) {
+                $msg .= ' — IP خروجی سرور API و آدرس بازگشت (RedirectUrl) را در پنل SEP بررسی کنید. آدرس فعلی: '.$redirectUrl;
+            }
+            throw new RuntimeException($msg);
         }
 
         return [

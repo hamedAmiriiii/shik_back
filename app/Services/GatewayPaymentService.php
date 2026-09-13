@@ -123,12 +123,14 @@ class GatewayPaymentService
      */
     protected function startSep(GatewayPayment $payment, ?string $mobile): array
     {
-        $callback = rtrim((string) (config('sep.callback_url') ?: url('/api/payments/sep/callback')), '/');
-        $resNum = 'gp'.$payment->id;
+        // آدرس بازگشت باید دقیقاً همان دامنهٔ ثبت‌شده در پنل SEP باشد (معمولاً webinoo-plus.ir مثل زرین‌پال).
+        // به RedirectUrl کوئری (?pid=) اضافه نکنید؛ تطبیق دامنه/آدرس سخت‌گیرانه است.
+        $callback = rtrim((string) (config('sep.callback_url') ?: 'https://webinoo-plus.ir/sep-callback.php'), '/');
+        $resNum = (string) $payment->id;
         $tokenResult = $this->sep->requestToken(
             (int) $payment->amount_rial,
             $resNum,
-            $callback.(str_contains($callback, '?') ? '&' : '?').'pid='.$payment->id,
+            $callback,
             $mobile
         );
 
@@ -136,6 +138,7 @@ class GatewayPaymentService
         $meta['sep'] = [
             'res_num' => $resNum,
             'token' => $tokenResult['token'],
+            'redirect_url' => $callback,
         ];
         $payment->update([
             'authority' => $tokenResult['token'],
@@ -233,7 +236,7 @@ class GatewayPaymentService
                 $payment = GatewayPayment::query()->find($id);
             }
         }
-        if (! $payment && $resNum !== '' && str_starts_with($resNum, 'gp')) {
+        if (! $payment && $resNum !== '' && strpos($resNum, 'gp') === 0) {
             $payment = GatewayPayment::query()->find((int) substr($resNum, 2));
         }
 
