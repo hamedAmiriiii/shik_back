@@ -57,6 +57,9 @@ class Atelier extends Model
         'subscription_status',
         'referred_by_user_id',
         'paid_plan_activated_at',
+        'subscription_current_price_rial',
+        'subscription_renewal_price_rial',
+        'subscription_renewal_days',
         'project_type',
         'oil_interval_km',
     ];
@@ -66,8 +69,14 @@ class Atelier extends Model
         'shop_access_ends_at' => 'datetime',
         'shop_access_suspended' => 'boolean',
         'paid_plan_activated_at' => 'datetime',
+        'subscription_current_price_rial' => 'integer',
+        'subscription_renewal_price_rial' => 'integer',
+        'subscription_renewal_days' => 'integer',
         'oil_interval_km' => 'integer',
     ];
+
+    /** مدت پیش‌فرض تمدید وقتی فقط قیمت سفارشی فروشگاه ست شده باشد */
+    public const DEFAULT_RENEWAL_DAYS = 365;
 
     /**
      * آیا پرسنل متصل به این فروشگاه اجازهٔ ورود و کار با بخش فروشگاه را دارد؟
@@ -125,7 +134,43 @@ class Atelier extends Model
             'subscription_status_label' => self::subscriptionStatusLabel($this->subscription_status ?? self::SUBSCRIPTION_TRIAL),
             'is_paid_plan' => ($this->subscription_status ?? self::SUBSCRIPTION_TRIAL) === self::SUBSCRIPTION_PAID,
             'paid_plan_activated_at' => $this->paid_plan_activated_at?->format('Y-m-d H:i:s'),
+            'subscription_current_price_rial' => $this->subscription_current_price_rial !== null
+                ? (int) $this->subscription_current_price_rial
+                : null,
+            'subscription_current_price_toman' => $this->subscription_current_price_rial !== null
+                ? (int) floor(((int) $this->subscription_current_price_rial) / 10)
+                : null,
+            'subscription_renewal_price_rial' => $this->subscription_renewal_price_rial !== null
+                ? (int) $this->subscription_renewal_price_rial
+                : null,
+            'subscription_renewal_price_toman' => $this->subscription_renewal_price_rial !== null
+                ? (int) floor(((int) $this->subscription_renewal_price_rial) / 10)
+                : null,
+            'subscription_renewal_days' => $this->effectiveRenewalDays(),
+            'has_custom_renewal_price' => $this->hasCustomRenewalPrice(),
         ];
+    }
+
+    public function hasCustomRenewalPrice(): bool
+    {
+        return $this->subscription_renewal_price_rial !== null
+            && (int) $this->subscription_renewal_price_rial >= 1000;
+    }
+
+    public function effectiveRenewalDays(): int
+    {
+        $days = (int) ($this->subscription_renewal_days ?? 0);
+
+        return $days > 0 ? $days : self::DEFAULT_RENEWAL_DAYS;
+    }
+
+    public function effectiveRenewalPriceRial(): ?int
+    {
+        if (! $this->hasCustomRenewalPrice()) {
+            return null;
+        }
+
+        return (int) $this->subscription_renewal_price_rial;
     }
 
     public static function subscriptionStatusLabel(?string $status): string

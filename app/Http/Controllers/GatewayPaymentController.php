@@ -15,26 +15,33 @@ class GatewayPaymentController extends Controller
 {
     public function catalog(Request $request, GatewayPaymentService $payments)
     {
-        $this->shopAtelierIdOrAbort($request);
+        // تمدید بعد از انقضا باید ممکن باشد — فقط شناسه فروشگاه لازم است.
+        $atelierId = $this->resolveShopAtelierIdOrAbort($request);
 
-        return response($payments->catalog(), 200);
+        return response($payments->catalog($atelierId), 200);
     }
 
     public function start(Request $request, GatewayPaymentService $payments)
     {
         $user = $this->requireStaffShopUser($request);
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->resolveShopAtelierIdOrAbort($request);
 
         $fields = $request->validate([
             'type' => 'required|string|in:'.GatewayPayment::TYPE_SMS_PACKAGE.','.GatewayPayment::TYPE_SHOP_PLAN,
-            'item_id' => 'required|integer|min:1',
-            'id' => 'nullable|integer|min:1',
+            'item_id' => 'required|integer|min:0',
+            'id' => 'nullable|integer|min:0',
             'return_url' => 'nullable|string|max:1024',
             'gateway' => 'nullable|string|in:'.implode(',', GatewayPayment::gateways()),
         ]);
 
         $itemId = (int) ($fields['item_id'] ?? $fields['id'] ?? 0);
         $gateway = $fields['gateway'] ?? GatewayPayment::GATEWAY_ZARINPAL;
+
+        // خرید پیامک فقط وقتی دسترسی فعال است؛ تمدید اشتراک حتی بعد از انقضا مجاز است.
+        if ($fields['type'] === GatewayPayment::TYPE_SMS_PACKAGE
+            && ! $this->shopRequestActorIsPlatformAdmin($request)) {
+            $this->assertShopAccessActive($atelierId);
+        }
 
         try {
             $payload = $payments->start(
@@ -63,7 +70,7 @@ class GatewayPaymentController extends Controller
 
     public function show(Request $request, string $authority, GatewayPaymentService $payments)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->resolveShopAtelierIdOrAbort($request);
         $row = $payments->statusForAtelier($atelierId, $authority);
         if (! $row) {
             return response(['message' => 'پرداخت یافت نشد.'], 404);

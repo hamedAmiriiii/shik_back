@@ -37,6 +37,9 @@ class ShopSmsQuotaController extends Controller
                 'ateliers.shop_access_suspended',
                 'ateliers.subscription_status',
                 'ateliers.paid_plan_activated_at',
+                'ateliers.subscription_current_price_rial',
+                'ateliers.subscription_renewal_price_rial',
+                'ateliers.subscription_renewal_days',
                 DB::raw('COALESCE(sms_quota_setting.value, 0) as shop_sms_quota'),
             ])
             ->orderByDesc('ateliers.id');
@@ -129,6 +132,11 @@ class ShopSmsQuotaController extends Controller
             'shop_access_suspended' => 'sometimes|boolean',
             'subscription_status' => 'sometimes|string|in:trial,paid',
             'activate_paid_plan' => 'sometimes|boolean',
+            'subscription_current_price_rial' => 'sometimes|nullable|integer|min:0|max:999999999999',
+            'subscription_renewal_price_rial' => 'sometimes|nullable|integer|min:0|max:999999999999',
+            'subscription_current_price_toman' => 'sometimes|nullable|integer|min:0|max:99999999999',
+            'subscription_renewal_price_toman' => 'sometimes|nullable|integer|min:0|max:99999999999',
+            'subscription_renewal_days' => 'sometimes|nullable|integer|min:1|max:3660',
         ]);
 
         $wasPaid = $atelier->isPaidPlan();
@@ -137,10 +145,15 @@ class ShopSmsQuotaController extends Controller
         $hasAccess = $request->has('shop_access_ends_at')
             || $request->has('shop_access_starts_at')
             || $request->has('shop_access_suspended');
+        $hasPricing = $request->has('subscription_current_price_rial')
+            || $request->has('subscription_renewal_price_rial')
+            || $request->has('subscription_current_price_toman')
+            || $request->has('subscription_renewal_price_toman')
+            || $request->has('subscription_renewal_days');
 
-        if (! $hasSms && ! $hasAccess) {
+        if (! $hasSms && ! $hasAccess && ! $hasPricing && ! $request->has('activate_paid_plan') && ! $request->has('subscription_status')) {
             return response()->json([
-                'message' => 'حداقل یکی از فیلدهای shop_sms_quota، shop_access_ends_at یا shop_access_suspended را بفرستید.',
+                'message' => 'حداقل یکی از فیلدهای موجودی پیامک، اعتبار دسترسی یا مبلغ اشتراک را بفرستید.',
             ], 422);
         }
 
@@ -149,8 +162,8 @@ class ShopSmsQuotaController extends Controller
             ShopSmsQuotaService::setBalance((int) $atelier->id, $newBalance);
         }
 
+        $update = [];
         if ($hasAccess) {
-            $update = [];
             if (array_key_exists('shop_access_starts_at', $fields)) {
                 $update['shop_access_starts_at'] = $fields['shop_access_starts_at']
                     ? $this->parseAccessDate($fields['shop_access_starts_at'], false)
@@ -167,6 +180,39 @@ class ShopSmsQuotaController extends Controller
             if (array_key_exists('subscription_status', $fields)) {
                 $update['subscription_status'] = $fields['subscription_status'];
             }
+        }
+
+        if ($hasPricing) {
+            if ($request->has('subscription_current_price_toman') && ! $request->has('subscription_current_price_rial')) {
+                $toman = $fields['subscription_current_price_toman'];
+                $update['subscription_current_price_rial'] = $toman === null || $toman === ''
+                    ? null
+                    : ((int) $toman) * 10;
+            } elseif (array_key_exists('subscription_current_price_rial', $fields)) {
+                $update['subscription_current_price_rial'] = $fields['subscription_current_price_rial'] !== null
+                    ? (int) $fields['subscription_current_price_rial']
+                    : null;
+            }
+
+            if ($request->has('subscription_renewal_price_toman') && ! $request->has('subscription_renewal_price_rial')) {
+                $toman = $fields['subscription_renewal_price_toman'];
+                $update['subscription_renewal_price_rial'] = $toman === null || $toman === ''
+                    ? null
+                    : ((int) $toman) * 10;
+            } elseif (array_key_exists('subscription_renewal_price_rial', $fields)) {
+                $update['subscription_renewal_price_rial'] = $fields['subscription_renewal_price_rial'] !== null
+                    ? (int) $fields['subscription_renewal_price_rial']
+                    : null;
+            }
+
+            if (array_key_exists('subscription_renewal_days', $fields)) {
+                $update['subscription_renewal_days'] = $fields['subscription_renewal_days'] !== null
+                    ? (int) $fields['subscription_renewal_days']
+                    : null;
+            }
+        }
+
+        if ($update !== []) {
             $atelier->update($update);
         }
 
@@ -192,6 +238,10 @@ class ShopSmsQuotaController extends Controller
             'shop_access_ends_at' => $atelier->shop_access_ends_at,
             'shop_access_suspended' => $atelier->shop_access_suspended,
             'subscription_status' => $atelier->subscription_status,
+            'paid_plan_activated_at' => $atelier->paid_plan_activated_at,
+            'subscription_current_price_rial' => $atelier->subscription_current_price_rial,
+            'subscription_renewal_price_rial' => $atelier->subscription_renewal_price_rial,
+            'subscription_renewal_days' => $atelier->subscription_renewal_days,
             'shop_sms_quota' => ShopSmsQuotaService::getBalance((int) $atelier->id),
         ];
 
@@ -252,6 +302,9 @@ class ShopSmsQuotaController extends Controller
             'shop_access_suspended' => $suspended,
             'subscription_status' => $row->subscription_status ?? Atelier::SUBSCRIPTION_TRIAL,
             'paid_plan_activated_at' => $row->paid_plan_activated_at ?? null,
+            'subscription_current_price_rial' => $row->subscription_current_price_rial ?? null,
+            'subscription_renewal_price_rial' => $row->subscription_renewal_price_rial ?? null,
+            'subscription_renewal_days' => $row->subscription_renewal_days ?? null,
         ]);
 
         return array_merge([

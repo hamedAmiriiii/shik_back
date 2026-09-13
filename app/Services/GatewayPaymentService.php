@@ -21,9 +21,9 @@ class GatewayPaymentService
     }
 
     /**
-     * @return array{sms_packages: array<int, mixed>, shop_plans: array<int, mixed>, gateways: array<int, array<string, string>>, currency: string}
+     * @return array{sms_packages: array<int, mixed>, shop_plans: array<int, mixed>, gateways: array<int, array<string, string>>, currency: string, shop_subscription?: array<string, mixed>}
      */
-    public function catalog(): array
+    public function catalog(?int $atelierId = null): array
     {
         $sms = [];
         if (Schema::hasTable('sms_packages')) {
@@ -39,7 +39,7 @@ class GatewayPaymentService
                 ->all();
         }
 
-        return [
+        $payload = [
             'sms_packages' => $sms,
             'shop_plans' => $plans,
             'currency' => 'IRR',
@@ -49,6 +49,57 @@ class GatewayPaymentService
                 ['id' => GatewayPayment::GATEWAY_SEP, 'name' => 'سامان کیش (SEP)'],
             ],
             'default_gateway' => GatewayPayment::GATEWAY_ZARINPAL,
+        ];
+
+        if ($atelierId) {
+            $atelier = Atelier::query()->find($atelierId);
+            if ($atelier) {
+                $payload['shop_subscription'] = [
+                    'current_price_rial' => $atelier->subscription_current_price_rial !== null
+                        ? (int) $atelier->subscription_current_price_rial
+                        : null,
+                    'current_price_toman' => $atelier->subscription_current_price_rial !== null
+                        ? (int) floor(((int) $atelier->subscription_current_price_rial) / 10)
+                        : null,
+                    'renewal_price_rial' => $atelier->effectiveRenewalPriceRial(),
+                    'renewal_price_toman' => $atelier->effectiveRenewalPriceRial() !== null
+                        ? (int) floor($atelier->effectiveRenewalPriceRial() / 10)
+                        : null,
+                    'renewal_days' => $atelier->effectiveRenewalDays(),
+                    'has_custom_renewal' => $atelier->hasCustomRenewalPrice(),
+                ];
+
+                if ($atelier->hasCustomRenewalPrice()) {
+                    $payload['shop_plans'] = [$this->formatShopCustomRenewalPlan($atelier)];
+                }
+            }
+        }
+
+        return $payload;
+    }
+
+    /**
+     * پلن تمدید اختصاصی فروشگاه — همان مبلغ تمدید ثبت‌شده برای این فروشگاه.
+     *
+     * @return array<string, mixed>
+     */
+    public function formatShopCustomRenewalPlan(Atelier $atelier): array
+    {
+        $days = $atelier->effectiveRenewalDays();
+        $priceRial = (int) $atelier->effectiveRenewalPriceRial();
+        $plan = ShopPlan::query()->active()->where('duration_days', $days)->orderBy('sort_order')->orderBy('id')->first()
+            ?? ShopPlan::query()->active()->orderBy('sort_order')->orderBy('id')->first();
+
+        return [
+            'id' => $plan ? (int) $plan->id : 0,
+            'type' => GatewayPayment::TYPE_SHOP_PLAN,
+            'name' => 'تمدید اشتراک',
+            'duration_days' => $days,
+            'price_rial' => $priceRial,
+            'price_toman' => (int) floor($priceRial / 10),
+            'sort_order' => 0,
+            'is_shop_custom_price' => true,
+            'description' => 'مبلغ تمدید اختصاصی فروشگاه شما',
         ];
     }
 
@@ -70,7 +121,7 @@ class GatewayPaymentService
 
         $gateway = $this->normalizeGateway($gateway);
 
-        [$amount, $description, $meta] = $this->resolveItem($type, $itemId);
+        [$amount, $description, $meta] = $this->resolveItem($type, $itemId, $atelierId);
         if ($amount < 1000) {
             throw new RuntimeException('مبلغ این آیتم برای پرداخت آنلاین معتبر نیست.');
         }
@@ -454,7 +505,7 @@ class GatewayPaymentService
     /**
      * @return array{0: int, 1: string, 2: array<string, mixed>}
      */
-    protected function resolveItem(string $type, int $itemId): array
+    protected function resolveItem(string $type, int $itemId, ?int $atelierId = null): array
     {
         if ($type === GatewayPayment::TYPE_SMS_PACKAGE) {
             $package = SmsPackage::query()->active()->find($itemId);
@@ -470,6 +521,24 @@ class GatewayPaymentService
         }
 
         if ($type === GatewayPayment::TYPE_SHOP_PLAN) {
+            $atelier = $atelierId ? Atelier::query()->find($atelierId) : null;
+            if ($atelier && $atelier->hasCustomRenewalPrice()) {
+                $days = $atelier->effectiveRenewalDays();
+                $amount = (int) $atelier->effectiveRenewalPriceRial();
+                $plan = $itemId > 0 ? ShopPlan::query()->find($itemId) : null;
+
+                return [
+                    $amount,
+                    'تمدید اشتراک '.$atelier->name,
+                    [
+                        'duration_days' => $days,
+                        'name' => 'تمدید اشتراک',
+                        'shop_custom_price' => true,
+                        'plan_id' => $plan?->id,
+                    ],
+                ];
+            }
+
             $plan = ShopPlan::query()->active()->find($itemId);
             if (! $plan) {
                 throw new RuntimeException('پلن اکانت یافت نشد.');
@@ -533,6 +602,12 @@ class GatewayPaymentService
         $atelier->shop_access_suspended = false;
         if (! $atelier->shop_access_starts_at) {
             $atelier->shop_access_starts_at = now();
+        }
+        // مبلغ پرداخت‌شده به‌عنوان قیمت فعلی ذخیره می‌شود؛ قیمت تمدید بعدی دست‌نخورده می‌ماند.
+        $atelier->subscription_current_price_rial = (int) $payment->amount_rial;
+        if (! $atelier->hasCustomRenewalPrice()) {
+            $atelier->subscription_renewal_price_rial = (int) $payment->amount_rial;
+            $atelier->subscription_renewal_days = $days;
         }
         $atelier->save();
 
