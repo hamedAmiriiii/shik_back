@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Atelier;
 use App\Models\Product;
 use App\Models\Setting;
 use App\Models\ShopTable;
@@ -461,7 +462,19 @@ class TableOrderController extends Controller
             ->where('table_number', $tableNumber)
             ->where('kind', $kind)
             ->where('is_active', true)
-            ->firstOrFail();
+            ->first();
+
+        // اگر با kind اشتباه باز شده (مثلاً اتاق با /reserv)، همان شماره را با kind واقعی پیدا کن
+        if (! $shopTable) {
+            $shopTable = ShopTable::where('atelier_id', $atelierId)
+                ->where('table_number', $tableNumber)
+                ->where('is_active', true)
+                ->firstOrFail();
+        }
+
+        $atelier = Atelier::query()->find($atelierId);
+        $restaurantCafeEnabled = Setting::isEnabled('restaurant_cafe_enabled', false);
+        $roomServicesEnabled = Setting::isEnabled('room_services_enabled', false);
 
         $pending = TableOrder::where('shop_table_id', $shopTable->id)
             ->where('status', TableOrder::STATUS_PENDING)
@@ -473,13 +486,21 @@ class TableOrderController extends Controller
 
         return response()->json([
             'table' => $shopTable,
+            'kind' => $shopTable->kind,
             'pending_orders' => $pending,
             'payment_methods' => TableOrder::paymentMethodsForApi(),
-            'room_services_enabled' => Setting::isEnabled('room_services_enabled', false),
-            'restaurant_cafe_enabled' => Setting::isEnabled('restaurant_cafe_enabled', false),
-            'allow_menu' => Setting::isEnabled('restaurant_cafe_enabled', false)
-                && ($shopTable->isRoom() || ! Setting::isEnabled('room_services_enabled', false)),
-            'allow_services' => Setting::isEnabled('room_services_enabled', false),
+            'room_services_enabled' => $roomServicesEnabled,
+            'restaurant_cafe_enabled' => $restaurantCafeEnabled,
+            // منو برای میز و اتاق وقتی رستوران/کافه فعال باشد
+            'allow_menu' => $restaurantCafeEnabled,
+            'allow_services' => $roomServicesEnabled,
+            'shop' => [
+                'id' => $atelier?->id,
+                'name' => $atelier?->name,
+                'code' => $atelier?->code,
+            ],
+            'shop_name' => $atelier?->name,
+            'shop_code' => $atelier?->code,
         ]);
     }
 
