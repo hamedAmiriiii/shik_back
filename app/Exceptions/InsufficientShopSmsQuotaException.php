@@ -7,11 +7,21 @@ use Illuminate\Contracts\Support\Responsable;
 
 class InsufficientShopSmsQuotaException extends Exception implements Responsable
 {
-    public function __construct(
-        public readonly int $required,
-        public readonly int $available,
-        public readonly int $charsPerSms = 70
-    ) {
+    /** @var int */
+    public $required;
+
+    /** @var int */
+    public $available;
+
+    /** @var int */
+    public $charsPerSms;
+
+    public function __construct($required, $available, $charsPerSms = 70)
+    {
+        $this->required = (int) $required;
+        $this->available = (int) $available;
+        $this->charsPerSms = (int) $charsPerSms;
+
         parent::__construct('اعتبار پیامک کافی نیست.');
     }
 

@@ -255,6 +255,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Shop SMS Logs routes - require authentication (برای فروشگاه)
     Route::prefix('shop-sms-logs')->name('shop-sms-logs.')->group(function () {
         Route::get('/', [\App\Http\Controllers\ShopSmsLogController::class, 'index']);
+        Route::post('refresh-pending', [\App\Http\Controllers\ShopSmsLogController::class, 'refreshPending']);
+        Route::post('{shopSmsLog}/refresh-status', [\App\Http\Controllers\ShopSmsLogController::class, 'refreshStatus']);
         Route::get('/{shopSmsLog}', [\App\Http\Controllers\ShopSmsLogController::class, 'show']);
     });
 

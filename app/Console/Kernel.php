@@ -66,6 +66,11 @@ class Kernel extends ConsoleKernel
             ->after(function () {
                 \Log::info('Scheduled task: cheques:convert-due - اجرا شد');
             });
+
+        // به‌روزرسانی وضعیت تحویل پیامک‌های فروشگاه از شینا
+        $schedule->command('shop-sms:refresh-statuses --limit=100')
+            ->everyFiveMinutes()
+            ->withoutOverlapping();
     }
 
     /**
