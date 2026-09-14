@@ -186,8 +186,11 @@ class Cheque extends Model
 
     /**
      * وصول چک: صادره → هزینه | دریافتی → درآمد
+     *
+     * @param  string|null  $clearDate  Y-m-d
+     * @param  int|null  $shopAccountId  حساب بانکی / تنخواه / صندوق
      */
-    public function clear(?string $clearDate = null): self
+    public function clear(?string $clearDate = null, ?int $shopAccountId = null): self
     {
         if ($this->status !== self::STATUS_PENDING) {
             throw new RuntimeException('فقط چک‌های در انتظار وصول قابل وصول هستند.');
@@ -195,7 +198,7 @@ class Cheque extends Model
 
         $date = $clearDate ?: Carbon::today('Asia/Tehran')->toDateString();
 
-        return DB::transaction(function () use ($date) {
+        return DB::transaction(function () use ($date, $shopAccountId) {
             $locked = static::where('id', $this->id)
                 ->where('status', self::STATUS_PENDING)
                 ->lockForUpdate()
@@ -205,12 +208,21 @@ class Cheque extends Model
                 throw new RuntimeException('چک قابل وصول نیست.');
             }
 
+            if ($shopAccountId) {
+                $locked->shop_account_id = $shopAccountId;
+                $locked->save();
+            }
+
             if ($locked->type === self::TYPE_ISSUED) {
                 $expense = null;
                 $invoice = $locked->invoice_id ? Invoice::find($locked->invoice_id) : null;
 
                 if (! $invoice && $locked->expense_id) {
                     $expense = Expense::find($locked->expense_id);
+                    if ($expense && $locked->shop_account_id && ! $expense->shop_account_id) {
+                        $expense->shop_account_id = $locked->shop_account_id;
+                        $expense->save();
+                    }
                 } elseif (! $invoice) {
                     $expensePayload = [
                         'user_name' => $locked->user_name ?: 'سیستم',
@@ -231,6 +243,11 @@ class Cheque extends Model
                     \App\Services\AccountingDocumentPoster::syncExpense($expense->fresh());
                 }
 
+                if ($invoice && $locked->shop_account_id && ! $invoice->shop_account_id) {
+                    $invoice->shop_account_id = $locked->shop_account_id;
+                    $invoice->save();
+                }
+
                 $accountId = $locked->shop_account_id
                     ?: ($invoice ? $invoice->shop_account_id : null)
                     ?: ($expense ? $expense->shop_account_id : null);
@@ -245,6 +262,7 @@ class Cheque extends Model
                 $locked->update([
                     'status' => self::STATUS_CLEARED,
                     'expense_id' => $expense ? $expense->id : $locked->expense_id,
+                    'shop_account_id' => $accountId ?: $locked->shop_account_id,
                     'cleared_at' => now(),
                 ]);
 
@@ -280,7 +298,7 @@ class Cheque extends Model
                 throw new RuntimeException('نوع چک نامعتبر است.');
             }
 
-            return $locked->fresh(['expense', 'income', 'purchase', 'invoice']);
+            return $locked->fresh(['expense', 'income', 'purchase', 'invoice', 'shopAccount']);
         });
     }
 

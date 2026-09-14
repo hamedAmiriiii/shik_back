@@ -7,6 +7,7 @@ use App\Models\DocumentPayment;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\ManualTrade;
+use App\Models\Cheque;
 use App\Models\ShopAccount;
 use App\Models\ShopAccountTransfer;
 use App\Services\ChartOfAccountsSeeder;
@@ -44,6 +45,7 @@ class ShopAccountBalanceService
                 'invoices' => 0.0,
                 'manual_purchases' => 0.0,
                 'manual_sales' => 0.0,
+                'cheque_clears' => 0.0,
                 'balance' => 0.0,
             ];
         }
@@ -90,9 +92,16 @@ class ShopAccountBalanceService
             }
         }
 
+        foreach (self::receivedChequeClearTotals($atelierId, $accountIds) as $id => $total) {
+            if (isset($result[$id])) {
+                $result[$id]['cheque_clears'] = $total;
+            }
+        }
+
         foreach ($result as $id => $row) {
+            $chequeClears = (float) ($row['cheque_clears'] ?? 0);
             $result[$id]['balance'] = round(
-                $row['deposits'] + $row['transfers_in'] + $row['manual_sales']
+                $row['deposits'] + $row['transfers_in'] + $row['manual_sales'] + $chequeClears
                     - $row['transfers_out'] - $row['expenses'] - $row['invoices'] - $row['manual_purchases'],
                 2
             );
@@ -377,6 +386,43 @@ class ShopAccountBalanceService
             ->where('atelier_id', $atelierId)
             ->where('type', $type)
             ->whereIn('shop_account_id', $accountIds)
+            ->selectRaw('shop_account_id, SUM(amount) as total')
+            ->groupBy('shop_account_id')
+            ->pluck('total', 'shop_account_id')
+            ->mapWithKeys(fn ($v, $k) => [(int) $k => (float) $v])
+            ->all();
+    }
+
+    /**
+     * وصول چک دریافتی به حساب بانکی/تنخواه (صندوق از دفتر حسابداری می‌آید).
+     *
+     * @param  array<int>  $accountIds
+     * @return array<int, float>
+     */
+    protected static function receivedChequeClearTotals(int $atelierId, array $accountIds): array
+    {
+        if (! Schema::hasTable('cheques') || ! Schema::hasColumn('cheques', 'shop_account_id')) {
+            return [];
+        }
+
+        $nonTillIds = ShopAccount::query()
+            ->forAtelier($atelierId)
+            ->whereIn('id', $accountIds)
+            ->get()
+            ->filter(fn (ShopAccount $account) => ! $account->isTill())
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        if ($nonTillIds === []) {
+            return [];
+        }
+
+        return Cheque::query()
+            ->where('atelier_id', $atelierId)
+            ->where('type', Cheque::TYPE_RECEIVED)
+            ->where('status', Cheque::STATUS_CLEARED)
+            ->whereIn('shop_account_id', $nonTillIds)
             ->selectRaw('shop_account_id, SUM(amount) as total')
             ->groupBy('shop_account_id')
             ->pluck('total', 'shop_account_id')

@@ -147,6 +147,11 @@ class AccountingSalePoster
             return null;
         }
 
+        $shopAccountId = (int) ($cheque->shop_account_id ?? 0);
+        $debitAccountId = $shopAccountId > 0
+            ? AccountingLedger::shopCashAccountId($atelierId, $shopAccountId)
+            : AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL);
+
         return AccountingVoucherService::post(
             $atelierId,
             self::eventDate($cheque->cleared_at),
@@ -154,7 +159,7 @@ class AccountingSalePoster
             AccountingVoucher::SOURCE_CHEQUE_CLEAR,
             (int) $cheque->id,
             [
-                ['account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL), 'debit' => $amount, 'credit' => 0],
+                ['account_id' => $debitAccountId, 'debit' => $amount, 'credit' => 0],
                 ['account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_CHEQUE_RECEIVABLE), 'debit' => 0, 'credit' => $amount],
             ]
         );

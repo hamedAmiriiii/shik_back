@@ -1,0 +1,44 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+/**
+ * درخواست مشاوره / خرید از لندینگ (مثلاً منوی دیجیتال).
+ */
+class ConsultationRequest extends Model
+{
+    public const STATUS_PENDING = 'pending';
+
+    public const STATUS_CONTACTED = 'contacted';
+
+    public const STATUS_DONE = 'done';
+
+    public const SOURCE_DIGITAL_MENU = 'digital_menu';
+
+    protected $fillable = [
+        'name',
+        'phone',
+        'state_id',
+        'city_id',
+        'state_name',
+        'city_name',
+        'business_name',
+        'source',
+        'status',
+        'admin_note',
+        'ip',
+    ];
+
+    public function state(): BelongsTo
+    {
+        return $this->belongsTo(State::class);
+    }
+
+    public function city(): BelongsTo
+    {
+        return $this->belongsTo(City::class);
+    }
+}

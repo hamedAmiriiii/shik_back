@@ -96,6 +96,13 @@ Route::prefix('agency-requests')->name('agency-requests.')->group(function () {
         ->middleware('throttle:10,60');
 });
 
+// درخواست مشاوره / خرید منوی دیجیتال — بدون لاگین
+Route::prefix('consultation-requests')->name('consultation-requests.')->group(function () {
+    Route::get('form-options', [\App\Http\Controllers\ConsultationRequestController::class, 'formOptions']);
+    Route::post('/', [\App\Http\Controllers\ConsultationRequestController::class, 'store'])
+        ->middleware('throttle:10,60');
+});
+
 Route::name('resetPassword.')->prefix('reset-password')->group(function () {
     Route::post('send-code', [\App\Http\Controllers\Auth\AuthController::class, 'sendForgotPasswordCode']);
     Route::post('confirm', [\App\Http\Controllers\Auth\AuthController::class, 'confirmForgotPassword']);

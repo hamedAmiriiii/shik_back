@@ -7,7 +7,7 @@
 --
 -- کل این فایل را یکجا در تب SQL phpMyAdmin اجرا کنید (نه دستوربه‌دستور جدا در نشست‌های مختلف).
 
-SET @aid = 13;
+SET @aid = ;
 
 SET FOREIGN_KEY_CHECKS = 0;
 

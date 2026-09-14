@@ -234,18 +234,25 @@ class ChequeController extends Controller
     /**
      * وصول چک → صادره=هزینه | دریافتی=درآمد
      * POST /api/cheques/{cheque}/clear
-     * body اختیاری: clear_date {year,month,day} شمسی — پیش‌فرض امروز
+     * body: shop_account_id (الزامی)، clear_date اختیاری
      */
     public function clear(Request $request, Cheque $cheque)
     {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
         $this->assertModelBelongsToStaffAtelier($request, $cheque);
 
         $fields = $request->validate([
+            'shop_account_id' => 'required|integer|exists:shop_accounts,id',
             'clear_date' => 'nullable|array',
             'clear_date.year' => 'required_with:clear_date|integer',
             'clear_date.month' => 'required_with:clear_date|integer|min:1|max:12',
             'clear_date.day' => 'required_with:clear_date|integer|min:1|max:31',
         ]);
+
+        $accountError = $this->paymentAccountError($atelierId, $fields['shop_account_id']);
+        if ($accountError) {
+            return response()->json(['message' => $accountError], 422);
+        }
 
         $clearDate = null;
         if (!empty($fields['clear_date'])) {
@@ -257,13 +264,13 @@ class ChequeController extends Controller
         }
 
         try {
-            $cleared = $cheque->clear($clearDate);
+            $cleared = $cheque->clear($clearDate, (int) $fields['shop_account_id']);
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
         $message = $cleared->type === Cheque::TYPE_RECEIVED
-            ? 'چک دریافتی وصول و به درآمد اضافه شد.'
+            ? 'چک دریافتی وصول و به حساب انتخاب‌شده واریز شد.'
             : 'چک صادره وصول شد.';
 
         $doc = $cleared->invoice ?: $cleared->expense;
