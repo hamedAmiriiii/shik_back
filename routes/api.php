@@ -470,6 +470,12 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::put('agency-requests/{agencyRequest}', [\App\Http\Controllers\Admin\AgencyRequestController::class, 'update']);
         Route::delete('agency-requests/{agencyRequest}', [\App\Http\Controllers\Admin\AgencyRequestController::class, 'destroy']);
 
+        // گرید درخواست‌های مشاوره / خرید منوی دیجیتال
+        Route::get('consultation-requests', [\App\Http\Controllers\Admin\ConsultationRequestController::class, 'index']);
+        Route::get('consultation-requests/{consultationRequest}', [\App\Http\Controllers\Admin\ConsultationRequestController::class, 'show']);
+        Route::put('consultation-requests/{consultationRequest}', [\App\Http\Controllers\Admin\ConsultationRequestController::class, 'update']);
+        Route::delete('consultation-requests/{consultationRequest}', [\App\Http\Controllers\Admin\ConsultationRequestController::class, 'destroy']);
+
         Route::resource("/log-sms", \App\Http\Controllers\Admin\LogSmsController::class)->only("index");
     });
 

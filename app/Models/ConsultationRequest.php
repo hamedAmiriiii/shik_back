@@ -16,7 +16,20 @@ class ConsultationRequest extends Model
 
     public const STATUS_DONE = 'done';
 
+    public const STATUS_REJECTED = 'rejected';
+
+    public const STATUSES = [
+        self::STATUS_PENDING => 'در انتظار بررسی',
+        self::STATUS_CONTACTED => 'تماس گرفته شد',
+        self::STATUS_DONE => 'انجام شد',
+        self::STATUS_REJECTED => 'رد شده',
+    ];
+
     public const SOURCE_DIGITAL_MENU = 'digital_menu';
+
+    public const SOURCES = [
+        self::SOURCE_DIGITAL_MENU => 'منوی دیجیتال',
+    ];
 
     protected $fillable = [
         'name',
@@ -32,6 +45,8 @@ class ConsultationRequest extends Model
         'ip',
     ];
 
+    protected $appends = ['status_label', 'source_label'];
+
     public function state(): BelongsTo
     {
         return $this->belongsTo(State::class);
@@ -40,5 +55,15 @@ class ConsultationRequest extends Model
     public function city(): BelongsTo
     {
         return $this->belongsTo(City::class);
+    }
+
+    public function getStatusLabelAttribute(): string
+    {
+        return self::STATUSES[$this->status] ?? (string) $this->status;
+    }
+
+    public function getSourceLabelAttribute(): string
+    {
+        return self::SOURCES[$this->source] ?? (string) ($this->source ?: '—');
     }
 }
