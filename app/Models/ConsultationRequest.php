@@ -27,8 +27,11 @@ class ConsultationRequest extends Model
 
     public const SOURCE_DIGITAL_MENU = 'digital_menu';
 
+    public const SOURCE_ACCOUNTING = 'accounting';
+
     public const SOURCES = [
         self::SOURCE_DIGITAL_MENU => 'منوی دیجیتال',
+        self::SOURCE_ACCOUNTING => 'حسابداری و فروش',
     ];
 
     protected $fillable = [

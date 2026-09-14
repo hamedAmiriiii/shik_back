@@ -99,7 +99,9 @@ class ConsultationRequestController extends Controller
 
     protected function notifyAdmin(ConsultationRequest $row): void
     {
-        $text = "درخواست مشاوره منوی دیجیتال وبینو\n"
+        $sourceLabel = ConsultationRequest::SOURCES[$row->source] ?? 'وبینو';
+
+        $text = "درخواست مشاوره {$sourceLabel}\n"
             ."نام: {$row->name}\n"
             ."مجموعه: {$row->business_name}\n"
             ."استان/شهر: {$row->state_name} - {$row->city_name}\n"
