@@ -29,6 +29,10 @@ class DailyTicketNumberService
         }
 
         $date = now('Asia/Tehran')->toDateString();
+        $rawCreated = $purchase->getRawOriginal('created_at');
+        if ($rawCreated) {
+            $date = \Carbon\Carbon::parse($rawCreated)->timezone('Asia/Tehran')->toDateString();
+        }
         $next = self::nextNumber($atelierId, $date);
         if ($next === null) {
             return null;

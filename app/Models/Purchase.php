@@ -246,7 +246,10 @@ class Purchase extends Model
             return 0.0;
         }
 
-        return $this->payableAmount();
+        return max(0, round(
+            $this->payableAmount() - $this->immediatePaidAmount() - $this->chequeAmount(),
+            2
+        ));
     }
 
     /**
@@ -289,10 +292,15 @@ class Purchase extends Model
         }
         if ($this->isDebt()) {
             if ($this->isDebtSettled()) {
-                return (float) $this->debt_settled_card_amount + (float) $this->debt_settled_cash_amount;
+                return $this->payableAmount();
             }
 
-            return 0.0;
+            $paid = $this->immediatePaidAmount();
+            if ($this->isChequeSettled()) {
+                $paid = round($paid + $this->chequeAmount(), 2);
+            }
+
+            return $paid;
         }
         if ($this->isCheque()) {
             $paid = $this->immediatePaidAmount();

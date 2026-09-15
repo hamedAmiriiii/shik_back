@@ -114,8 +114,8 @@ class PurchasedProductController extends Controller
             $total += $purchase->paid_amount;
         } elseif ($purchase->isDebt()) {
             $total += $purchase->isDebtSettled()
-                ? ((float) $purchase->debt_settled_card_amount + (float) $purchase->debt_settled_cash_amount)
-                : $purchase->payableAmount();
+                ? $purchase->payableAmount()
+                : $purchase->immediatePaidAmount();
         } elseif ($purchase->isCheque()) {
             $total += $purchase->immediatePaidAmount()
                 + ($purchase->isChequeSettled() ? $purchase->chequeAmount() : 0);
@@ -174,7 +174,7 @@ class PurchasedProductController extends Controller
 
         $request->validate([
             'client_id' => 'nullable|string|max:64',
-            'phone' => 'required_if:payment_type,debt|nullable|string|regex:/^09\d{9}$/',
+            'phone' => 'nullable|string|regex:/^09\d{9}$/',
             'products' => 'required|array|min:1',
             'products.*.product_id' => [
                 'nullable',
@@ -198,18 +198,19 @@ class PurchasedProductController extends Controller
             'products.*.color' => 'nullable|string|max:255',
             'use_credit' => 'nullable|boolean',
             'discount_amount' => 'nullable|numeric|min:0',
-            'payment_type' => 'nullable|string|in:cash,installment,debt,cheque',
-            'cheque_id' => 'required_if:payment_type,cheque|nullable|integer|exists:cheques,id',
+            'payment_type' => 'nullable|string|in:cash,installment,debt,cheque,mixed',
+            'cheque_id' => 'nullable|integer|exists:cheques,id',
             'installment_count' => 'required_if:payment_type,installment|integer|min:2|max:24',
             'card_amount' => 'nullable|numeric|min:0',
             'cash_amount' => 'nullable|numeric|min:0',
             'payment_settlement' => 'nullable|string|in:card,cash',
             'replace_purchase_id' => 'nullable|integer',
+            'sale_date' => 'nullable|date_format:Y-m-d',
         ]);
 
         $phone = $request->input('phone');
         $useCredit = $request->input('use_credit', false);
-        $paymentType = $request->input('payment_type', 'cash'); // پیش‌فرض: نقدی
+        $paymentType = $request->input('payment_type', 'cash');
         $installmentCount = $request->input('installment_count');
         $chequeId = $request->input('cheque_id');
 
@@ -351,7 +352,7 @@ class PurchasedProductController extends Controller
 
         $amountPaidNow = $paymentType === 'installment'
             ? $this->roundToThreeZeroEnding($finalTotalAmount / 3)
-            : ($paymentType === 'debt' ? 0.0 : (float) $payableAmount);
+            : (float) $payableAmount;
 
         $installmentReserve = 0.0;
         if ($paymentType === 'installment' && $installmentCount && $installmentAmount) {
@@ -363,67 +364,27 @@ class PurchasedProductController extends Controller
             }
         }
 
-        $settlement = $paymentType === 'debt'
-            ? ['card_amount' => 0.0, 'cash_amount' => 0.0]
-            : ['card_amount' => 0.0, 'cash_amount' => 0.0];
-
-        $linkedCheque = null;
-        if ($paymentType === 'cheque') {
-            if (! $chequeId) {
-                return response(['error' => 'برای فروش چکی، cheque_id الزامی است.'], 422);
-            }
-
-            $linkedCheque = Cheque::find($chequeId);
-            if (!$linkedCheque) {
-                return response(['error' => 'چک یافت نشد.'], 404);
-            }
-            if ($linkedCheque->type !== Cheque::TYPE_RECEIVED) {
-                return response(['error' => 'فقط چک دریافتی قابل اتصال به فروش است.'], 422);
-            }
-            if ($linkedCheque->status !== Cheque::STATUS_PENDING) {
-                return response(['error' => 'فقط چک در انتظار وصول قابل اتصال به فروش است.'], 422);
-            }
-            if ($linkedCheque->purchase_id
-                && (! $replacePurchase || (int) $linkedCheque->purchase_id !== (int) $replacePurchase->id)) {
-                return response(['error' => 'این چک قبلاً به فروش دیگری وصل شده است.'], 422);
-            }
-            if ($purchaseAtelierId !== null && (int) $linkedCheque->atelier_id !== (int) $purchaseAtelierId) {
-                return response(['error' => 'چک متعلق به این فروشگاه نیست.'], 422);
-            }
-
-            $chequeAmount = round((float) $linkedCheque->amount, 2);
-            if ($chequeAmount <= 0) {
-                return response(['error' => 'مبلغ چک نامعتبر است.'], 422);
-            }
-            if ($chequeAmount > $payableAmount + 0.02) {
-                return response([
-                    'error' => 'مبلغ چک بیشتر از مبلغ قابل پرداخت فروش است.',
-                    'cheque_amount' => $chequeAmount,
-                    'payable_amount' => (float) $payableAmount,
-                ], 422);
-            }
-
-            // بخش نقد/کارت = باقیمانده بعد از چک (می‌تواند صفر باشد = تمام‌چکی)
-            $immediateDue = round(max(0, (float) $payableAmount - $chequeAmount), 2);
-            if ($immediateDue <= 0.02) {
-                $settlement = ['card_amount' => 0.0, 'cash_amount' => 0.0];
-            } else {
-                // اگر فقط یکی از نقد/کارت ارسال شده یا payment_settlement، باقیمانده را پر می‌کند
-                $settlement = $this->resolvePurchaseSettlement($request, $immediateDue);
-            }
-
-            if (abs($chequeAmount + $settlement['card_amount'] + $settlement['cash_amount'] - (float) $payableAmount) > 0.02) {
-                return response([
-                    'error' => 'جمع نقد + کارت + چک باید برابر مبلغ قابل پرداخت باشد.',
-                    'payable_amount' => (float) $payableAmount,
-                    'cheque_amount' => $chequeAmount,
-                    'card_amount' => $settlement['card_amount'],
-                    'cash_amount' => $settlement['cash_amount'],
-                ], 422);
-            }
-        } elseif ($paymentType !== 'debt') {
-            $settlement = $this->resolvePurchaseSettlement($request, $amountPaidNow);
+        try {
+            $paymentBundle = $this->resolvePosPaymentMethod(
+                $request,
+                (string) $paymentType,
+                (float) $payableAmount,
+                (float) $amountPaidNow,
+                $chequeId ? (int) $chequeId : null,
+                $phone,
+                $replacePurchase,
+                $purchaseAtelierId
+            );
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            throw $e;
+        } catch (\RuntimeException $e) {
+            return response(['error' => $e->getMessage()], 422);
         }
+
+        $paymentType = $paymentBundle['payment_type'];
+        $settlement = $paymentBundle['settlement'];
+        $linkedCheque = $paymentBundle['linkedCheque'];
+        $amountPaidNow = $paymentBundle['amount_paid_now'];
 
         // ایجاد سبد خرید (Purchase)
         $saleAttempts = 4;
@@ -462,6 +423,9 @@ class PurchasedProductController extends Controller
                 $installmentReserve = $replanned['installmentReserve'];
                 $settlement = $replanned['settlement'];
                 $linkedCheque = $replanned['linkedCheque'];
+                if (! empty($replanned['paymentType'])) {
+                    $paymentType = $replanned['paymentType'];
+                }
             }
 
             if ($creditUsed > 0 || $installmentReserve > 0) {
@@ -485,16 +449,21 @@ class PurchasedProductController extends Controller
                 $userShiksho = $lockedUser;
             }
 
-            if ($paymentType === 'cheque') {
+            if ($chequeId) {
                 $linkedCheque = Cheque::query()
                     ->where('id', $chequeId)
                     ->where('type', Cheque::TYPE_RECEIVED)
                     ->where('status', Cheque::STATUS_PENDING)
-                    ->whereNull('purchase_id')
+                    ->where(function ($q) use ($replacePurchase) {
+                        $q->whereNull('purchase_id');
+                        if ($replacePurchase) {
+                            $q->orWhere('purchase_id', $replacePurchase->id);
+                        }
+                    })
                     ->lockForUpdate()
                     ->first();
 
-                if (!$linkedCheque) {
+                if (! $linkedCheque) {
                     DB::rollBack();
 
                     return response(['error' => 'چک برای اتصال به فروش در دسترس نیست.'], 422);
@@ -508,7 +477,7 @@ class PurchasedProductController extends Controller
                 'credit_used' => $creditUsed,
                 'credit_earned' => $creditEarned,
                 'payment_type' => $paymentType,
-                'cheque_id' => $paymentType === 'cheque' ? $linkedCheque->id : null,
+                'cheque_id' => $linkedCheque ? $linkedCheque->id : null,
                 'card_amount' => $settlement['card_amount'],
                 'cash_amount' => $settlement['cash_amount'],
                 'is_debt_settled' => false,
@@ -517,17 +486,41 @@ class PurchasedProductController extends Controller
                 'atelier_id' => $purchaseAtelierId,
             ];
 
+            $saleCreatedAt = null;
+            if ($request->filled('sale_date')) {
+                try {
+                    $saleCreatedAt = \Carbon\Carbon::createFromFormat(
+                        'Y-m-d',
+                        $request->input('sale_date'),
+                        'Asia/Tehran'
+                    )->setTimeFrom(now('Asia/Tehran'));
+                } catch (\Throwable $e) {
+                    DB::rollBack();
+
+                    return response(['error' => 'تاریخ فروش نامعتبر است.'], 422);
+                }
+            }
+
             if ($replacePurchase) {
                 $replacePurchase->fill($purchasePayload);
+                if ($saleCreatedAt) {
+                    $replacePurchase->created_at = $saleCreatedAt;
+                    $replacePurchase->updated_at = $saleCreatedAt;
+                }
                 $replacePurchase->save();
                 $purchase = $replacePurchase;
             } else {
                 $purchasePayload['client_id'] = $clientId;
-                $purchase = Purchase::create($purchasePayload);
+                $purchase = new Purchase($purchasePayload);
+                if ($saleCreatedAt) {
+                    $purchase->created_at = $saleCreatedAt;
+                    $purchase->updated_at = $saleCreatedAt;
+                }
+                $purchase->save();
                 \App\Services\DailyTicketNumberService::assign($purchase);
             }
 
-            if ($paymentType === 'cheque' && $linkedCheque) {
+            if ($linkedCheque) {
                 $linkedCheque->update(['purchase_id' => $purchase->id]);
             }
 
@@ -554,7 +547,7 @@ class PurchasedProductController extends Controller
                 \App\Services\CustomerCreditExpenseService::recordCreditUsed($purchase, $actorName);
             }
             $purchase->load(['purchasedProducts', 'cheque']);
-            if ($paymentType === 'cheque' && $linkedCheque) {
+            if ($linkedCheque) {
                 \App\Services\AccountingMiscPoster::reverseReceivedCheque($linkedCheque);
             }
             \App\Services\AccountingSalePoster::post($purchase);
@@ -812,6 +805,174 @@ class PurchasedProductController extends Controller
     }
 
     /**
+     * نرمال‌سازی روش پرداخت فروش (نقد / نسیه / چک / ترکیبی).
+     *
+     * @return array{
+     *   payment_type: string,
+     *   settlement: array{card_amount: float, cash_amount: float},
+     *   linkedCheque: ?\App\Models\Cheque,
+     *   debt_residual: float,
+     *   amount_paid_now: float
+     * }
+     */
+    private function resolvePosPaymentMethod(
+        Request $request,
+        string $paymentType,
+        float $payableAmount,
+        float $amountPaidNowHint,
+        ?int $chequeId,
+        ?string $phone,
+        $replacePurchase,
+        $purchaseAtelierId
+    ): array {
+        if ($paymentType === 'installment') {
+            return [
+                'payment_type' => 'installment',
+                'settlement' => $this->resolvePurchaseSettlement($request, $amountPaidNowHint),
+                'linkedCheque' => null,
+                'debt_residual' => 0.0,
+                'amount_paid_now' => round($amountPaidNowHint, 2),
+            ];
+        }
+
+        $linkedCheque = null;
+        $chequeAmount = 0.0;
+        if ($chequeId) {
+            $linkedCheque = $this->assertSaleChequeAvailable(
+                $chequeId,
+                $payableAmount,
+                $replacePurchase,
+                $purchaseAtelierId,
+                in_array($paymentType, ['cheque', 'mixed', 'debt'], true)
+            );
+            $chequeAmount = round((float) $linkedCheque->amount, 2);
+        } elseif ($paymentType === 'cheque') {
+            throw new \RuntimeException('برای فروش چکی، cheque_id الزامی است.');
+        }
+
+        if ($paymentType === 'cash') {
+            $settlement = $this->resolvePurchaseSettlement($request, $payableAmount);
+
+            return [
+                'payment_type' => 'cash',
+                'settlement' => $settlement,
+                'linkedCheque' => null,
+                'debt_residual' => 0.0,
+                'amount_paid_now' => round($settlement['card_amount'] + $settlement['cash_amount'], 2),
+            ];
+        }
+
+        if ($paymentType === 'cheque') {
+            $immediateDue = round(max(0, $payableAmount - $chequeAmount), 2);
+            if ($immediateDue <= 0.02) {
+                $settlement = ['card_amount' => 0.0, 'cash_amount' => 0.0];
+            } else {
+                $settlement = $this->resolvePurchaseSettlement($request, $immediateDue);
+            }
+            if (abs($chequeAmount + $settlement['card_amount'] + $settlement['cash_amount'] - $payableAmount) > 0.02) {
+                throw new \RuntimeException('جمع نقد + کارت + چک باید برابر مبلغ قابل پرداخت باشد.');
+            }
+
+            return [
+                'payment_type' => 'cheque',
+                'settlement' => $settlement,
+                'linkedCheque' => $linkedCheque,
+                'debt_residual' => 0.0,
+                'amount_paid_now' => round($settlement['card_amount'] + $settlement['cash_amount'], 2),
+            ];
+        }
+
+        // debt یا mixed: نقد/کارت/چک اختیاری؛ مانده = نسیه
+        $card = round(max(0, (float) $request->input('card_amount', 0)), 2);
+        $cash = round(max(0, (float) $request->input('cash_amount', 0)), 2);
+
+        if ($paymentType === 'debt' && $card < 0.01 && $cash < 0.01 && ! $linkedCheque) {
+            if (! $phone) {
+                throw new \RuntimeException('برای فروش نسیه شماره موبایل الزامی است.');
+            }
+
+            return [
+                'payment_type' => 'debt',
+                'settlement' => ['card_amount' => 0.0, 'cash_amount' => 0.0],
+                'linkedCheque' => null,
+                'debt_residual' => round($payableAmount, 2),
+                'amount_paid_now' => 0.0,
+            ];
+        }
+
+        $covered = round($cash + $card + $chequeAmount, 2);
+        if ($covered > $payableAmount + 0.02) {
+            throw new \RuntimeException('جمع نقد + کارت + چک بیشتر از مبلغ قابل پرداخت است.');
+        }
+
+        $debtResidual = round(max(0, $payableAmount - $covered), 2);
+        if ($debtResidual > 0.02 && ! $phone) {
+            throw new \RuntimeException('برای مانده نسیه شماره موبایل الزامی است.');
+        }
+
+        if ($paymentType === 'mixed' && $covered < 0.02 && $debtResidual < 0.02) {
+            throw new \RuntimeException('در حالت ترکیبی حداقل یکی از نقد، کارت، چک یا نسیه را مشخص کنید.');
+        }
+
+        $normalized = 'cash';
+        if ($debtResidual > 0.02) {
+            $normalized = 'debt';
+        } elseif ($linkedCheque) {
+            $normalized = 'cheque';
+        }
+
+        return [
+            'payment_type' => $normalized,
+            'settlement' => [
+                'card_amount' => $card,
+                'cash_amount' => $cash,
+            ],
+            'linkedCheque' => $linkedCheque,
+            'debt_residual' => $debtResidual,
+            'amount_paid_now' => round($cash + $card, 2),
+        ];
+    }
+
+    private function assertSaleChequeAvailable(
+        int $chequeId,
+        float $payableAmount,
+        $replacePurchase,
+        $purchaseAtelierId,
+        bool $allowPartialCover
+    ) {
+        $linkedCheque = Cheque::find($chequeId);
+        if (! $linkedCheque) {
+            throw new \RuntimeException('چک یافت نشد.');
+        }
+        if ($linkedCheque->type !== Cheque::TYPE_RECEIVED) {
+            throw new \RuntimeException('فقط چک دریافتی قابل اتصال به فروش است.');
+        }
+        if ($linkedCheque->status !== Cheque::STATUS_PENDING) {
+            throw new \RuntimeException('فقط چک در انتظار وصول قابل اتصال به فروش است.');
+        }
+        if ($linkedCheque->purchase_id
+            && (! $replacePurchase || (int) $linkedCheque->purchase_id !== (int) $replacePurchase->id)) {
+            throw new \RuntimeException('این چک قبلاً به فروش دیگری وصل شده است.');
+        }
+        if ($purchaseAtelierId !== null && (int) $linkedCheque->atelier_id !== (int) $purchaseAtelierId) {
+            throw new \RuntimeException('چک متعلق به این فروشگاه نیست.');
+        }
+
+        $chequeAmount = round((float) $linkedCheque->amount, 2);
+        if ($chequeAmount <= 0) {
+            throw new \RuntimeException('مبلغ چک نامعتبر است.');
+        }
+        if (! $allowPartialCover && $chequeAmount > $payableAmount + 0.02) {
+            throw new \RuntimeException('مبلغ چک بیشتر از مبلغ قابل پرداخت فروش است.');
+        }
+        if ($allowPartialCover && $chequeAmount > $payableAmount + 0.02) {
+            throw new \RuntimeException('مبلغ چک بیشتر از مبلغ قابل پرداخت فروش است.');
+        }
+
+        return $linkedCheque;
+    }
+
+    /**
      * تسویهٔ پرداخت در لحظهٔ فروش: کارت / نقد دستی (جمع باید برابر مبلغ پرداختی باشد).
      *
      * @return array{card_amount: float, cash_amount: float}
@@ -930,7 +1091,7 @@ class PurchasedProductController extends Controller
 
         $amountPaidNow = $paymentType === 'installment'
             ? $this->roundToThreeZeroEnding($finalTotalAmount / 3)
-            : ($paymentType === 'debt' ? 0.0 : (float) $payableAmount);
+            : (float) $payableAmount;
 
         $installmentReserve = 0.0;
         if ($paymentType === 'installment' && $installmentCount && $installmentAmount) {
@@ -940,54 +1101,21 @@ class PurchasedProductController extends Controller
             }
         }
 
-        $settlement = ['card_amount' => 0.0, 'cash_amount' => 0.0];
-        $linkedCheque = null;
-        if ($paymentType === 'cheque') {
-            if (! $chequeId) {
-                throw new \RuntimeException('برای فروش چکی، cheque_id الزامی است.');
-            }
-            $linkedCheque = Cheque::find($chequeId);
-            if (! $linkedCheque) {
-                throw new \RuntimeException('چک یافت نشد.');
-            }
-            if ($linkedCheque->type !== Cheque::TYPE_RECEIVED) {
-                throw new \RuntimeException('فقط چک دریافتی قابل اتصال به فروش است.');
-            }
-            if ($linkedCheque->status !== Cheque::STATUS_PENDING) {
-                throw new \RuntimeException('فقط چک در انتظار وصول قابل اتصال به فروش است.');
-            }
-            if ($linkedCheque->purchase_id
-                && (! $replacePurchase || (int) $linkedCheque->purchase_id !== (int) $replacePurchase->id)) {
-                throw new \RuntimeException('این چک قبلاً به فروش دیگری وصل شده است.');
-            }
-            if ($purchaseAtelierId !== null && (int) $linkedCheque->atelier_id !== (int) $purchaseAtelierId) {
-                throw new \RuntimeException('چک متعلق به این فروشگاه نیست.');
-            }
-            $chequeAmount = round((float) $linkedCheque->amount, 2);
-            if ($chequeAmount <= 0) {
-                throw new \RuntimeException('مبلغ چک نامعتبر است.');
-            }
-            if ($chequeAmount > $payableAmount + 0.02) {
-                throw new \RuntimeException('مبلغ چک بیشتر از مبلغ قابل پرداخت فروش است.');
-            }
-            $immediateDue = round(max(0, (float) $payableAmount - $chequeAmount), 2);
-            if ($immediateDue > 0.02) {
-                try {
-                    $settlement = $this->resolvePurchaseSettlement($request, $immediateDue);
-                } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
-                    throw new \RuntimeException('جمع مبلغ کارت و نقد باید برابر مبلغ پرداختی باشد.');
-                }
-            }
-            if (abs($chequeAmount + $settlement['card_amount'] + $settlement['cash_amount'] - (float) $payableAmount) > 0.02) {
-                throw new \RuntimeException('جمع نقد + کارت + چک باید برابر مبلغ قابل پرداخت باشد.');
-            }
-        } elseif ($paymentType !== 'debt') {
-            try {
-                $settlement = $this->resolvePurchaseSettlement($request, $amountPaidNow);
-            } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
-                throw new \RuntimeException('جمع مبلغ کارت و نقد باید برابر مبلغ پرداختی باشد.');
-            }
-        }
+        $paymentBundle = $this->resolvePosPaymentMethod(
+            $request,
+            (string) $paymentType,
+            (float) $payableAmount,
+            (float) $amountPaidNow,
+            $chequeId ? (int) $chequeId : null,
+            $phone,
+            $replacePurchase,
+            $purchaseAtelierId
+        );
+
+        $paymentType = $paymentBundle['payment_type'];
+        $settlement = $paymentBundle['settlement'];
+        $linkedCheque = $paymentBundle['linkedCheque'];
+        $amountPaidNow = $paymentBundle['amount_paid_now'];
 
         return [
             'productsData' => $productsData,
@@ -1003,6 +1131,7 @@ class PurchasedProductController extends Controller
             'installmentReserve' => $installmentReserve,
             'settlement' => $settlement,
             'linkedCheque' => $linkedCheque,
+            'paymentType' => $paymentType,
         ];
     }
      

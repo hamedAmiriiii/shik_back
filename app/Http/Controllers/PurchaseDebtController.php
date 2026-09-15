@@ -59,7 +59,7 @@ class PurchaseDebtController extends Controller
         $grouped = [];
         foreach ($purchases as $purchase) {
             $phone = $purchase->phone;
-            $amount = $purchase->payableAmount();
+            $amount = $purchase->outstandingDebtAmount();
             if ($amount <= 0) {
                 continue;
             }
@@ -185,7 +185,7 @@ class PurchaseDebtController extends Controller
             return response()->json(['message' => 'این فاکتور قبلاً تسویه شده است.'], 422);
         }
 
-        $payable = $purchase->payableAmount();
+        $payable = $purchase->outstandingDebtAmount();
         if ($payable <= 0) {
             return response()->json(['message' => 'مبلغ قابل تسویه این فاکتور صفر است.'], 422);
         }
@@ -254,7 +254,10 @@ class PurchaseDebtController extends Controller
             'total_amount' => (float) $purchase->total_amount,
             'discount_amount' => (float) $purchase->discount_amount,
             'credit_used' => (float) $purchase->credit_used,
-            'payable_amount' => $purchase->payableAmount(),
+            'payable_amount' => $purchase->outstandingDebtAmount(),
+            'invoice_payable_amount' => $purchase->payableAmount(),
+            'cash_amount' => (float) $purchase->cash_amount,
+            'card_amount' => (float) $purchase->card_amount,
             'is_debt_settled' => (bool) $purchase->is_debt_settled,
             'debt_settled_at' => $purchase->debt_settled_at,
             'debt_settled_card_amount' => (float) $purchase->debt_settled_card_amount,
