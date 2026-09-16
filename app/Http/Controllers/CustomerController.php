@@ -22,11 +22,13 @@ class CustomerController extends Controller
             'phone' => 'required|string|digits:11',
             'name' => 'nullable|string|max:255',
             'full_name' => 'nullable|string|max:255',
+            'birth_date' => 'nullable|date',
         ]);
 
         $atelierId = $this->shopAtelierIdOrAbort($request);
         $name = trim((string) ($validated['name'] ?? $validated['full_name'] ?? ''));
         $name = $name !== '' ? $name : null;
+        $birthDate = $validated['birth_date'] ?? null;
 
         $create = [
             'credit' => 0,
@@ -37,14 +39,26 @@ class CustomerController extends Controller
         if ($name !== null && Schema::hasColumn('user_shiksho', 'name')) {
             $create['name'] = $name;
         }
+        if ($birthDate !== null && Schema::hasColumn('user_shiksho', 'birth_date')) {
+            $create['birth_date'] = $birthDate;
+        }
 
         $userShiksho = UserShiksho::firstOrCreate(
             ['phone' => $validated['phone'], 'atelier_id' => $atelierId],
             $create
         );
 
-        if (! $userShiksho->wasRecentlyCreated && $name !== null && Schema::hasColumn('user_shiksho', 'name')) {
-            $userShiksho->update(['name' => $name]);
+        if (! $userShiksho->wasRecentlyCreated) {
+            $updates = [];
+            if ($name !== null && Schema::hasColumn('user_shiksho', 'name')) {
+                $updates['name'] = $name;
+            }
+            if ($birthDate !== null && Schema::hasColumn('user_shiksho', 'birth_date')) {
+                $updates['birth_date'] = $birthDate;
+            }
+            if ($updates !== []) {
+                $userShiksho->update($updates);
+            }
         }
 
         $smsSent = false;
@@ -174,6 +188,9 @@ class CustomerController extends Controller
         $stats = [
             'phone' => $phone,
             'name' => $userShiksho->name ?? null,
+            'birth_date' => $userShiksho && $userShiksho->birth_date
+                ? $userShiksho->birth_date->format('Y-m-d')
+                : null,
             'id' => $userShiksho->id ?? null,
             'total_purchases' => $purchases->count(),
             'total_spent' => $purchases->sum('total_amount'),
@@ -200,6 +217,102 @@ class CustomerController extends Controller
             'stats' => $stats,
             'purchases' => $purchases,
             'as_beneficiary' => $asBeneficiary,
+        ], 200);
+    }
+
+    /**
+     * داشبورد باشگاه مشتریان: پرفروش‌ها + آمار خرید ۳۰ روز
+     */
+    public function clubDashboard(Request $request)
+    {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $since = now()->subDays(30);
+
+        $inactive30d = (int) DB::table('purchases')
+            ->select('phone')
+            ->where('atelier_id', $atelierId)
+            ->whereNotNull('phone')
+            ->where('phone', '!=', '')
+            ->groupBy('phone')
+            ->havingRaw('MAX(created_at) < ?', [$since])
+            ->get()
+            ->count();
+
+        $frequent30d = (int) DB::table('purchases')
+            ->select('phone')
+            ->where('atelier_id', $atelierId)
+            ->whereNotNull('phone')
+            ->where('phone', '!=', '')
+            ->where('created_at', '>=', $since)
+            ->groupBy('phone')
+            ->havingRaw('COUNT(id) > 3')
+            ->get()
+            ->count();
+
+        $clubMembers = Schema::hasTable('user_shiksho')
+            ? (int) UserShiksho::where('atelier_id', $atelierId)->count()
+            : 0;
+
+        $salesQuery = DB::table('purchased_products')
+            ->join('purchases', 'purchased_products.purchase_id', '=', 'purchases.id')
+            ->join('products', 'purchased_products.product_id', '=', 'products.id')
+            ->where('products.atelier_id', $atelierId)
+            ->where(function ($q) use ($atelierId) {
+                $q->where('purchases.atelier_id', $atelierId)
+                    ->orWhereNull('purchases.atelier_id');
+            });
+
+        $productIds = (clone $salesQuery)
+            ->select('purchased_products.product_id', DB::raw('SUM(purchased_products.quantity) as total_sold'))
+            ->groupBy('purchased_products.product_id')
+            ->orderByDesc('total_sold')
+            ->limit(4)
+            ->pluck('product_id')
+            ->toArray();
+
+        $bestSelling = [];
+        if (! empty($productIds)) {
+            $totalSoldMap = (clone $salesQuery)
+                ->select('purchased_products.product_id', DB::raw('SUM(purchased_products.quantity) as total_sold'))
+                ->whereIn('purchased_products.product_id', $productIds)
+                ->groupBy('purchased_products.product_id')
+                ->pluck('total_sold', 'product_id')
+                ->toArray();
+
+            $products = \App\Models\Product::whereIn('id', $productIds)
+                ->where('atelier_id', $atelierId)
+                ->with(['images'])
+                ->get()
+                ->keyBy('id');
+
+            foreach ($productIds as $productId) {
+                $product = $products->get($productId);
+                if (! $product) {
+                    continue;
+                }
+                $image = null;
+                if ($product->relationLoaded('images') && $product->images->isNotEmpty()) {
+                    $first = $product->images->first();
+                    $image = $first->url ?? $first->path ?? $first->image ?? null;
+                }
+                $bestSelling[] = [
+                    'id' => $product->id,
+                    'name' => $product->name,
+                    'sale_price' => (float) $product->sale_price,
+                    'quantity' => (float) $product->quantity,
+                    'total_sold' => (int) ($totalSoldMap[$productId] ?? 0),
+                    'image' => $image,
+                ];
+            }
+        }
+
+        return response([
+            'stats' => [
+                'inactive_30d' => $inactive30d,
+                'frequent_30d' => $frequent30d,
+                'club_members' => $clubMembers,
+            ],
+            'best_selling' => $bestSelling,
         ], 200);
     }
 

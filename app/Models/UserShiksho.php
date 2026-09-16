@@ -17,6 +17,7 @@ class UserShiksho extends Model
         'phone',
         'atelier_id',
         'name',
+        'birth_date',
         'credit',
         'installment_credit',
         'credit_last_updated_at',
@@ -26,6 +27,7 @@ class UserShiksho extends Model
     protected $casts = [
         'credit' => 'decimal:2',
         'installment_credit' => 'decimal:2',
+        'birth_date' => 'date',
         'credit_last_updated_at' => 'datetime',
         'last_warning_sent_at' => 'datetime'
     ];

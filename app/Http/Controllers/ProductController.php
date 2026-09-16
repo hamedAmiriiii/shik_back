@@ -563,8 +563,18 @@ class ProductController extends Controller
             return response(['message' => $prepared], 422);
         }
 
+        $previousQuantity = (float) ($product->quantity ?? 0);
         $product->update($prepared);
         $this->syncProductRelations($product, $request->all());
+
+        $newQuantity = (float) ($product->fresh()->quantity ?? $previousQuantity);
+        if (array_key_exists('quantity', $prepared)) {
+            \App\Services\ProductStockNotifyService::notifyIfRestocked(
+                $product->fresh(),
+                $previousQuantity,
+                $newQuantity
+            );
+        }
 
         $product->load(['images', 'categories']);
         $product->item_type = 'product';

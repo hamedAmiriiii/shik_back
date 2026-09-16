@@ -170,6 +170,27 @@ class ShopBackupTables
                 'fks' => [],
             ],
             [
+                'name' => 'shop_customer_groups',
+                'scope' => 'atelier',
+                'fks' => [],
+            ],
+            [
+                'name' => 'shop_customer_group_members',
+                'scope' => 'parent',
+                'parent' => 'shop_customer_groups',
+                'parent_key' => 'group_id',
+                'fks' => [
+                    'group_id' => 'shop_customer_groups',
+                ],
+            ],
+            [
+                'name' => 'product_stock_notify_requests',
+                'scope' => 'atelier',
+                'fks' => [
+                    'product_id' => 'products',
+                ],
+            ],
+            [
                 'name' => 'carts',
                 'scope' => 'atelier',
                 'fks' => [

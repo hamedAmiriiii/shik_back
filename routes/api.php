@@ -168,6 +168,7 @@ Route::prefix('purchased-products')->name('purchased-products.')->group(function
 
 Route::prefix('customers')->name('customers.')->group(function () {
     Route::post('/register', [\App\Http\Controllers\CustomerController::class, 'registerUserShiksho']);
+    Route::get('/club-dashboard', [\App\Http\Controllers\CustomerController::class, 'clubDashboard']);
     Route::get('/', [\App\Http\Controllers\CustomerController::class, 'index']);
     Route::get('/{phone}', [\App\Http\Controllers\CustomerController::class, 'show']);
 });
@@ -351,6 +352,13 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Broadcast message to selected customers
     Route::get('customer-broadcast/list', [\App\Http\Controllers\CustomerController::class, 'getCustomersForBroadcast']);
     Route::post('customer-broadcast/message', [\App\Http\Controllers\CustomerController::class, 'broadcastMessage']);
+
+    Route::get('shop-customer-groups', [\App\Http\Controllers\ShopCustomerGroupController::class, 'index']);
+    Route::post('shop-customer-groups', [\App\Http\Controllers\ShopCustomerGroupController::class, 'store']);
+    Route::delete('shop-customer-groups/{group}', [\App\Http\Controllers\ShopCustomerGroupController::class, 'destroy'])
+        ->where('group', '[0-9]+');
+
+    Route::post('product-stock-notify', [\App\Http\Controllers\ProductStockNotifyController::class, 'store']);
 
     // Product routes that require authentication
     Route::post("product", [ProductController::class, 'store']);
