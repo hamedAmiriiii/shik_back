@@ -225,7 +225,7 @@ class CustomerController extends Controller
     }
 
     /**
-     * داشبورد باشگاه مشتریان: پرفروش‌ها + آمار خرید ۳۰ روز
+     * داشبورد باشگاه مشتریان: پرفروش‌ها + آمار خرید N روز
      */
     public function clubDashboard(Request $request)
     {
@@ -234,19 +234,26 @@ class CustomerController extends Controller
             \App\Services\ShopFeatureFlags::CUSTOMER_CLUB,
             'باشگاه مشتریان برای این فروشگاه فعال نیست.'
         );
-        $since = now()->subDays(30);
 
-        $inactive30d = (int) DB::table('purchases')
+        $days = (int) $request->input('days', 30);
+        if (! in_array($days, [30, 60], true)) {
+            $days = 30;
+        }
+        $since = now()->subDays($days);
+
+        $inactivePhones = DB::table('purchases')
             ->select('phone')
             ->where('atelier_id', $atelierId)
             ->whereNotNull('phone')
             ->where('phone', '!=', '')
             ->groupBy('phone')
             ->havingRaw('MAX(created_at) < ?', [$since])
-            ->get()
-            ->count();
+            ->pluck('phone')
+            ->map(fn ($p) => (string) $p)
+            ->values()
+            ->all();
 
-        $frequent30d = (int) DB::table('purchases')
+        $frequentPhones = DB::table('purchases')
             ->select('phone')
             ->where('atelier_id', $atelierId)
             ->whereNotNull('phone')
@@ -254,8 +261,10 @@ class CustomerController extends Controller
             ->where('created_at', '>=', $since)
             ->groupBy('phone')
             ->havingRaw('COUNT(id) > 3')
-            ->get()
-            ->count();
+            ->pluck('phone')
+            ->map(fn ($p) => (string) $p)
+            ->values()
+            ->all();
 
         $clubMembers = Schema::hasTable('user_shiksho')
             ? (int) UserShiksho::where('atelier_id', $atelierId)->count()
@@ -274,7 +283,7 @@ class CustomerController extends Controller
             ->select('purchased_products.product_id', DB::raw('SUM(purchased_products.quantity) as total_sold'))
             ->groupBy('purchased_products.product_id')
             ->orderByDesc('total_sold')
-            ->limit(4)
+            ->limit(10)
             ->pluck('product_id')
             ->toArray();
 
@@ -314,12 +323,21 @@ class CustomerController extends Controller
             }
         }
 
+        $inactiveCount = count($inactivePhones);
+        $frequentCount = count($frequentPhones);
+
         return response([
+            'days' => $days,
             'stats' => [
-                'inactive_30d' => $inactive30d,
-                'frequent_30d' => $frequent30d,
+                'inactive' => $inactiveCount,
+                'frequent' => $frequentCount,
                 'club_members' => $clubMembers,
+                // سازگاری با کلاینت‌های قبلی
+                'inactive_30d' => $inactiveCount,
+                'frequent_30d' => $frequentCount,
             ],
+            'inactive_phones' => $inactivePhones,
+            'frequent_phones' => $frequentPhones,
             'best_selling' => $bestSelling,
         ], 200);
     }
