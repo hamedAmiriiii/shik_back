@@ -66,7 +66,7 @@ class ProductStockNotifyService
                 );
                 $sent++;
             } catch (\Throwable $e) {
-                Log::warning('stock notify sms failed', [
+                    Log::warning('stock notify sms failed', [
                     'phone' => $request->phone,
                     'product_id' => $product->id,
                     'error' => $e->getMessage(),
@@ -77,5 +77,21 @@ class ProductStockNotifyService
         }
 
         return $sent;
+    }
+
+    /**
+     * بعد از افزایش موجودی با increment، متقاضیان را مطلع کن.
+     */
+    public static function afterQuantityIncrease(Product $product, float $addedQuantity): int
+    {
+        if ($addedQuantity <= 0) {
+            return 0;
+        }
+
+        $fresh = $product->fresh() ?? $product;
+        $newQuantity = (float) ($fresh->quantity ?? 0);
+        $previousQuantity = $newQuantity - $addedQuantity;
+
+        return self::notifyIfRestocked($fresh, $previousQuantity, $newQuantity);
     }
 }

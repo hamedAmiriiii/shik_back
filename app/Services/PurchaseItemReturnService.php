@@ -180,6 +180,10 @@ class PurchaseItemReturnService
 
             if ($purchasedProduct->product_id && $purchasedProduct->product) {
                 $purchasedProduct->product->increment('quantity', $returnQuantity);
+                \App\Services\ProductStockNotifyService::afterQuantityIncrease(
+                    $purchasedProduct->product,
+                    (float) $returnQuantity
+                );
             } else {
                 app(ShopPosSaleService::class)->restoreStock($purchasedProduct, $returnQuantity);
             }
