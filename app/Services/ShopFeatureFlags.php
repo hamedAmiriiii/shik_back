@@ -14,11 +14,17 @@ class ShopFeatureFlags
 
     public const ACCOUNTING = 'accounting_enabled';
 
+    public const CUSTOMER_CLUB = 'customer_club_enabled';
+
+    /** فروشگاه‌هایی که به‌صورت پیش‌فرض باشگاه مشتریان دارند (اگر هنوز در settings ست نشده). */
+    public const CUSTOMER_CLUB_DEFAULT_ATELIER_IDS = [1, 5, 13, 17];
+
     public const KEYS = [
         self::RESTAURANT_CAFE,
         self::ROOM_SERVICES,
         self::PRODUCED_GOODS,
         self::ACCOUNTING,
+        self::CUSTOMER_CLUB,
     ];
 
     public const ALIASES = [
@@ -26,10 +32,12 @@ class ShopFeatureFlags
         'room_services' => self::ROOM_SERVICES,
         'produced_goods' => self::PRODUCED_GOODS,
         'accounting' => self::ACCOUNTING,
+        'customer_club' => self::CUSTOMER_CLUB,
         self::RESTAURANT_CAFE => self::RESTAURANT_CAFE,
         self::ROOM_SERVICES => self::ROOM_SERVICES,
         self::PRODUCED_GOODS => self::PRODUCED_GOODS,
         self::ACCOUNTING => self::ACCOUNTING,
+        self::CUSTOMER_CLUB => self::CUSTOMER_CLUB,
     ];
 
     public static function normalizeKey(string $feature): ?string
@@ -47,7 +55,13 @@ class ShopFeatureFlags
             self::ROOM_SERVICES => false,
             self::PRODUCED_GOODS => false,
             self::ACCOUNTING => false,
+            self::CUSTOMER_CLUB => false,
         ];
+    }
+
+    public static function customerClubDefaultForAtelier(int $atelierId): bool
+    {
+        return in_array($atelierId, self::CUSTOMER_CLUB_DEFAULT_ATELIER_IDS, true);
     }
 
     /**
@@ -70,7 +84,10 @@ class ShopFeatureFlags
     {
         $map = [];
         foreach ($atelierIds as $id) {
-            $map[(int) $id] = self::empty();
+            $aid = (int) $id;
+            $flags = self::empty();
+            $flags[self::CUSTOMER_CLUB] = self::customerClubDefaultForAtelier($aid);
+            $map[$aid] = $flags;
         }
         if ($atelierIds === []) {
             return $map;
@@ -85,6 +102,7 @@ class ShopFeatureFlags
             $id = (int) $row->atelier_id;
             if (! isset($map[$id])) {
                 $map[$id] = self::empty();
+                $map[$id][self::CUSTOMER_CLUB] = self::customerClubDefaultForAtelier($id);
             }
             $map[$id][$row->key] = self::isTruthy($row->value);
         }

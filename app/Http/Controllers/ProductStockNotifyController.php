@@ -11,7 +11,11 @@ class ProductStockNotifyController extends Controller
 {
     public function store(Request $request)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature(
+            $request,
+            \App\Services\ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
         if (! Schema::hasTable('product_stock_notify_requests')) {
             return response(['message' => 'جدول اعلان موجودی هنوز ساخته نشده است.'], 503);
         }

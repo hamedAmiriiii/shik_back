@@ -73,7 +73,7 @@ class ShopRoomServiceAccessController extends Controller
         $this->requirePlatformAdmin($request);
 
         $fields = $request->validate([
-            'feature' => 'required|string|in:restaurant_cafe,room_services,produced_goods,accounting,restaurant_cafe_enabled,room_services_enabled,produced_goods_enabled,accounting_enabled',
+            'feature' => 'required|string|in:restaurant_cafe,room_services,produced_goods,accounting,customer_club,restaurant_cafe_enabled,room_services_enabled,produced_goods_enabled,accounting_enabled,customer_club_enabled',
             'enabled' => 'required',
         ]);
 

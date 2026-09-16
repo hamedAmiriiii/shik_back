@@ -12,7 +12,11 @@ class ShopCustomerGroupController extends Controller
 {
     public function index(Request $request)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature(
+            $request,
+            \App\Services\ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
         if (! Schema::hasTable('shop_customer_groups')) {
             return response(['groups' => []], 200);
         }
@@ -39,7 +43,11 @@ class ShopCustomerGroupController extends Controller
 
     public function store(Request $request)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature(
+            $request,
+            \App\Services\ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
         if (! Schema::hasTable('shop_customer_groups')) {
             return response(['message' => 'جدول گروه‌ها هنوز ساخته نشده است.'], 503);
         }
@@ -92,7 +100,11 @@ class ShopCustomerGroupController extends Controller
 
     public function update(Request $request, $group)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature(
+            $request,
+            \App\Services\ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
         if (! Schema::hasTable('shop_customer_groups')) {
             return response(['message' => 'جدول گروه‌ها هنوز ساخته نشده است.'], 503);
         }
@@ -149,7 +161,11 @@ class ShopCustomerGroupController extends Controller
 
     public function destroy(Request $request, $group)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature(
+            $request,
+            \App\Services\ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
         if (! Schema::hasTable('shop_customer_groups')) {
             return response(['message' => 'جدول گروه‌ها هنوز ساخته نشده است.'], 503);
         }

@@ -40,6 +40,10 @@ class ProductStockNotifyService
             return 0;
         }
 
+        if (! \App\Services\ShopFeatureFlags::enabled($atelierId, \App\Services\ShopFeatureFlags::CUSTOMER_CLUB)) {
+            return 0;
+        }
+
         $requests = ProductStockNotifyRequest::query()
             ->where('atelier_id', $atelierId)
             ->where('product_id', $product->id)

@@ -102,7 +102,11 @@ class CustomerController extends Controller
      */
     public function index(Request $request)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature(
+            $request,
+            \App\Services\ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
 
         // جستجو بر اساس searchFilterModel
         $searchDataModel = json_decode($request->input('searchFilterModel'));
@@ -225,7 +229,11 @@ class CustomerController extends Controller
      */
     public function clubDashboard(Request $request)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature(
+            $request,
+            \App\Services\ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
         $since = now()->subDays(30);
 
         $inactive30d = (int) DB::table('purchases')
@@ -321,7 +329,11 @@ class CustomerController extends Controller
      */
     public function getCustomersForBroadcast(Request $request)
     {
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature(
+            $request,
+            \App\Services\ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
 
         $select = [
             'user_shiksho.phone',
@@ -385,7 +397,11 @@ class CustomerController extends Controller
             ], 400);
         }
 
-        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $atelierId = $this->assertShopFeature(
+            $request,
+            \App\Services\ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
         $fullMessage = SmsTools::shopSmsBrand($atelierId)."\n".$request->input('message');
 
         $partsEach = \App\Services\ShopSmsQuotaService::countSmsParts($fullMessage);
