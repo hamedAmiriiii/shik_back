@@ -80,6 +80,8 @@ Route::prefix('oil')->name('oil.')->group(function () {
         Route::get('reports', [\App\Http\Controllers\Oil\OilReportController::class, 'index']);
         Route::get('reminders', [\App\Http\Controllers\Oil\OilReminderController::class, 'index']);
         Route::get('sms-logs', [\App\Http\Controllers\ShopSmsLogController::class, 'index']);
+        Route::get('customer-broadcast/list', [\App\Http\Controllers\Oil\OilBroadcastController::class, 'customers']);
+        Route::post('customer-broadcast/message', [\App\Http\Controllers\Oil\OilBroadcastController::class, 'message']);
         Route::get('sms-quota', [\App\Http\Controllers\ShopSmsQuotaController::class, 'show']);
         Route::get('sms-packages', [\App\Http\Controllers\ShopSmsPackageController::class, 'index']);
         Route::post('sms-packages/{smsPackage}/purchase', [\App\Http\Controllers\ShopSmsPackageController::class, 'purchase']);

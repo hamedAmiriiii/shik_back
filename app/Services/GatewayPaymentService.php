@@ -34,7 +34,19 @@ class GatewayPaymentService
 
         $plans = [];
         if (Schema::hasTable('shop_plans')) {
-            $plans = ShopPlan::query()->active()->orderBy('sort_order')->orderBy('id')->get()
+            $projectType = null;
+            if ($atelierId) {
+                $atelierForType = Atelier::query()->find($atelierId);
+                if ($atelierForType) {
+                    $projectType = $atelierForType->projectType();
+                }
+            }
+            $plans = ShopPlan::query()
+                ->active()
+                ->when($projectType !== null, fn ($q) => $q->forProject($projectType))
+                ->orderBy('sort_order')
+                ->orderBy('id')
+                ->get()
                 ->map(fn (ShopPlan $p) => $this->formatShopPlan($p))
                 ->all();
         }
@@ -87,8 +99,9 @@ class GatewayPaymentService
     {
         $days = $atelier->effectiveRenewalDays();
         $priceRial = (int) $atelier->effectiveRenewalPriceRial();
-        $plan = ShopPlan::query()->active()->where('duration_days', $days)->orderBy('sort_order')->orderBy('id')->first()
-            ?? ShopPlan::query()->active()->orderBy('sort_order')->orderBy('id')->first();
+        $planQuery = ShopPlan::query()->active()->forProject($atelier->projectType());
+        $plan = (clone $planQuery)->where('duration_days', $days)->orderBy('sort_order')->orderBy('id')->first()
+            ?? $planQuery->orderBy('sort_order')->orderBy('id')->first();
 
         return [
             'id' => $plan ? (int) $plan->id : 0,
@@ -97,8 +110,13 @@ class GatewayPaymentService
             'duration_days' => $days,
             'price_rial' => $priceRial,
             'price_toman' => (int) floor($priceRial / 10),
+            'discount_price_rial' => null,
+            'discount_price_toman' => null,
+            'payable_price_rial' => $priceRial,
+            'payable_price_toman' => (int) floor($priceRial / 10),
             'sort_order' => 0,
             'is_shop_custom_price' => true,
+            'project_type' => $atelier->projectType(),
             'description' => 'مبلغ تمدید اختصاصی فروشگاه شما',
         ];
     }
@@ -491,15 +509,33 @@ class GatewayPaymentService
 
     public function formatShopPlan(ShopPlan $plan): array
     {
-        return [
+        $priceRial = (int) $plan->price_rial;
+        $discountRial = Schema::hasColumn('shop_plans', 'discount_price_rial')
+            ? ($plan->discount_price_rial !== null ? (int) $plan->discount_price_rial : null)
+            : null;
+        $payableRial = $plan->payablePriceRial();
+        $payload = [
             'id' => $plan->id,
             'type' => GatewayPayment::TYPE_SHOP_PLAN,
             'name' => $plan->name,
             'duration_days' => $plan->duration_days,
-            'price_rial' => $plan->price_rial,
-            'price_toman' => (int) floor($plan->price_rial / 10),
+            'price_rial' => $priceRial,
+            'price_toman' => (int) floor($priceRial / 10),
+            'discount_price_rial' => $discountRial,
+            'discount_price_toman' => $discountRial !== null ? (int) floor($discountRial / 10) : null,
+            'payable_price_rial' => $payableRial,
+            'payable_price_toman' => (int) floor($payableRial / 10),
             'sort_order' => $plan->sort_order,
+            'is_active' => (bool) $plan->is_active,
         ];
+        if (Schema::hasColumn('shop_plans', 'project_type')) {
+            $payload['project_type'] = $plan->projectType();
+        }
+        if (Schema::hasColumn('shop_plans', 'description')) {
+            $payload['description'] = $plan->description;
+        }
+
+        return $payload;
     }
 
     /**
@@ -543,11 +579,22 @@ class GatewayPaymentService
             if (! $plan) {
                 throw new RuntimeException('پلن اکانت یافت نشد.');
             }
+            if ($atelier && Schema::hasColumn('shop_plans', 'project_type')
+                && $plan->projectType() !== $atelier->projectType()) {
+                throw new RuntimeException('این پلن برای نوع کسب‌وکار شما نیست.');
+            }
 
             return [
-                (int) $plan->price_rial,
+                (int) $plan->payablePriceRial(),
                 'خرید اکانت '.$plan->name,
-                ['duration_days' => $plan->duration_days, 'name' => $plan->name],
+                [
+                    'duration_days' => $plan->duration_days,
+                    'name' => $plan->name,
+                    'list_price_rial' => (int) $plan->price_rial,
+                    'discount_price_rial' => Schema::hasColumn('shop_plans', 'discount_price_rial')
+                        ? ($plan->discount_price_rial !== null ? (int) $plan->discount_price_rial : null)
+                        : null,
+                ],
             ];
         }
 
