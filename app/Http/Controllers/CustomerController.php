@@ -48,6 +48,7 @@ class CustomerController extends Controller
             $create
         );
 
+        $updatedExisting = false;
         if (! $userShiksho->wasRecentlyCreated) {
             $updates = [];
             if ($name !== null && Schema::hasColumn('user_shiksho', 'name')) {
@@ -58,6 +59,7 @@ class CustomerController extends Controller
             }
             if ($updates !== []) {
                 $userShiksho->update($updates);
+                $updatedExisting = true;
             }
         }
 
@@ -89,8 +91,11 @@ class CustomerController extends Controller
         return response([
             'message' => $userShiksho->wasRecentlyCreated
                 ? "کاربر با موفقیت در باشگاه مشتریان {$shopBrand} ثبت شد"
-                : "کاربر قبلاً در باشگاه مشتریان {$shopBrand} ثبت شده است",
+                : ($updatedExisting
+                    ? "اطلاعات عضو باشگاه مشتریان {$shopBrand} به‌روز شد"
+                    : "کاربر قبلاً در باشگاه مشتریان {$shopBrand} ثبت شده است"),
             'already_exists' => !$userShiksho->wasRecentlyCreated,
+            'updated' => $updatedExisting,
             'sms_sent' => $smsSent,
             'sms_error' => $smsError,
             'data' => $userShiksho
@@ -191,11 +196,11 @@ class CustomerController extends Controller
         // آمار کلی
         $stats = [
             'phone' => $phone,
-            'name' => $userShiksho->name ?? null,
+            'name' => $userShiksho?->name,
             'birth_date' => $userShiksho && $userShiksho->birth_date
                 ? $userShiksho->birth_date->format('Y-m-d')
                 : null,
-            'id' => $userShiksho->id ?? null,
+            'id' => $userShiksho?->id,
             'total_purchases' => $purchases->count(),
             'total_spent' => $purchases->sum('total_amount'),
             'total_credit_earned' => $purchases->sum('credit_earned'),
