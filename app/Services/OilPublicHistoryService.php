@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Atelier;
 use App\Models\OilVisit;
 use App\Tools\PhoneTools;
 use App\Tools\PlateTools;
@@ -9,11 +10,23 @@ use Illuminate\Support\Facades\Schema;
 
 class OilPublicHistoryService
 {
-    public static function historyUrl(string $phone): string
+    public static function historyUrl(string $phone, ?string $shopCode = null): string
     {
         $base = rtrim((string) config('oil.public_base_url', 'https://webinoo-plus.ir'), '/');
+        $code = trim((string) $shopCode);
+        if ($code !== '') {
+            return $base.'/oilservice/shop/'.rawurlencode($code).'/'.$phone;
+        }
 
         return $base.'/oilservice/'.$phone;
+    }
+
+    public static function shopLandingUrl(string $shopCode): string
+    {
+        $base = rtrim((string) config('oil.public_base_url', 'https://webinoo-plus.ir'), '/');
+        $code = trim($shopCode);
+
+        return $base.'/oilservice/shop/'.rawurlencode($code);
     }
 
     public static function resolvePhone(string $raw): ?string
@@ -26,14 +39,65 @@ class OilPublicHistoryService
         return $phone;
     }
 
+    public static function findOilShopByCode(string $rawCode): ?Atelier
+    {
+        $code = trim($rawCode);
+        if ($code === '' || ! Schema::hasTable('ateliers')) {
+            return null;
+        }
+
+        $shop = Atelier::query()->where('code', $code)->first();
+        if (! $shop || ! $shop->isOilProject()) {
+            return null;
+        }
+
+        return $shop;
+    }
+
     /**
-     * @return array{phone: string, cars: array<int, array<string, mixed>>}|null
+     * @return array{code: string, name: string, landing_url: string}|null
      */
-    public static function payload(string $rawPhone): ?array
+    public static function shopPayload(string $rawCode): ?array
+    {
+        $shop = self::findOilShopByCode($rawCode);
+        if (! $shop) {
+            return null;
+        }
+
+        $name = trim((string) $shop->name);
+        if ($name === '') {
+            $name = 'تعویض روغن';
+        }
+
+        return [
+            'code' => (string) $shop->code,
+            'name' => $name,
+            'landing_url' => self::shopLandingUrl((string) $shop->code),
+        ];
+    }
+
+    /**
+     * @return array{phone: string, shop?: array{code: string, name: string}, cars: array<int, array<string, mixed>>}|null
+     */
+    public static function payload(string $rawPhone, ?string $shopCode = null): ?array
     {
         $phone = self::resolvePhone($rawPhone);
         if (! $phone) {
             return null;
+        }
+
+        $atelierId = null;
+        $shopMeta = null;
+        if ($shopCode !== null && trim($shopCode) !== '') {
+            $shop = self::findOilShopByCode($shopCode);
+            if (! $shop) {
+                return null;
+            }
+            $atelierId = (int) $shop->id;
+            $shopMeta = [
+                'code' => (string) $shop->code,
+                'name' => trim((string) $shop->name) !== '' ? trim((string) $shop->name) : 'تعویض روغن',
+            ];
         }
 
         $cars = [];
@@ -42,6 +106,7 @@ class OilPublicHistoryService
                 ->withItems()
                 ->with('atelier')
                 ->where('phone', $phone)
+                ->when($atelierId !== null, fn ($q) => $q->where('atelier_id', $atelierId))
                 ->orderByDesc('id')
                 ->get();
 
@@ -57,10 +122,15 @@ class OilPublicHistoryService
             }
         }
 
-        return [
+        $payload = [
             'phone' => $phone,
             'cars' => array_values($cars),
         ];
+        if ($shopMeta) {
+            $payload['shop'] = $shopMeta;
+        }
+
+        return $payload;
     }
 
     protected static function visitPayload(OilVisit $visit): array

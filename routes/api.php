@@ -57,6 +57,12 @@ Route::prefix('oil')->name('oil.')->group(function () {
     Route::get('public/history/{phone}', [\App\Http\Controllers\Oil\OilPublicHistoryController::class, 'show'])
         ->middleware('throttle:30,1')
         ->where('phone', '[^/]+');
+    Route::get('public/shop/{code}', [\App\Http\Controllers\Oil\OilPublicHistoryController::class, 'shop'])
+        ->middleware('throttle:60,1')
+        ->where('code', '[^/]+');
+    Route::get('public/shop/{code}/history/{phone}', [\App\Http\Controllers\Oil\OilPublicHistoryController::class, 'shopHistory'])
+        ->middleware('throttle:30,1')
+        ->where(['code' => '[^/]+', 'phone' => '[^/]+']);
 
     Route::middleware(['auth:sanctum', 'oil.project'])->group(function () {
         Route::post('logout', [\App\Http\Controllers\Oil\OilAuthController::class, 'logout']);
@@ -73,6 +79,7 @@ Route::prefix('oil')->name('oil.')->group(function () {
         Route::delete('products/{oilProduct}', [\App\Http\Controllers\Oil\OilProductController::class, 'destroy']);
         Route::get('reports', [\App\Http\Controllers\Oil\OilReportController::class, 'index']);
         Route::get('reminders', [\App\Http\Controllers\Oil\OilReminderController::class, 'index']);
+        Route::get('sms-logs', [\App\Http\Controllers\ShopSmsLogController::class, 'index']);
         Route::get('sms-quota', [\App\Http\Controllers\ShopSmsQuotaController::class, 'show']);
         Route::get('sms-packages', [\App\Http\Controllers\ShopSmsPackageController::class, 'index']);
         Route::post('sms-packages/{smsPackage}/purchase', [\App\Http\Controllers\ShopSmsPackageController::class, 'purchase']);

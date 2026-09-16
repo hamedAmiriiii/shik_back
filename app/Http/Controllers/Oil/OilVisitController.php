@@ -153,6 +153,7 @@ class OilVisitController extends Controller
             'gearbox_oil_product_id' => 'nullable|integer|min:1',
             'air_filter_product_id' => 'nullable|integer|min:1',
             'oil_filter_product_id' => 'nullable|integer|min:1',
+            'accessory_product_id' => 'nullable|integer|min:1',
         ]);
 
         $parsed = PlateTools::parse($fields['plate'] ?? '')
@@ -253,7 +254,8 @@ class OilVisitController extends Controller
         }
 
         [$smsSent, $smsError] = $this->sendOilSms($phone, $message, $atelierId, 'oil_welcome');
-        $historyUrl = OilPublicHistoryService::historyUrl($phone);
+        $shopCode = $atelier ? (string) $atelier->code : null;
+        $historyUrl = OilPublicHistoryService::historyUrl($phone, $shopCode);
         $linkSent = false;
         $linkError = null;
         if (config('oil.send_history_link_sms')) {
@@ -301,7 +303,13 @@ class OilVisitController extends Controller
             $payload['sms_sent'] = (bool) $fresh->sms_sent;
             $payload['sms_error'] = $fresh->sms_error;
             $payload['link_sms_sent'] = false;
-            $payload['history_url'] = OilPublicHistoryService::historyUrl((string) $fresh->phone);
+            if (! $fresh->relationLoaded('atelier')) {
+                $fresh->load('atelier');
+            }
+            $payload['history_url'] = OilPublicHistoryService::historyUrl(
+                (string) $fresh->phone,
+                $fresh->atelier ? (string) $fresh->atelier->code : null
+            );
 
             return response()->json($payload, 200);
         }
@@ -374,6 +382,7 @@ class OilVisitController extends Controller
             OilProduct::KIND_GEARBOX_OIL => (int) ($fields['gearbox_oil_product_id'] ?? 0),
             OilProduct::KIND_AIR_FILTER => (int) ($fields['air_filter_product_id'] ?? 0),
             OilProduct::KIND_OIL_FILTER => (int) ($fields['oil_filter_product_id'] ?? 0),
+            OilProduct::KIND_ACCESSORY => (int) ($fields['accessory_product_id'] ?? 0),
         ];
         $hasAny = collect($selected)->contains(fn ($id) => $id > 0);
         if (! $hasAny) {

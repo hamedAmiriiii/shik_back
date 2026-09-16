@@ -16,6 +16,8 @@ class OilProduct extends Model
 
     public const KIND_OIL_FILTER = 'oil_filter';
 
+    public const KIND_ACCESSORY = 'accessory';
+
     protected $fillable = [
         'atelier_id',
         'kind',
@@ -43,6 +45,7 @@ class OilProduct extends Model
             self::KIND_GEARBOX_OIL => 'روغن گیربکس',
             self::KIND_AIR_FILTER => 'فیلتر هوا',
             self::KIND_OIL_FILTER => 'فیلتر روغن',
+            self::KIND_ACCESSORY => 'جانبی',
         ];
     }
 

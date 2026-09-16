@@ -8,6 +8,7 @@
     { key: "gearbox_oil", label: "روغن گیربکس", field: "gearbox_oil_product_id" },
     { key: "air_filter", label: "فیلتر هوا", field: "air_filter_product_id" },
     { key: "oil_filter", label: "فیلتر روغن", field: "oil_filter_product_id" },
+    { key: "accessory", label: "جانبی", field: "accessory_product_id" },
   ];
   const TOKEN_KEY = "oil_token";
   const SESSION_KEY = "oil_session";
@@ -57,6 +58,7 @@
       gearbox_oil_product_id: "",
       air_filter_product_id: "",
       oil_filter_product_id: "",
+      accessory_product_id: "",
       known: false,
       knownText: "",
     };

@@ -26,6 +26,7 @@ SQL لازم روی دیتابیس موجود:
 | `gearbox_oil` | روغن گیربکس |
 | `air_filter` | فیلتر هوا |
 | `oil_filter` | فیلتر روغن |
+| `accessory` | جانبی |
 
 هر فروشگاه برای هر kind چند `product` تعریف می‌کند (مثلاً بهران ۱۰W۴۰).
 
@@ -83,7 +84,7 @@ Query:
 { "kind": "oil", "name": "بهران 10W40", "purchase_price": 180000, "sale_price": 250000 }
 ```
 
-`kind` یکی از چهار مقدار بالا، `name` حداکثر ۱۲۰ کاراکتر.
+`kind` یکی از پنج مقدار بالا، `name` حداکثر ۱۲۰ کاراکتر.
 
 ```json
 {
@@ -217,7 +218,8 @@ Query: `q` (پلاک یا موبایل)، `per_page` (۱–۵۰، پیش‌فر�
   "oil_product_id": 12,
   "gearbox_oil_product_id": 30,
   "air_filter_product_id": 20,
-  "oil_filter_product_id": 21
+  "oil_filter_product_id": 21,
+  "accessory_product_id": 40
 }
 ```
 
@@ -234,6 +236,7 @@ Query: `q` (پلاک یا موبایل)، `per_page` (۱–۵۰، پیش‌فر�
 | `gearbox_oil_product_id` | نه | `kind=gearbox_oil` |
 | `air_filter_product_id` | نه | `kind=air_filter` |
 | `oil_filter_product_id` | نه | `kind=oil_filter` |
+| `accessory_product_id` | نه | `kind=accessory` (جانبی) |
 
 اولین ثبت **۲۰۱** با `already_exists: false`. اگر همان `client_id` دوباره بیاید **۲۰۰**:
 
@@ -330,6 +333,13 @@ Query: `q` (پلاک یا موبایل)، `per_page` (۱–۵۰، پیش‌فر�
 
 شماره نامعتبر: ۴۲۲. اگر سابقه‌ای نباشد `cars` خالی است.
 
+QR هر فروشگاه:
+
+- صفحه ورود شماره: `/oilservice/shop/{shop_code}`
+- بعد از ورود: `/oilservice/shop/{shop_code}/{phone}`
+- API فروشگاه: `GET /api/oil/public/shop/{code}`
+- API سابقه محدود به فروشگاه: `GET /api/oil/public/shop/{code}/history/{phone}`
+
 ---
 
 ## پیشنهاد UI
@@ -389,6 +399,7 @@ Query: `q` (پلاک یا موبایل)، `per_page` (۱–۵۰، پیش‌فر�
 - `GET /api/oil/sms-packages`
 - `POST /api/oil/sms-packages/{id}/purchase`
 - `GET /api/oil/sms-package-orders?per_page=20`
+- `GET /api/oil/sms-logs` — همه پیامک‌های فروشگاه (`shop_sms_logs`)
 - `GET /api/oil/reminders` — صفحه‌بندی لاگ یادآوری
 - `POST /api/oil/reminders/run` — بررسی نوبت و ارسال
 
