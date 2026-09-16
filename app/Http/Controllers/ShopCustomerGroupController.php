@@ -90,6 +90,63 @@ class ShopCustomerGroupController extends Controller
         ], 201);
     }
 
+    public function update(Request $request, $group)
+    {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        if (! Schema::hasTable('shop_customer_groups')) {
+            return response(['message' => 'جدول گروه‌ها هنوز ساخته نشده است.'], 503);
+        }
+
+        $model = ShopCustomerGroup::query()
+            ->where('atelier_id', $atelierId)
+            ->where('id', $group)
+            ->first();
+
+        if (! $model) {
+            return response(['message' => 'گروه یافت نشد'], 404);
+        }
+
+        $validated = $request->validate([
+            'name' => 'required|string|min:1|max:120',
+            'phones' => 'required|array|min:1',
+            'phones.*' => 'required|string|digits:11',
+        ]);
+
+        $phones = collect($validated['phones'])
+            ->map(fn ($p) => trim((string) $p))
+            ->filter(fn ($p) => preg_match('/^09\d{9}$/', $p))
+            ->unique()
+            ->values()
+            ->all();
+
+        if (empty($phones)) {
+            return response(['message' => 'هیچ شماره معتبری انتخاب نشده است'], 422);
+        }
+
+        DB::transaction(function () use ($model, $validated, $phones) {
+            $model->update(['name' => trim($validated['name'])]);
+            ShopCustomerGroupMember::where('group_id', $model->id)->delete();
+            foreach ($phones as $phone) {
+                ShopCustomerGroupMember::create([
+                    'group_id' => $model->id,
+                    'phone' => $phone,
+                ]);
+            }
+        });
+
+        $phonesOut = $model->members()->pluck('phone')->values()->all();
+
+        return response([
+            'message' => 'گروه به‌روز شد',
+            'group' => [
+                'id' => $model->id,
+                'name' => $model->name,
+                'member_count' => count($phonesOut),
+                'phones' => $phonesOut,
+            ],
+        ], 200);
+    }
+
     public function destroy(Request $request, $group)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);

@@ -355,6 +355,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
     Route::get('shop-customer-groups', [\App\Http\Controllers\ShopCustomerGroupController::class, 'index']);
     Route::post('shop-customer-groups', [\App\Http\Controllers\ShopCustomerGroupController::class, 'store']);
+    Route::put('shop-customer-groups/{group}', [\App\Http\Controllers\ShopCustomerGroupController::class, 'update'])
+        ->where('group', '[0-9]+');
     Route::delete('shop-customer-groups/{group}', [\App\Http\Controllers\ShopCustomerGroupController::class, 'destroy'])
         ->where('group', '[0-9]+');
 
