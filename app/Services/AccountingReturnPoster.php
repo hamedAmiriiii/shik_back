@@ -12,7 +12,17 @@ use RuntimeException;
 class AccountingReturnPoster
 {
     /**
-     * @param  array{loyalty?: float, wallet?: float, ar?: float, cheque?: float}  $settlement
+     * @param  array{
+     *   loyalty?: float,
+     *   cash?: float,
+     *   card?: float,
+     *   card_credit?: float,
+     *   card_account?: float,
+     *   wallet?: float,
+     *   ar?: float,
+     *   cheque?: float,
+     *   shop_account_id?: int|null
+     * }  $settlement
      */
     public static function post(PurchaseItemReturn $log, array $settlement = []): ?AccountingVoucher
     {
@@ -43,12 +53,24 @@ class AccountingReturnPoster
         }
 
         $loyalty = round((float) ($settlement['loyalty'] ?? 0), 2);
-        $wallet = round((float) ($settlement['wallet'] ?? 0), 2);
+        $cash = round((float) ($settlement['cash'] ?? 0), 2);
+        $cardCredit = round((float) ($settlement['card_credit'] ?? 0), 2);
+        $cardAccount = round((float) ($settlement['card_account'] ?? 0), 2);
         $ar = round((float) ($settlement['ar'] ?? 0), 2);
         $cheque = round((float) ($settlement['cheque'] ?? 0), 2);
-        $credits = round($loyalty + $wallet + $ar + $cheque, 2);
+        $shopAccountId = (int) ($settlement['shop_account_id'] ?? 0);
+
+        // سازگاری با settlement قدیمی که فقط wallet داشت
+        if ($cash < 0.01 && $cardCredit < 0.01 && $cardAccount < 0.01) {
+            $wallet = round((float) ($settlement['wallet'] ?? 0), 2);
+            if ($wallet >= 0.01) {
+                $cardCredit = $wallet;
+            }
+        }
+
+        $credits = round($loyalty + $cash + $cardCredit + $cardAccount + $ar + $cheque, 2);
         if ($sale >= 0.01 && $credits < 0.01) {
-            $wallet = $sale;
+            $cash = $sale;
             $credits = $sale;
         }
 
@@ -70,11 +92,30 @@ class AccountingReturnPoster
             );
             AccountingLedger::push(
                 $lines,
+                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL),
+                0,
+                $cash,
+                'برگشت نقد از صندوق'
+            );
+            AccountingLedger::push(
+                $lines,
                 AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AR),
                 0,
-                round($wallet + $ar, 2),
+                round($cardCredit + $ar, 2),
                 $ar >= 0.01 ? 'بستن طلب / اعتبار مشتری' : 'برگشت به اعتبار مشتری'
             );
+            if ($cardAccount >= 0.01) {
+                $accountId = $shopAccountId > 0
+                    ? AccountingLedger::shopCashAccountId($atelierId, $shopAccountId)
+                    : AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_ACCOUNT_1);
+                AccountingLedger::push(
+                    $lines,
+                    $accountId,
+                    0,
+                    $cardAccount,
+                    'برگشت کارت از حساب فروشگاه'
+                );
+            }
             AccountingLedger::push(
                 $lines,
                 AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_CHEQUE_RECEIVABLE),

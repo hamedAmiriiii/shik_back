@@ -53,6 +53,8 @@ class ReturnedProductController extends Controller
             'notes' => 'nullable|string|max:2000',
             'phone' => 'nullable|string|max:20',
             'quantity' => 'nullable|numeric|min:0.001',
+            'card_refund_destination' => 'nullable|string|in:customer_credit,shop_account',
+            'shop_account_id' => 'nullable|integer|min:1',
         ]);
 
         $staffAtelierId = $this->staffShopAtelierId($request);
@@ -102,7 +104,15 @@ class ReturnedProductController extends Controller
                 $qty,
                 $userName,
                 $request->input('notes'),
-                $request->input('phone')
+                $request->input('phone'),
+                true,
+                [
+                    'card_refund_destination' => $request->input(
+                        'card_refund_destination',
+                        PurchaseItemReturnService::CARD_REFUND_CUSTOMER_CREDIT
+                    ),
+                    'shop_account_id' => $request->input('shop_account_id'),
+                ]
             );
         } catch (\InvalidArgumentException $e) {
             return response(['error' => $e->getMessage(), 'message' => $e->getMessage()], 422);

@@ -18,18 +18,26 @@ use Illuminate\Support\Facades\Schema;
 
 class PurchaseItemReturnService
 {
+    /** مبلغ کارتخوان به اعتبار مشتری (پیش‌فرض) */
+    public const CARD_REFUND_CUSTOMER_CREDIT = 'customer_credit';
+
+    /** مبلغ کارتخوان از حساب فروشگاه برداشت و به مشتری داده شود */
+    public const CARD_REFUND_SHOP_ACCOUNT = 'shop_account';
+
     /**
      * برگشت کامل همه اقلام باقی‌مانده فاکتور.
      *
+     * @param  array{card_refund_destination?: string, shop_account_id?: int|null}  $refundOptions
      * @return array<string, mixed>
      */
     public static function processFullReturn(
         Purchase $purchase,
         ?string $phone = null,
         ?string $userName = null,
-        ?string $notes = null
+        ?string $notes = null,
+        array $refundOptions = []
     ): array {
-        return DB::transaction(function () use ($purchase, $phone, $userName, $notes) {
+        return DB::transaction(function () use ($purchase, $phone, $userName, $notes, $refundOptions) {
             $purchase->load('purchasedProducts');
             if ($purchase->purchasedProducts->isEmpty()) {
                 throw new \InvalidArgumentException('این خرید اقلام باقی‌مانده برای برگشت ندارد.');
@@ -40,6 +48,8 @@ class PurchaseItemReturnService
             $rows = [];
             $creditRefunded = 0.0;
             $creditEarnedReversed = 0.0;
+            $cashRefunded = 0.0;
+            $cardRefunded = 0.0;
 
             foreach ($items as $item) {
                 $freshPurchase = Purchase::query()->with('purchasedProducts')->find($purchase->id);
@@ -58,12 +68,15 @@ class PurchaseItemReturnService
                     $userName,
                     $notes,
                     $phone,
-                    false
+                    false,
+                    $refundOptions
                 );
                 $returnedItems[] = $result['returned_item'];
                 $rows[] = $result['row'];
                 $creditRefunded += (float) $result['returned_item']['credit_refunded'];
                 $creditEarnedReversed += (float) $result['returned_item']['credit_earned_reversed'];
+                $cashRefunded += (float) ($result['returned_item']['cash_refunded'] ?? 0);
+                $cardRefunded += (float) ($result['returned_item']['card_refunded'] ?? 0);
             }
 
             $purchase = Purchase::query()
@@ -71,6 +84,7 @@ class PurchaseItemReturnService
                 ->findOrFail($purchase->id);
 
             $customer = self::findUserShiksho($purchase);
+            $options = self::normalizeRefundOptions($refundOptions);
 
             return [
                 'full_return' => true,
@@ -78,6 +92,10 @@ class PurchaseItemReturnService
                 'rows' => $rows,
                 'credit_refunded' => round($creditRefunded, 2),
                 'credit_earned_reversed' => round($creditEarnedReversed, 2),
+                'cash_refunded' => round($cashRefunded, 2),
+                'card_refunded' => round($cardRefunded, 2),
+                'card_refund_destination' => $options['card_refund_destination'],
+                'shop_account_id' => $options['shop_account_id'],
                 'customer_credit' => $customer ? (float) $customer->credit : 0,
                 'phone' => $purchase->phone,
                 'purchase' => $purchase,
@@ -87,8 +105,9 @@ class PurchaseItemReturnService
 
     /**
      * برگشت یک یا چند عدد از خط فاکتور.
-     * سهم پرداخت‌نشده (نسیه/قسط/چک) بسته می‌شود؛ فقط سهم نقدی پرداخت‌شده به اعتبار می‌رود.
+     * سهم پرداخت‌نشده (نسیه/قسط/چک) بسته می‌شود؛ نقد از صندوق؛ کارت به اعتبار (پیش‌فرض) یا حساب فروشگاه.
      *
+     * @param  array{card_refund_destination?: string, shop_account_id?: int|null}  $refundOptions
      * @return array<string, mixed>
      */
     public static function processReturn(
@@ -98,9 +117,11 @@ class PurchaseItemReturnService
         ?string $userName = null,
         ?string $notes = null,
         ?string $phone = null,
-        bool $useTransaction = true
+        bool $useTransaction = true,
+        array $refundOptions = []
     ): array {
-        $run = function () use ($purchase, $purchasedProduct, $returnQuantity, $userName, $notes, $phone) {
+        $run = function () use ($purchase, $purchasedProduct, $returnQuantity, $userName, $notes, $phone, $refundOptions) {
+            $options = self::normalizeRefundOptions($refundOptions);
             if ((int) $purchasedProduct->purchase_id !== (int) $purchase->id) {
                 throw new \InvalidArgumentException('این محصول متعلق به این خرید نیست');
             }
@@ -142,14 +163,38 @@ class PurchaseItemReturnService
                 throw new \InvalidArgumentException('فروشگاه این فاکتور مشخص نیست');
             }
 
+            if ($options['shop_account_id']) {
+                $account = \App\Models\ShopAccount::query()->find($options['shop_account_id']);
+                if (! $account || (int) $account->atelier_id !== $atelierId) {
+                    throw new \InvalidArgumentException('حساب انتخاب‌شده متعلق به این فروشگاه نیست.');
+                }
+                if ($account->isTill()) {
+                    throw new \InvalidArgumentException('برای برگشت کارتخوان، حساب بانکی یا تنخواه انتخاب کنید (نه صندوق نقد).');
+                }
+            }
+
             $purchase->loadMissing(['installments', 'cheque']);
-            $settlement = self::allocateReturnSettlement($purchase, $ratio);
+            $settlement = self::allocateReturnSettlement($purchase, $ratio, $options);
             $origEarned = (float) $purchase->credit_earned;
             $creditEarnedReversed = PriceTools::roundToman($origEarned * $ratio);
             if ($creditEarnedReversed > $origEarned) {
                 $creditEarnedReversed = $origEarned;
             }
-            $creditRefunded = PriceTools::roundToman($settlement['wallet'] + $settlement['loyalty']);
+
+            $cashRefunded = (float) $settlement['cash'];
+            $cardRefunded = (float) $settlement['card'];
+            $loyaltyRefunded = (float) $settlement['loyalty'];
+            $cardToCredit = (float) $settlement['card_credit'];
+            $creditRefunded = PriceTools::roundToman($loyaltyRefunded + $cardToCredit);
+
+            if ($cardRefunded >= 0.01
+                && $options['card_refund_destination'] === self::CARD_REFUND_SHOP_ACCOUNT
+                && ! $options['shop_account_id']
+            ) {
+                throw new \InvalidArgumentException(
+                    'برای برگشت مبلغ کارتخوان از حساب، یک حساب فروشگاه انتخاب کنید.'
+                );
+            }
 
             $needsCustomer = $creditRefunded >= 0.01 || $creditEarnedReversed >= 0.01
                 || $purchase->phone || $phone;
@@ -196,7 +241,7 @@ class PurchaseItemReturnService
                 $purchasedProduct->save();
             }
 
-            $log = PurchaseItemReturn::create([
+            $logPayload = [
                 'atelier_id' => $atelierId,
                 'purchase_id' => $purchase->id,
                 'purchased_product_id' => $purchasedProductId,
@@ -216,7 +261,21 @@ class PurchaseItemReturnService
                 'color' => $purchasedProduct->color,
                 'user_name' => $userName,
                 'notes' => $notes,
-            ]);
+            ];
+            if (Schema::hasColumn('purchase_item_returns', 'cash_refunded')) {
+                $logPayload['cash_refunded'] = $cashRefunded;
+            }
+            if (Schema::hasColumn('purchase_item_returns', 'card_refunded')) {
+                $logPayload['card_refunded'] = $cardRefunded;
+            }
+            if (Schema::hasColumn('purchase_item_returns', 'card_refund_destination')) {
+                $logPayload['card_refund_destination'] = $options['card_refund_destination'];
+            }
+            if (Schema::hasColumn('purchase_item_returns', 'shop_account_id')) {
+                $logPayload['shop_account_id'] = $options['shop_account_id'];
+            }
+
+            $log = PurchaseItemReturn::create($logPayload);
 
             self::logReturnedProduct(
                 $purchasedProduct,
@@ -262,6 +321,10 @@ class PurchaseItemReturnService
                     'credit_refunded' => $creditRefunded,
                     'credit_used_refund' => $creditRefunded,
                     'credit_earned_reversed' => $creditEarnedReversed,
+                    'cash_refunded' => $cashRefunded,
+                    'card_refunded' => $cardRefunded,
+                    'card_refund_destination' => $options['card_refund_destination'],
+                    'shop_account_id' => $options['shop_account_id'],
                     'unpaid_reduced' => round($settlement['ar'] + $settlement['cheque'], 2),
                 ],
                 'row' => PurchaseItemReturnGridService::formatTransactionRow(
@@ -281,17 +344,46 @@ class PurchaseItemReturnService
     }
 
     /**
-     * سهم برگشت: اول بدهی پرداخت‌نشده، بعد اعتبار برای مبلغ نقدی پرداخت‌شده.
+     * سهم برگشت: اول بدهی پرداخت‌نشده، نقد از صندوق، کارت به اعتبار یا حساب.
      *
-     * @return array{loyalty: float, wallet: float, ar: float, cheque: float}
+     * @param  array{card_refund_destination: string, shop_account_id: int|null}  $options
+     * @return array{
+     *   loyalty: float,
+     *   cash: float,
+     *   card: float,
+     *   card_credit: float,
+     *   card_account: float,
+     *   wallet: float,
+     *   ar: float,
+     *   cheque: float,
+     *   card_refund_destination: string,
+     *   shop_account_id: int|null
+     * }
      */
-    public static function allocateReturnSettlement(Purchase $purchase, float $ratio): array
-    {
+    public static function allocateReturnSettlement(
+        Purchase $purchase,
+        float $ratio,
+        array $options = []
+    ): array {
         $ratio = min(1, max(0, $ratio));
+        $options = self::normalizeRefundOptions($options);
         $purchase->loadMissing(['installments', 'cheque']);
 
         $loyalty = PriceTools::roundToman((float) $purchase->credit_used * $ratio);
-        $wallet = PriceTools::roundToman((float) $purchase->actual_paid_amount * $ratio);
+        [$cashBase, $cardBase] = self::paidCashCardBases($purchase);
+        $cash = PriceTools::roundToman($cashBase * $ratio);
+        $card = PriceTools::roundToman($cardBase * $ratio);
+
+        $cardCredit = 0.0;
+        $cardAccount = 0.0;
+        if ($card >= 0.01) {
+            if ($options['card_refund_destination'] === self::CARD_REFUND_SHOP_ACCOUNT) {
+                $cardAccount = $card;
+            } else {
+                $cardCredit = $card;
+            }
+        }
+
         $ar = 0.0;
         $cheque = 0.0;
 
@@ -306,10 +398,92 @@ class PurchaseItemReturnService
 
         return [
             'loyalty' => $loyalty,
-            'wallet' => $wallet,
+            'cash' => $cash,
+            'card' => $card,
+            'card_credit' => $cardCredit,
+            'card_account' => $cardAccount,
+            'wallet' => PriceTools::roundToman($cash + $card),
             'ar' => $ar,
             'cheque' => $cheque,
+            'card_refund_destination' => $options['card_refund_destination'],
+            'shop_account_id' => $options['shop_account_id'],
         ];
+    }
+
+    /**
+     * @param  array{card_refund_destination?: string, shop_account_id?: int|null}  $options
+     * @return array{card_refund_destination: string, shop_account_id: int|null}
+     */
+    public static function normalizeRefundOptions(array $options): array
+    {
+        $destination = (string) ($options['card_refund_destination'] ?? self::CARD_REFUND_CUSTOMER_CREDIT);
+        if (! in_array($destination, [self::CARD_REFUND_CUSTOMER_CREDIT, self::CARD_REFUND_SHOP_ACCOUNT], true)) {
+            $destination = self::CARD_REFUND_CUSTOMER_CREDIT;
+        }
+
+        $shopAccountId = isset($options['shop_account_id']) ? (int) $options['shop_account_id'] : null;
+        if ($shopAccountId !== null && $shopAccountId <= 0) {
+            $shopAccountId = null;
+        }
+
+        if ($destination === self::CARD_REFUND_SHOP_ACCOUNT && $shopAccountId) {
+            $account = \App\Models\ShopAccount::query()->find($shopAccountId);
+            if (! $account || $account->isTill()) {
+                throw new \InvalidArgumentException('برای برگشت کارتخوان، حساب بانکی یا تنخواه معتبر انتخاب کنید (نه صندوق نقد).');
+            }
+        }
+
+        return [
+            'card_refund_destination' => $destination,
+            'shop_account_id' => $destination === self::CARD_REFUND_SHOP_ACCOUNT ? $shopAccountId : null,
+        ];
+    }
+
+    /**
+     * پایهٔ نقد/کارت پرداخت‌شده روی فاکتور (قبل از نسبت برگشت).
+     *
+     * @return array{0: float, 1: float}
+     */
+    protected static function paidCashCardBases(Purchase $purchase): array
+    {
+        if ($purchase->isInstallment()) {
+            $paid = (float) $purchase->installments->where('is_paid', true)->sum('amount');
+
+            // وصول اقساط در حسابداری به صندوق نقد می‌رود
+            return [max(0, $paid), 0.0];
+        }
+
+        if ($purchase->isDebt() && $purchase->isDebtSettled()) {
+            $cash = (float) $purchase->debt_settled_cash_amount;
+            $card = (float) $purchase->debt_settled_card_amount;
+            if ($cash + $card < 0.01) {
+                $cash = (float) $purchase->cash_amount;
+                $card = (float) $purchase->card_amount;
+            }
+
+            return [max(0, $cash), max(0, $card)];
+        }
+
+        $cash = (float) $purchase->cash_amount;
+        $card = (float) $purchase->card_amount;
+        if ($cash + $card >= 0.01) {
+            return [max(0, $cash), max(0, $card)];
+        }
+
+        // فاکتورهای قدیمی بدون تفکیک نقد/کارت → نقد از صندوق
+        $paid = max(0, round(
+            (float) $purchase->total_amount
+            - (float) $purchase->discount_amount
+            - (float) $purchase->credit_used,
+            2
+        ));
+        if ($purchase->isDebt() && ! $purchase->isDebtSettled()) {
+            $paid = (float) $purchase->immediatePaidAmount();
+        } elseif ($purchase->isCheque()) {
+            $paid = (float) $purchase->immediatePaidAmount();
+        }
+
+        return [max(0, $paid), 0.0];
     }
 
     protected static function reduceUnpaidInstallments(Purchase $purchase, float $reduceBy, ?UserShiksho $customer): void

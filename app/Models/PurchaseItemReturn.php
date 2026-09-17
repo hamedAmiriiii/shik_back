@@ -24,6 +24,10 @@ class PurchaseItemReturn extends Model
         'payment_type',
         'credit_used_refund',
         'credit_earned_reversed',
+        'cash_refunded',
+        'card_refunded',
+        'card_refund_destination',
+        'shop_account_id',
         'size',
         'color',
         'user_name',
@@ -38,6 +42,9 @@ class PurchaseItemReturn extends Model
         'return_purchase_total' => 'decimal:2',
         'credit_used_refund' => 'decimal:2',
         'credit_earned_reversed' => 'decimal:2',
+        'cash_refunded' => 'decimal:2',
+        'card_refunded' => 'decimal:2',
+        'shop_account_id' => 'integer',
     ];
 
     public function getCreatedAtAttribute($value): string

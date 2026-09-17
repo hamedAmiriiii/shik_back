@@ -1221,6 +1221,8 @@ class PurchasedProductController extends Controller
             'quantity' => 'sometimes|numeric|min:0.001',
             'notes' => 'nullable|string|max:2000',
             'phone' => 'nullable|string|max:20',
+            'card_refund_destination' => 'nullable|string|in:customer_credit,shop_account',
+            'shop_account_id' => 'nullable|integer|min:1',
         ]);
 
         $product = $purchasedProduct->product;
@@ -1249,6 +1251,14 @@ class PurchasedProductController extends Controller
             }
         }
 
+        $refundOptions = [
+            'card_refund_destination' => $request->input(
+                'card_refund_destination',
+                \App\Services\PurchaseItemReturnService::CARD_REFUND_CUSTOMER_CREDIT
+            ),
+            'shop_account_id' => $request->input('shop_account_id'),
+        ];
+
         try {
             $result = \App\Services\PurchaseItemReturnService::processReturn(
                 $purchase,
@@ -1256,7 +1266,9 @@ class PurchasedProductController extends Controller
                 $returnQty,
                 $userName,
                 $request->input('notes'),
-                $request->input('phone')
+                $request->input('phone'),
+                true,
+                $refundOptions
             );
         } catch (\InvalidArgumentException $e) {
             return response(['error' => $e->getMessage(), 'message' => $e->getMessage()], 422);
@@ -1268,6 +1280,10 @@ class PurchasedProductController extends Controller
             'row' => $result['row'],
             'phone' => $result['phone'] ?? $purchase->phone,
             'customer_credit' => $result['customer_credit'] ?? null,
+            'credit_refunded' => $result['returned_item']['credit_refunded'] ?? null,
+            'cash_refunded' => $result['returned_item']['cash_refunded'] ?? null,
+            'card_refunded' => $result['returned_item']['card_refunded'] ?? null,
+            'card_refund_destination' => $result['returned_item']['card_refund_destination'] ?? null,
             'purchase' => $result['purchase'] ?? $purchase,
         ], 200);
     }
@@ -1281,6 +1297,8 @@ class PurchasedProductController extends Controller
         $request->validate([
             'notes' => 'nullable|string|max:2000',
             'phone' => 'nullable|string|max:20',
+            'card_refund_destination' => 'nullable|string|in:customer_credit,shop_account',
+            'shop_account_id' => 'nullable|integer|min:1',
         ]);
 
         $userName = null;
@@ -1293,24 +1311,36 @@ class PurchasedProductController extends Controller
             }
         }
 
+        $refundOptions = [
+            'card_refund_destination' => $request->input(
+                'card_refund_destination',
+                \App\Services\PurchaseItemReturnService::CARD_REFUND_CUSTOMER_CREDIT
+            ),
+            'shop_account_id' => $request->input('shop_account_id'),
+        ];
+
         try {
             $result = \App\Services\PurchaseItemReturnService::processFullReturn(
                 $purchase,
                 $request->input('phone'),
                 $userName,
-                $request->input('notes')
+                $request->input('notes'),
+                $refundOptions
             );
         } catch (\InvalidArgumentException $e) {
             return response(['error' => $e->getMessage(), 'message' => $e->getMessage()], 422);
         }
 
         return response([
-            'message' => 'خرید به‌طور کامل برگشت داده شد. مبلغ به اعتبار مشتری اضافه شد.',
+            'message' => 'خرید به‌طور کامل برگشت داده شد.',
             'full_return' => true,
             'returned_items' => $result['returned_items'],
             'rows' => $result['rows'],
             'credit_refunded' => $result['credit_refunded'],
             'credit_earned_reversed' => $result['credit_earned_reversed'],
+            'cash_refunded' => $result['cash_refunded'] ?? null,
+            'card_refunded' => $result['card_refunded'] ?? null,
+            'card_refund_destination' => $result['card_refund_destination'] ?? null,
             'phone' => $result['phone'],
             'customer_credit' => $result['customer_credit'],
             'purchase' => $result['purchase'],
