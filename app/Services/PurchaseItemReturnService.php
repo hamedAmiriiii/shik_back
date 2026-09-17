@@ -196,6 +196,19 @@ class PurchaseItemReturnService
                 );
             }
 
+            $cardFromAccount = (float) ($settlement['card_account'] ?? 0);
+            if ($cardFromAccount >= 0.01 && $options['shop_account_id']) {
+                $account = \App\Models\ShopAccount::query()->find($options['shop_account_id']);
+                if ($account) {
+                    $available = ShopAccountBalanceService::availableBalance($account);
+                    if ($available + 0.001 < $cardFromAccount) {
+                        throw new \InvalidArgumentException(
+                            'موجودی حساب کافی نیست. موجودی: '.number_format($available, 0).' تومان'
+                        );
+                    }
+                }
+            }
+
             $needsCustomer = $creditRefunded >= 0.01 || $creditEarnedReversed >= 0.01
                 || $purchase->phone || $phone;
             $customer = $needsCustomer

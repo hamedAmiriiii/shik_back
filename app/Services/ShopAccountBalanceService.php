@@ -8,8 +8,10 @@ use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\ManualTrade;
 use App\Models\Cheque;
+use App\Models\PurchaseItemReturn;
 use App\Models\ShopAccount;
 use App\Models\ShopAccountTransfer;
+use App\Models\ShopPartnerSettlement;
 use App\Services\ChartOfAccountsSeeder;
 use App\Services\DocumentPaymentService;
 use Illuminate\Support\Facades\DB;
@@ -19,7 +21,9 @@ use Illuminate\Support\Facades\Schema;
  * موجودی حساب‌های فروشگاه و تنخواه.
  *
  * حساب فروشگاه: واریزهای تطبیق روزانه − شارژ تنخواه − هزینه/فاکتور پرداخت‌شده از آن
- * تنخواه: شارژ دریافتی − هزینه/فاکتور پرداخت‌شده از آن
+ *               − برگشت فروش از حساب − تقسیم سود شرکا
+ * تنخواه: شارژ دریافتی − هزینه/فاکتور پرداخت‌شده از آن − برگشت/برداشت‌های مشابه
+ * صندوق نقد: مانده دفتر حسابداری (۱۱۱۰۱)
  */
 class ShopAccountBalanceService
 {
@@ -46,6 +50,8 @@ class ShopAccountBalanceService
                 'manual_purchases' => 0.0,
                 'manual_sales' => 0.0,
                 'cheque_clears' => 0.0,
+                'sale_return_refunds' => 0.0,
+                'partner_settlements' => 0.0,
                 'balance' => 0.0,
             ];
         }
@@ -98,11 +104,26 @@ class ShopAccountBalanceService
             }
         }
 
+        foreach (self::saleReturnRefundTotals($atelierId, $accountIds) as $id => $total) {
+            if (isset($result[$id])) {
+                $result[$id]['sale_return_refunds'] = $total;
+            }
+        }
+
+        foreach (self::partnerSettlementTotals($atelierId, $accountIds) as $id => $total) {
+            if (isset($result[$id])) {
+                $result[$id]['partner_settlements'] = $total;
+            }
+        }
+
         foreach ($result as $id => $row) {
             $chequeClears = (float) ($row['cheque_clears'] ?? 0);
+            $saleReturns = (float) ($row['sale_return_refunds'] ?? 0);
+            $partnerSettlements = (float) ($row['partner_settlements'] ?? 0);
             $result[$id]['balance'] = round(
                 $row['deposits'] + $row['transfers_in'] + $row['manual_sales'] + $chequeClears
-                    - $row['transfers_out'] - $row['expenses'] - $row['invoices'] - $row['manual_purchases'],
+                    - $row['transfers_out'] - $row['expenses'] - $row['invoices'] - $row['manual_purchases']
+                    - $saleReturns - $partnerSettlements,
                 2
             );
         }
@@ -387,6 +408,66 @@ class ShopAccountBalanceService
             ->where('type', $type)
             ->whereIn('shop_account_id', $accountIds)
             ->selectRaw('shop_account_id, SUM(amount) as total')
+            ->groupBy('shop_account_id')
+            ->pluck('total', 'shop_account_id')
+            ->mapWithKeys(fn ($v, $k) => [(int) $k => (float) $v])
+            ->all();
+    }
+
+    /**
+     * برداشت از حساب برای برگشت مبلغ کارتخوان به مشتری.
+     *
+     * @param  array<int>  $accountIds
+     * @return array<int, float>
+     */
+    protected static function saleReturnRefundTotals(int $atelierId, array $accountIds): array
+    {
+        if (! Schema::hasTable('purchase_item_returns')
+            || ! Schema::hasColumn('purchase_item_returns', 'shop_account_id')
+        ) {
+            return [];
+        }
+
+        $amountExpr = Schema::hasColumn('purchase_item_returns', 'card_refunded')
+            ? 'SUM(COALESCE(card_refunded, 0))'
+            : 'SUM(COALESCE(return_sale_total, 0))';
+
+        $query = PurchaseItemReturn::query()
+            ->where('atelier_id', $atelierId)
+            ->whereIn('shop_account_id', $accountIds)
+            ->whereNotNull('shop_account_id');
+
+        if (Schema::hasColumn('purchase_item_returns', 'card_refund_destination')) {
+            $query->where('card_refund_destination', 'shop_account');
+        }
+
+        return $query
+            ->selectRaw("shop_account_id, {$amountExpr} as total")
+            ->groupBy('shop_account_id')
+            ->pluck('total', 'shop_account_id')
+            ->mapWithKeys(fn ($v, $k) => [(int) $k => (float) $v])
+            ->all();
+    }
+
+    /**
+     * برداشت تقسیم سود شرکا از حساب فروشگاه.
+     *
+     * @param  array<int>  $accountIds
+     * @return array<int, float>
+     */
+    protected static function partnerSettlementTotals(int $atelierId, array $accountIds): array
+    {
+        if (! Schema::hasTable('shop_partner_settlements')
+            || ! Schema::hasColumn('shop_partner_settlements', 'shop_account_id')
+        ) {
+            return [];
+        }
+
+        return ShopPartnerSettlement::query()
+            ->where('atelier_id', $atelierId)
+            ->whereIn('shop_account_id', $accountIds)
+            ->whereNotNull('shop_account_id')
+            ->selectRaw('shop_account_id, SUM(COALESCE(total_distributed, 0)) as total')
             ->groupBy('shop_account_id')
             ->pluck('total', 'shop_account_id')
             ->mapWithKeys(fn ($v, $k) => [(int) $k => (float) $v])

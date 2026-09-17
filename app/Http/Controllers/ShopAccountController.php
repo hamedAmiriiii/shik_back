@@ -218,6 +218,8 @@ class ShopAccountController extends Controller
             'invoices_total' => round((float) ($row['invoices'] ?? 0), 2),
             'manual_purchases_total' => round((float) ($row['manual_purchases'] ?? 0), 2),
             'manual_sales_total' => round((float) ($row['manual_sales'] ?? 0), 2),
+            'sale_return_refunds_total' => round((float) ($row['sale_return_refunds'] ?? 0), 2),
+            'partner_settlements_total' => round((float) ($row['partner_settlements'] ?? 0), 2),
         ];
     }
 }
