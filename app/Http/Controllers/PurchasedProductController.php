@@ -61,15 +61,39 @@ class PurchasedProductController extends Controller
     // جستجو بر اساس searchFilterModel
     $searchDataModel = json_decode($request->input('searchFilterModel'));
     if ($searchDataModel) {
-        $query->where(function($q) use ($searchDataModel) {
+        $query->where(function ($q) use ($searchDataModel, $atelierId) {
             if (is_object($searchDataModel)) {
-                // جستجو بر اساس شماره تلفن
                 if (isset($searchDataModel->phone)) {
-                    $q->where('phone', 'like', '%' . $searchDataModel->phone . '%');
+                    $q->where('phone', 'like', '%'.$searchDataModel->phone.'%');
                 }
-            } else if (is_string($searchDataModel)) {
-                // اگر یک رشته ساده بود، در شماره تلفن جستجو می‌کند
-                $q->where('phone', 'like', '%' . $searchDataModel . '%');
+                if (isset($searchDataModel->customer_name)
+                    && Schema::hasTable('user_shiksho')
+                    && Schema::hasColumn('user_shiksho', 'name')
+                ) {
+                    $name = trim((string) $searchDataModel->customer_name);
+                    if ($name !== '') {
+                        $q->orWhereIn('phone', function ($sub) use ($atelierId, $name) {
+                            $sub->select('phone')
+                                ->from('user_shiksho')
+                                ->where('atelier_id', $atelierId)
+                                ->where('name', 'like', '%'.$name.'%');
+                        });
+                    }
+                }
+            } elseif (is_string($searchDataModel)) {
+                $term = trim($searchDataModel);
+                $q->where('phone', 'like', '%'.$term.'%');
+                if ($term !== ''
+                    && Schema::hasTable('user_shiksho')
+                    && Schema::hasColumn('user_shiksho', 'name')
+                ) {
+                    $q->orWhereIn('phone', function ($sub) use ($atelierId, $term) {
+                        $sub->select('phone')
+                            ->from('user_shiksho')
+                            ->where('atelier_id', $atelierId)
+                            ->where('name', 'like', '%'.$term.'%');
+                    });
+                }
             }
         });
     }
@@ -129,6 +153,26 @@ class PurchasedProductController extends Controller
 
     // تبدیل به array و اضافه کردن فیلد paid_amount برای خریدهای اقساطی
     $itemsArray = $items->toArray();
+
+    $customerNames = [];
+    if (Schema::hasTable('user_shiksho') && Schema::hasColumn('user_shiksho', 'name')) {
+        $phones = collect($itemsArray['data'] ?? [])
+            ->pluck('phone')
+            ->filter(fn ($p) => is_string($p) && $p !== '')
+            ->unique()
+            ->values()
+            ->all();
+        if ($phones !== []) {
+            $customerNames = UserShiksho::query()
+                ->where('atelier_id', $atelierId)
+                ->whereIn('phone', $phones)
+                ->whereNotNull('name')
+                ->where('name', '!=', '')
+                ->pluck('name', 'phone')
+                ->all();
+        }
+    }
+
     foreach ($itemsArray['data'] as &$purchaseData) {
         $purchase = $items->firstWhere('id', $purchaseData['id']);
         if ($purchase && $purchase->isInstallment()) {
@@ -153,6 +197,10 @@ class PurchasedProductController extends Controller
         }
         $purchaseData['daily_ticket_number'] = $purchase?->daily_ticket_number;
         $purchaseData['dailyTicketNumber'] = $purchase?->daily_ticket_number;
+
+        $phone = is_string($purchaseData['phone'] ?? null) ? $purchaseData['phone'] : '';
+        $customerName = $phone !== '' ? trim((string) ($customerNames[$phone] ?? '')) : '';
+        $purchaseData['customer_name'] = $customerName !== '' ? $customerName : null;
     }
     unset($purchaseData);
 
