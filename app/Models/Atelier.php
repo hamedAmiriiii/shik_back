@@ -60,6 +60,7 @@ class Atelier extends Model
         'subscription_current_price_rial',
         'subscription_renewal_price_rial',
         'subscription_renewal_days',
+        'unlimited_products',
         'project_type',
         'oil_interval_km',
     ];
@@ -72,6 +73,7 @@ class Atelier extends Model
         'subscription_current_price_rial' => 'integer',
         'subscription_renewal_price_rial' => 'integer',
         'subscription_renewal_days' => 'integer',
+        'unlimited_products' => 'boolean',
         'oil_interval_km' => 'integer',
     ];
 
@@ -148,6 +150,12 @@ class Atelier extends Model
                 : null,
             'subscription_renewal_days' => $this->effectiveRenewalDays(),
             'has_custom_renewal_price' => $this->hasCustomRenewalPrice(),
+            'unlimited_products' => Schema::hasColumn('ateliers', 'unlimited_products')
+                ? (bool) $this->unlimited_products
+                : false,
+            'product_limit' => Schema::hasColumn('ateliers', 'unlimited_products') && $this->unlimited_products
+                ? null
+                : \App\Services\ShopProductLimitService::DEFAULT_LIMIT,
         ];
     }
 

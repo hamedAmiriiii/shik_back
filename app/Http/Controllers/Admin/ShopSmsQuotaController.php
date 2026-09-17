@@ -12,6 +12,7 @@ use App\Services\ShopSmsQuotaService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ShopSmsQuotaController extends Controller
 {
@@ -43,6 +44,10 @@ class ShopSmsQuotaController extends Controller
                 DB::raw('COALESCE(sms_quota_setting.value, 0) as shop_sms_quota'),
             ])
             ->orderByDesc('ateliers.id');
+
+        if (Schema::hasColumn('ateliers', 'unlimited_products')) {
+            $query->addSelect('ateliers.unlimited_products');
+        }
 
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         if ($searchDataModel) {
@@ -137,6 +142,7 @@ class ShopSmsQuotaController extends Controller
             'subscription_current_price_toman' => 'sometimes|nullable|integer|min:0|max:99999999999',
             'subscription_renewal_price_toman' => 'sometimes|nullable|integer|min:0|max:99999999999',
             'subscription_renewal_days' => 'sometimes|nullable|integer|min:1|max:3660',
+            'unlimited_products' => 'sometimes|boolean',
         ]);
 
         $wasPaid = $atelier->isPaidPlan();
@@ -150,8 +156,10 @@ class ShopSmsQuotaController extends Controller
             || $request->has('subscription_current_price_toman')
             || $request->has('subscription_renewal_price_toman')
             || $request->has('subscription_renewal_days');
+        $hasUnlimited = $request->has('unlimited_products')
+            && Schema::hasColumn('ateliers', 'unlimited_products');
 
-        if (! $hasSms && ! $hasAccess && ! $hasPricing && ! $request->has('activate_paid_plan') && ! $request->has('subscription_status')) {
+        if (! $hasSms && ! $hasAccess && ! $hasPricing && ! $hasUnlimited && ! $request->has('activate_paid_plan') && ! $request->has('subscription_status')) {
             return response()->json([
                 'message' => 'حداقل یکی از فیلدهای موجودی پیامک، اعتبار دسترسی یا مبلغ اشتراک را بفرستید.',
             ], 422);
@@ -212,6 +220,10 @@ class ShopSmsQuotaController extends Controller
             }
         }
 
+        if ($hasUnlimited) {
+            $update['unlimited_products'] = (bool) $fields['unlimited_products'];
+        }
+
         if ($update !== []) {
             $atelier->update($update);
         }
@@ -242,6 +254,7 @@ class ShopSmsQuotaController extends Controller
             'subscription_current_price_rial' => $atelier->subscription_current_price_rial,
             'subscription_renewal_price_rial' => $atelier->subscription_renewal_price_rial,
             'subscription_renewal_days' => $atelier->subscription_renewal_days,
+            'unlimited_products' => (bool) ($atelier->unlimited_products ?? false),
             'shop_sms_quota' => ShopSmsQuotaService::getBalance((int) $atelier->id),
         ];
 
@@ -305,6 +318,7 @@ class ShopSmsQuotaController extends Controller
             'subscription_current_price_rial' => $row->subscription_current_price_rial ?? null,
             'subscription_renewal_price_rial' => $row->subscription_renewal_price_rial ?? null,
             'subscription_renewal_days' => $row->subscription_renewal_days ?? null,
+            'unlimited_products' => (bool) ($row->unlimited_products ?? false),
         ]);
 
         return array_merge([

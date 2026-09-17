@@ -16,6 +16,7 @@ class ShopPlan extends Model
         'discount_price_rial',
         'description',
         'is_active',
+        'unlimited_products',
         'sort_order',
     ];
 
@@ -24,8 +25,18 @@ class ShopPlan extends Model
         'price_rial' => 'integer',
         'discount_price_rial' => 'integer',
         'is_active' => 'boolean',
+        'unlimited_products' => 'boolean',
         'sort_order' => 'integer',
     ];
+
+    public function grantsUnlimitedProducts(): bool
+    {
+        if (! Schema::hasColumn('shop_plans', 'unlimited_products')) {
+            return false;
+        }
+
+        return (bool) $this->unlimited_products;
+    }
 
     public function scopeActive($query)
     {

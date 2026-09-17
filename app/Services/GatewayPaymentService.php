@@ -82,8 +82,28 @@ class GatewayPaymentService
                 ];
 
                 if ($atelier->hasCustomRenewalPrice()) {
-                    $payload['shop_plans'] = [$this->formatShopCustomRenewalPlan($atelier)];
+                    $plansList = [$this->formatShopCustomRenewalPlan($atelier)];
+                    // پلن‌های بدون سقف کالا (مثل اشتراک طلایی) همیشه کنار تمدید اختصاصی نمایش داده شوند
+                    if (Schema::hasColumn('shop_plans', 'unlimited_products')
+                        && Schema::hasColumn('ateliers', 'unlimited_products')
+                        && ! $atelier->unlimited_products
+                    ) {
+                        $golden = ShopPlan::query()
+                            ->active()
+                            ->forProject($atelier->projectType())
+                            ->where('unlimited_products', true)
+                            ->orderBy('sort_order')
+                            ->orderBy('id')
+                            ->get()
+                            ->map(fn (ShopPlan $p) => $this->formatShopPlan($p))
+                            ->all();
+                        $plansList = array_merge($plansList, $golden);
+                    }
+                    $payload['shop_plans'] = $plansList;
                 }
+                $payload['shop_subscription']['unlimited_products'] = Schema::hasColumn('ateliers', 'unlimited_products')
+                    ? (bool) $atelier->unlimited_products
+                    : false;
             }
         }
 
@@ -534,6 +554,9 @@ class GatewayPaymentService
         if (Schema::hasColumn('shop_plans', 'description')) {
             $payload['description'] = $plan->description;
         }
+        if (Schema::hasColumn('shop_plans', 'unlimited_products')) {
+            $payload['unlimited_products'] = (bool) $plan->unlimited_products;
+        }
 
         return $payload;
     }
@@ -558,10 +581,13 @@ class GatewayPaymentService
 
         if ($type === GatewayPayment::TYPE_SHOP_PLAN) {
             $atelier = $atelierId ? Atelier::query()->find($atelierId) : null;
-            if ($atelier && $atelier->hasCustomRenewalPrice()) {
+            $plan = $itemId > 0 ? ShopPlan::query()->active()->find($itemId) : null;
+            $isUnlimitedUpgrade = $plan && $plan->grantsUnlimitedProducts();
+
+            // تمدید اختصاصی فقط برای پلن‌های عادی؛ خرید اشتراک طلایی با قیمت خود پلن
+            if ($atelier && $atelier->hasCustomRenewalPrice() && ! $isUnlimitedUpgrade) {
                 $days = $atelier->effectiveRenewalDays();
                 $amount = (int) $atelier->effectiveRenewalPriceRial();
-                $plan = $itemId > 0 ? ShopPlan::query()->find($itemId) : null;
 
                 return [
                     $amount,
@@ -575,7 +601,6 @@ class GatewayPaymentService
                 ];
             }
 
-            $plan = ShopPlan::query()->active()->find($itemId);
             if (! $plan) {
                 throw new RuntimeException('پلن اکانت یافت نشد.');
             }
@@ -594,6 +619,7 @@ class GatewayPaymentService
                     'discount_price_rial' => Schema::hasColumn('shop_plans', 'discount_price_rial')
                         ? ($plan->discount_price_rial !== null ? (int) $plan->discount_price_rial : null)
                         : null,
+                    'unlimited_products' => $plan->grantsUnlimitedProducts(),
                 ],
             ];
         }
@@ -656,6 +682,14 @@ class GatewayPaymentService
             $atelier->subscription_renewal_price_rial = (int) $payment->amount_rial;
             $atelier->subscription_renewal_days = $days;
         }
+
+        $plan = ShopPlan::query()->find($payment->item_id);
+        $grantsUnlimited = (bool) ($payment->meta['unlimited_products'] ?? false)
+            || ($plan && $plan->grantsUnlimitedProducts());
+        if ($grantsUnlimited && Schema::hasColumn('ateliers', 'unlimited_products')) {
+            $atelier->unlimited_products = true;
+        }
+
         $atelier->save();
 
         ShopReferralService::onPaidPlanActivated($atelier->fresh());

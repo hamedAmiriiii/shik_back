@@ -73,6 +73,7 @@ class ShopPlanController extends Controller
             'discount_price_toman' => 'sometimes|nullable|integer|min:0',
             'description' => 'sometimes|nullable|string|max:500',
             'is_active' => 'sometimes|boolean',
+            'unlimited_products' => 'sometimes|boolean',
             'sort_order' => 'sometimes|integer|min:0|max:255',
         ];
         if (Schema::hasColumn('shop_plans', 'project_type')) {
@@ -117,6 +118,10 @@ class ShopPlanController extends Controller
             $fields['description'] = $desc !== '' ? $desc : null;
         }
 
+        if (array_key_exists('unlimited_products', $fields)) {
+            $fields['unlimited_products'] = (bool) $fields['unlimited_products'];
+        }
+
         if (! Schema::hasColumn('shop_plans', 'description')) {
             unset($fields['description']);
         }
@@ -125,6 +130,9 @@ class ShopPlanController extends Controller
         }
         if (! Schema::hasColumn('shop_plans', 'project_type')) {
             unset($fields['project_type']);
+        }
+        if (! Schema::hasColumn('shop_plans', 'unlimited_products')) {
+            unset($fields['unlimited_products']);
         }
 
         return $fields;

@@ -136,6 +136,12 @@ class ProductController extends Controller
             return response(['message' => $prepared], 422);
         }
 
+        try {
+            \App\Services\ShopProductLimitService::assertCanCreate($atelierId, 1);
+        } catch (\App\Services\ProductLimitReachedException $e) {
+            return response($e->payload(), 422);
+        }
+
         $product = $this->createProductFromPreparedFields($prepared, $atelierId, $request->all());
         $product->load(['images', 'categories']);
 
@@ -206,6 +212,20 @@ class ProductController extends Controller
 
         $createdProducts = [];
         $updatedProducts = [];
+
+        $newCreateCount = 0;
+        foreach ($productsData as $productData) {
+            $barcode = trim((string) ($productData['barcode'] ?? ''));
+            $existing = $barcode !== '' ? $existingByBarcode->get($barcode) : null;
+            if (! $existing) {
+                $newCreateCount++;
+            }
+        }
+        try {
+            \App\Services\ShopProductLimitService::assertCanCreate($atelierId, $newCreateCount);
+        } catch (\App\Services\ProductLimitReachedException $e) {
+            return response($e->payload(), 422);
+        }
 
         try {
             DB::transaction(function () use ($productsData, $atelierId, $existingByBarcode, &$createdProducts, &$updatedProducts) {
