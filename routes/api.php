@@ -359,7 +359,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::put('manufacturers/{manufacturer}', [\App\Http\Controllers\ManufacturerController::class, 'update']);
     Route::delete('manufacturers/{manufacturer}', [\App\Http\Controllers\ManufacturerController::class, 'destroy']);
 
-    // Broadcast message to selected customers
+        // Broadcast message to selected customers
     Route::get('customer-broadcast/list', [\App\Http\Controllers\CustomerController::class, 'getCustomersForBroadcast']);
     Route::post('customer-broadcast/message', [\App\Http\Controllers\CustomerController::class, 'broadcastMessage']);
 
@@ -369,6 +369,36 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         ->where('group', '[0-9]+');
     Route::delete('shop-customer-groups/{group}', [\App\Http\Controllers\ShopCustomerGroupController::class, 'destroy'])
         ->where('group', '[0-9]+');
+
+    Route::prefix('smart-customer')->group(function () {
+        Route::get('overview', [\App\Http\Controllers\SmartCustomerController::class, 'overview']);
+        Route::get('customers', [\App\Http\Controllers\SmartCustomerController::class, 'customers']);
+        Route::get('thresholds', [\App\Http\Controllers\SmartCustomerController::class, 'thresholds']);
+        Route::put('thresholds', [\App\Http\Controllers\SmartCustomerController::class, 'updateThresholds']);
+        Route::post('recompute', [\App\Http\Controllers\SmartCustomerController::class, 'recompute']);
+        Route::get('actions', [\App\Http\Controllers\SmartCustomerController::class, 'actions']);
+        Route::post('actions/{action}/dismiss', [\App\Http\Controllers\SmartCustomerController::class, 'dismissAction'])
+            ->where('action', '[0-9]+');
+        Route::post('actions/{action}/execute', [\App\Http\Controllers\SmartCustomerController::class, 'executeAction'])
+            ->where('action', '[0-9]+');
+
+        Route::get('campaigns', [\App\Http\Controllers\SmartCampaignController::class, 'index']);
+        Route::post('campaigns', [\App\Http\Controllers\SmartCampaignController::class, 'store']);
+        Route::get('campaigns/{campaign}', [\App\Http\Controllers\SmartCampaignController::class, 'show'])
+            ->where('campaign', '[0-9]+');
+        Route::put('campaigns/{campaign}', [\App\Http\Controllers\SmartCampaignController::class, 'update'])
+            ->where('campaign', '[0-9]+');
+        Route::delete('campaigns/{campaign}', [\App\Http\Controllers\SmartCampaignController::class, 'destroy'])
+            ->where('campaign', '[0-9]+');
+        Route::get('campaigns/{campaign}/preview', [\App\Http\Controllers\SmartCampaignController::class, 'preview'])
+            ->where('campaign', '[0-9]+');
+        Route::post('campaigns/{campaign}/run', [\App\Http\Controllers\SmartCampaignController::class, 'run'])
+            ->where('campaign', '[0-9]+');
+        Route::get('campaigns/{campaign}/runs', [\App\Http\Controllers\SmartCampaignController::class, 'runs'])
+            ->where('campaign', '[0-9]+');
+        Route::get('campaigns/{campaign}/logs', [\App\Http\Controllers\SmartCampaignController::class, 'logs'])
+            ->where('campaign', '[0-9]+');
+    });
 
     Route::post('product-stock-notify', [\App\Http\Controllers\ProductStockNotifyController::class, 'store']);
 

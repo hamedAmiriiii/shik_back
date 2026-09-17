@@ -191,6 +191,67 @@ class ShopBackupTables
                 ],
             ],
             [
+                'name' => 'shop_customer_metrics',
+                'scope' => 'atelier',
+                'fks' => [],
+            ],
+            [
+                'name' => 'shop_segment_thresholds',
+                'scope' => 'atelier',
+                'fks' => [],
+            ],
+            [
+                'name' => 'shop_customer_segments',
+                'scope' => 'atelier',
+                'fks' => [],
+            ],
+            [
+                'name' => 'shop_smart_actions',
+                'scope' => 'atelier',
+                'fks' => [],
+            ],
+            [
+                'name' => 'shop_campaigns',
+                'scope' => 'atelier',
+                'fks' => [],
+            ],
+            [
+                'name' => 'shop_campaign_rules',
+                'scope' => 'parent',
+                'parent' => 'shop_campaigns',
+                'parent_key' => 'campaign_id',
+                'fks' => [
+                    'campaign_id' => 'shop_campaigns',
+                ],
+            ],
+            [
+                'name' => 'shop_campaign_actions',
+                'scope' => 'parent',
+                'parent' => 'shop_campaigns',
+                'parent_key' => 'campaign_id',
+                'fks' => [
+                    'campaign_id' => 'shop_campaigns',
+                ],
+            ],
+            [
+                'name' => 'shop_campaign_runs',
+                'scope' => 'parent',
+                'parent' => 'shop_campaigns',
+                'parent_key' => 'campaign_id',
+                'fks' => [
+                    'campaign_id' => 'shop_campaigns',
+                ],
+            ],
+            [
+                'name' => 'shop_campaign_logs',
+                'scope' => 'parent',
+                'parent' => 'shop_campaigns',
+                'parent_key' => 'campaign_id',
+                'fks' => [
+                    'campaign_id' => 'shop_campaigns',
+                ],
+            ],
+            [
                 'name' => 'carts',
                 'scope' => 'atelier',
                 'fks' => [

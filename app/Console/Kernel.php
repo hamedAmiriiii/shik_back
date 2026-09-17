@@ -71,6 +71,20 @@ class Kernel extends ConsoleKernel
         $schedule->command('shop-sms:refresh-statuses --limit=100')
             ->everyFiveMinutes()
             ->withoutOverlapping();
+
+        // باشگاه هوشمند: RFM + سگمنت + پیشنهاد اقدام — هر شب ۲۳:۰۰ تهران
+        $schedule->command('smart-customer:nightly')
+            ->dailyAt('23:00')
+            ->withoutOverlapping()
+            ->before(function () {
+                \Log::info('Scheduled task: smart-customer:nightly - شروع اجرا', [
+                    'time' => now()->format('Y-m-d H:i:s'),
+                    'timezone' => config('app.timezone'),
+                ]);
+            })
+            ->after(function () {
+                \Log::info('Scheduled task: smart-customer:nightly - اجرا شد');
+            });
     }
 
     /**

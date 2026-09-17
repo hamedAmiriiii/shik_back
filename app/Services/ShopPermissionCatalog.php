@@ -53,7 +53,7 @@ class ShopPermissionCatalog
             ['key' => 'products', 'label' => 'کالاها', 'prefixes' => ['products', 'product']],
             ['key' => 'categories', 'label' => 'دسته‌بندی', 'prefixes' => ['category']],
             ['key' => 'manufacturers', 'label' => 'تولیدکننده', 'prefixes' => ['manufacturers']],
-            ['key' => 'customers', 'label' => 'مشتریان', 'prefixes' => ['customers', 'customer-broadcast', 'shop-customer-groups']],
+            ['key' => 'customers', 'label' => 'مشتریان', 'prefixes' => ['customers', 'customer-broadcast', 'shop-customer-groups', 'smart-customer']],
             ['key' => 'invoices', 'label' => 'فاکتورها', 'prefixes' => ['invoices']],
             ['key' => 'expenses', 'label' => 'هزینه‌ها', 'prefixes' => ['expenses-statistics', 'expenses']],
             ['key' => 'cheques', 'label' => 'چک‌ها', 'prefixes' => ['cheques']],
