@@ -376,6 +376,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('thresholds', [\App\Http\Controllers\SmartCustomerController::class, 'thresholds']);
         Route::put('thresholds', [\App\Http\Controllers\SmartCustomerController::class, 'updateThresholds']);
         Route::post('recompute', [\App\Http\Controllers\SmartCustomerController::class, 'recompute']);
+        Route::get('product-signals', [\App\Http\Controllers\SmartCustomerController::class, 'productSignals']);
         Route::get('actions', [\App\Http\Controllers\SmartCustomerController::class, 'actions']);
         Route::post('actions/{action}/dismiss', [\App\Http\Controllers\SmartCustomerController::class, 'dismissAction'])
             ->where('action', '[0-9]+');

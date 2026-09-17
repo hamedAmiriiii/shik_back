@@ -304,6 +304,24 @@ class SmartCustomerController extends Controller
         ], ! empty($result['ok']) ? 200 : 422);
     }
 
+    public function productSignals(Request $request)
+    {
+        $atelierId = $this->assertShopFeature(
+            $request,
+            ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
+
+        $type = $request->query('type', 'bad');
+        if (! in_array($type, ['bad', 'good'], true)) {
+            $type = 'bad';
+        }
+
+        $data = \App\Services\SmartCustomer\ProductCycleInsightService::analyze($atelierId, $type);
+
+        return response($data, 200);
+    }
+
     public function actions(Request $request)
     {
         $atelierId = $this->assertShopFeature(
