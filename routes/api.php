@@ -306,6 +306,16 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::put('shop-accounts/{shopAccount}', [\App\Http\Controllers\ShopAccountController::class, 'update']);
     Route::delete('shop-accounts/{shopAccount}', [\App\Http\Controllers\ShopAccountController::class, 'destroy']);
 
+    Route::get('shop-partners', [\App\Http\Controllers\ShopPartnerController::class, 'index']);
+    Route::post('shop-partners', [\App\Http\Controllers\ShopPartnerController::class, 'store']);
+    Route::get('shop-partners/profit-preview', [\App\Http\Controllers\ShopPartnerController::class, 'profitPreview']);
+    Route::post('shop-partners/settle', [\App\Http\Controllers\ShopPartnerController::class, 'settle']);
+    Route::get('shop-partners/settlements', [\App\Http\Controllers\ShopPartnerController::class, 'settlements']);
+    Route::get('shop-partners/settlements/{settlement}', [\App\Http\Controllers\ShopPartnerController::class, 'showSettlement']);
+    Route::delete('shop-partners/settlements/{settlement}', [\App\Http\Controllers\ShopPartnerController::class, 'destroySettlement']);
+    Route::put('shop-partners/{shopPartner}', [\App\Http\Controllers\ShopPartnerController::class, 'update']);
+    Route::delete('shop-partners/{shopPartner}', [\App\Http\Controllers\ShopPartnerController::class, 'destroy']);
+
     Route::get('accounting/accounts', [\App\Http\Controllers\AccountingAccountController::class, 'index']);
     Route::post('accounting/accounts', [\App\Http\Controllers\AccountingAccountController::class, 'store']);
     Route::put('accounting/accounts/{accountingAccount}', [\App\Http\Controllers\AccountingAccountController::class, 'update']);

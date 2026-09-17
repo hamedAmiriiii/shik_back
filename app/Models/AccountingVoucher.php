@@ -46,6 +46,8 @@ class AccountingVoucher extends Model
 
     public const SOURCE_OPENING = 'opening';
 
+    public const SOURCE_PARTNER_SETTLEMENT = 'partner_settlement';
+
     protected $fillable = [
         'atelier_id',
         'number',

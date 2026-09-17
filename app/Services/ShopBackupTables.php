@@ -237,6 +237,28 @@ class ShopBackupTables
                 ],
             ],
             [
+                'name' => 'shop_partners',
+                'scope' => 'atelier',
+                'fks' => [],
+            ],
+            [
+                'name' => 'shop_partner_settlements',
+                'scope' => 'atelier',
+                'fks' => [
+                    'shop_account_id' => 'shop_accounts',
+                ],
+            ],
+            [
+                'name' => 'shop_partner_settlement_lines',
+                'scope' => 'parent',
+                'parent' => 'shop_partner_settlements',
+                'parent_key' => 'settlement_id',
+                'fks' => [
+                    'settlement_id' => 'shop_partner_settlements',
+                    'partner_id' => 'shop_partners',
+                ],
+            ],
+            [
                 'name' => 'incomes',
                 'scope' => 'atelier',
                 'fks' => [],
@@ -499,6 +521,7 @@ class ShopBackupTables
             \App\Models\AccountingVoucher::SOURCE_PAYROLL_PAYMENT => 'employee_payroll_payments',
             \App\Models\AccountingVoucher::SOURCE_MANUAL_TRADE => 'manual_trades',
             \App\Models\AccountingVoucher::SOURCE_INCOME => 'cheques',
+            \App\Models\AccountingVoucher::SOURCE_PARTNER_SETTLEMENT => 'shop_partner_settlements',
         ];
     }
 }

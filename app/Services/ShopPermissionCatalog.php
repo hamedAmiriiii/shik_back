@@ -61,6 +61,7 @@ class ShopPermissionCatalog
             ['key' => 'raw_materials', 'label' => 'مواد اولیه', 'prefixes' => ['raw-materials']],
             ['key' => 'produced_goods', 'label' => 'کالای تولیدی', 'prefixes' => ['produced-goods']],
             ['key' => 'shop_accounts', 'label' => 'حساب‌ها و تنخواه', 'prefixes' => ['shop-account-transfers', 'shop-accounts']],
+            ['key' => 'partners', 'label' => 'شرکا و تقسیم سود', 'prefixes' => ['shop-partners']],
             ['key' => 'daily_reconciliations', 'label' => 'تطبیق روزانه', 'prefixes' => ['daily-reconciliations']],
             ['key' => 'employees', 'label' => 'کارمندان و حقوق', 'prefixes' => ['shop-employees', 'employee-payrolls']],
             ['key' => 'shop_tables', 'label' => 'میز و سفارش میز', 'prefixes' => ['shop-tables', 'table-orders']],
