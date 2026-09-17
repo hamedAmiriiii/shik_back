@@ -3,7 +3,7 @@
 CREATE TABLE IF NOT EXISTS `returned_products` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `product_id` BIGINT UNSIGNED NOT NULL,
-  `sale_price` DECIMAL(10, 2) NOT NULL,
+  `sale_price` DECIMAL(15, 2) NOT NULL,
   `created_at` TIMESTAMP NULL DEFAULT NULL,
   `updated_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
