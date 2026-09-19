@@ -133,9 +133,13 @@ class FinancialReportController extends Controller
             'installments_collected' => 0,
             'total_collected' => 0,
             'uncollected_installments' => 0,
+            'uncollected_debts' => 0,
             'open_cheques' => 0,
             'cheques_collected' => 0,
             'credit_used_total' => 0,
+            'invoice_cash_out' => 0,
+            'invoice_unpaid' => 0,
+            'expense_cash_out' => 0,
         ];
 
         foreach ($months as $month) {
@@ -170,6 +174,10 @@ class FinancialReportController extends Controller
             $totals['open_cheques'] += $monthData['open_cheques'];
             $totals['cheques_collected'] += $monthData['cheques_collected'];
             $totals['credit_used_total'] += $monthData['credit_used_total'];
+            $totals['uncollected_debts'] += $monthData['uncollected_debts'];
+            $totals['invoice_cash_out'] += $monthData['invoice_cash_out'];
+            $totals['invoice_unpaid'] += $monthData['invoice_unpaid'];
+            $totals['expense_cash_out'] += $monthData['expense_cash_out'];
         }
 
             return response([
@@ -381,14 +389,16 @@ class FinancialReportController extends Controller
 
         $invoiceCashOut = DocumentPaymentService::cashOutflowInRange($atelierId, $from, $to, 'invoices');
         $expenseCashOut = DocumentPaymentService::cashOutflowInRange($atelierId, $from, $to, 'expenses');
+        $invoiceUnpaid = round(max(0, (float) $totalInvoices - $invoiceCashOut), 2);
+        $uncollectedDebts = (float) ($metrics['uncollected_period_debts'] ?? $metrics['uncollected_debts'] ?? 0);
+        $uncollectedInstallments = (float) ($metrics['uncollected_installments'] ?? 0);
 
         // خالص سود = سود - هزینه‌های جاری
         $netProfit = $totalProfit - $totalExpenses;
 
-        // موجودی نقد فقط با پرداخت واقعی یا پاس چک کم می‌شود (فاکتور/هزینهٔ چکی و نسیهٔ باز نه).
-        // فروش چکی در sales هست ولی نقد نشده؛ یک‌بار کم می‌شود تا موجودی نقدی بماند
+        // موجودی نقد عملیاتی: فروش تعهدی منهای نسیه/چک/قسط وصول‌نشده و پرداخت نقدی فاکتور و هزینه
         $accountBalance = $netSales + $incomesForBalance - $expenseCashOut - $invoiceCashOut - $manualPurchases
-            - $metrics['credit_used_total'] - $chequePayments;
+            - $metrics['credit_used_total'] - $chequePayments - $uncollectedDebts - $uncollectedInstallments;
 
         return [
             'year' => $year,
@@ -400,6 +410,9 @@ class FinancialReportController extends Controller
             'total_expenses' => round($totalExpenses, 2),
             'total_incomes' => round($totalIncomes, 2),
             'total_invoices' => round($totalInvoices, 2),
+            'invoice_cash_out' => round($invoiceCashOut, 2),
+            'invoice_unpaid' => $invoiceUnpaid,
+            'expense_cash_out' => round($expenseCashOut, 2),
             'total_manual_purchases' => round($manualPurchases, 2),
             'total_manual_sales' => round($manualSales, 2),
             'net_profit' => round($netProfit, 2),
@@ -415,7 +428,8 @@ class FinancialReportController extends Controller
             'cash_and_card_total' => round($metrics['cash_and_card_total'], 2),
             'installments_collected' => round($metrics['installments_collected'], 2),
             'total_collected' => round($metrics['total_collected'], 2),
-            'uncollected_installments' => round($metrics['uncollected_installments'], 2),
+            'uncollected_installments' => round($uncollectedInstallments, 2),
+            'uncollected_debts' => round($uncollectedDebts, 2),
             'credit_used_total' => round($metrics['credit_used_total'], 2),
         ];
     }

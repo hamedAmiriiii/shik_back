@@ -44,6 +44,7 @@ class ShopSalesReportService
         $cashAmount = 0.0;
         $creditUsedTotal = 0.0;
         $uncollectedFromPeriodSales = 0.0;
+        $uncollectedPeriodDebts = 0.0;
         $discountGiven = 0.0;
         // مبلغ «پرداخت چکی» در تسویه (هنوز نقد نشده) — فقط برای موجودی عملیاتی
         $chequePayments = 0.0;
@@ -64,6 +65,12 @@ class ShopSalesReportService
             } elseif ($purchase->isDebt()) {
                 $totalSales += $invoiceSales;
                 $totalPurchase += $lineCost;
+                $settledAsOfEnd = $purchase->isDebtSettled()
+                    && $purchase->debt_settled_at
+                    && Carbon::parse($purchase->debt_settled_at)->lte($endDate);
+                if (! $settledAsOfEnd) {
+                    $uncollectedPeriodDebts += $purchase->payableAmount();
+                }
             } elseif ($purchase->isCheque()) {
                 $saleAmount = (float) $purchase->total_amount;
                 if ($saleAmount <= 0) {
@@ -155,6 +162,7 @@ class ShopSalesReportService
             'cheque_payments' => (float) round($chequePayments, 2),
             'total_collected' => (float) round($totalCollected, 2),
             'uncollected_installments' => (float) $uncollectedFromPeriodSales,
+            'uncollected_period_debts' => (float) round($uncollectedPeriodDebts, 2),
             'uncollected_debts' => (float) round($openDebts, 2),
             'uncollected_cheques' => (float) round($openCheques, 2),
             'open_debt' => (float) round($openDebts, 2),
