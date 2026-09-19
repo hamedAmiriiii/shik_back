@@ -475,6 +475,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/outstanding', [\App\Http\Controllers\OutstandingSettlementController::class, 'index']);
     });
 
+    Route::get('shop-health', [\App\Http\Controllers\ShopDataHealthController::class, 'show']);
+
     // Admin routes
     Route::name('admin.')->prefix('admin')->group(function () {
         
