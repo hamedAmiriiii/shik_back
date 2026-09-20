@@ -6,6 +6,7 @@ use App\Models\Cheque;
 use App\Models\Expense;
 use App\Models\Installment;
 use App\Models\Purchase;
+use App\Models\PurchaseDebtPayment;
 use App\Models\PurchaseItemReturn;
 use App\Models\PurchasedProduct;
 use App\Models\ReturnedProduct;
@@ -45,8 +46,11 @@ class PurchaseReplaceService
             throw new InvalidArgumentException('چک این فروش وصول شده و فاکتور قابل جایگزینی نیست.');
         }
 
-        if ($purchase->isDebt() && $purchase->isDebtSettled()) {
-            throw new InvalidArgumentException('بدهی این فروش تسویه شده و فاکتور قابل جایگزینی نیست.');
+        if ($purchase->isDebt()) {
+            $paid = $purchase->recordedDebtPaymentsAmount();
+            if ($purchase->isDebtSettled() || $paid > 0.02) {
+                throw new InvalidArgumentException('این فروش نسیه پرداخت ثبت‌شده دارد و قابل جایگزینی نیست. از برگشت استفاده کنید.');
+            }
         }
     }
 
@@ -115,6 +119,9 @@ class PurchaseReplaceService
         }
 
         Installment::query()->where('purchase_id', $purchase->id)->delete();
+        if (Schema::hasTable('purchase_debt_payments')) {
+            PurchaseDebtPayment::query()->where('purchase_id', $purchase->id)->delete();
+        }
         PurchasedProduct::query()->where('purchase_id', $purchase->id)->delete();
 
         $purchase->cheque_id = null;
@@ -137,6 +144,7 @@ class PurchaseReplaceService
         $purchase->unsetRelation('installments');
         $purchase->unsetRelation('cheque');
         $purchase->unsetRelation('itemReturns');
+        $purchase->unsetRelation('debtPayments');
     }
 
     /**

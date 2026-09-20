@@ -38,6 +38,10 @@ DELETE inst FROM installments inst
 INNER JOIN purchases p ON p.id = inst.purchase_id
 WHERE p.atelier_id = @aid;
 
+DELETE pdp FROM purchase_debt_payments pdp
+INNER JOIN purchases p ON p.id = pdp.purchase_id
+WHERE p.atelier_id = @aid;
+
 DELETE pp FROM purchased_products pp
 INNER JOIN purchases p ON p.id = pp.purchase_id
 WHERE p.atelier_id = @aid;

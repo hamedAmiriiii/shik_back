@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use App\Tools\PriceTools;
+use Illuminate\Support\Facades\Schema;
 use Morilog\Jalali\Jalalian;
 
 class Purchase extends Model
@@ -125,6 +126,14 @@ class Purchase extends Model
     }
 
     /**
+     * پرداخت‌های جزئی تسویه نسیه
+     */
+    public function debtPayments()
+    {
+        return $this->hasMany(PurchaseDebtPayment::class)->orderBy('paid_at')->orderBy('id');
+    }
+
+    /**
      * قسط‌های پرداخت شده
      */
     public function paidInstallments()
@@ -240,16 +249,90 @@ class Purchase extends Model
         return $this->isDebt() && (bool) $this->is_debt_settled;
     }
 
-    public function outstandingDebtAmount(): float
+    /**
+     * مانده نسیه. اگر $asOf داده شود، پرداخت‌های بعد از آن تاریخ کم نمی‌شوند.
+     *
+     * @param  \Carbon\Carbon|string|null  $asOf
+     */
+    public function outstandingDebtAmount($asOf = null): float
     {
-        if (! $this->isDebt() || $this->isDebtSettled()) {
+        if (! $this->isDebt()) {
             return 0.0;
         }
 
+        if ($asOf === null && $this->isDebtSettled()) {
+            return 0.0;
+        }
+
+        $paid = $this->recordedDebtPaymentsAmount($asOf);
+
+        if ($paid < 0.01 && $this->isDebtSettled()) {
+            $settledAt = $this->getRawOriginal('debt_settled_at') ?: $this->debt_settled_at;
+            if ($settledAt && $asOf !== null) {
+                $cutoff = $asOf instanceof \Carbon\Carbon
+                    ? $asOf->copy()
+                    : \Carbon\Carbon::parse((string) $asOf);
+                if (\Carbon\Carbon::parse($settledAt)->lte($cutoff)) {
+                    return 0.0;
+                }
+            } elseif ($asOf === null) {
+                return 0.0;
+            }
+        }
+
         return max(0, round(
-            $this->payableAmount() - $this->immediatePaidAmount() - $this->chequeAmount(),
+            $this->payableAmount()
+            - $this->immediatePaidAmount()
+            - $this->chequeAmount()
+            - $paid,
             2
         ));
+    }
+
+    /**
+     * مجموع پرداخت‌های ثبت‌شده برای تسویه نسیه.
+     *
+     * @param  \Carbon\Carbon|string|null  $asOf
+     */
+    public function recordedDebtPaymentsAmount($asOf = null): float
+    {
+        if (! Schema::hasTable('purchase_debt_payments')) {
+            return 0.0;
+        }
+
+        $cutoff = null;
+        if ($asOf !== null) {
+            $cutoff = $asOf instanceof \Carbon\Carbon
+                ? $asOf->copy()
+                : \Carbon\Carbon::parse((string) $asOf);
+        }
+
+        if ($this->relationLoaded('debtPayments')) {
+            $rows = $this->debtPayments;
+            if ($cutoff) {
+                $rows = $rows->filter(function (PurchaseDebtPayment $row) use ($cutoff) {
+                    $paidAt = $row->getRawOriginal('paid_at') ?: $row->paid_at;
+                    if (! $paidAt) {
+                        return false;
+                    }
+
+                    return \Carbon\Carbon::parse($paidAt)->lte($cutoff);
+                });
+            }
+
+            return round((float) $rows->sum(function (PurchaseDebtPayment $row) {
+                return (float) $row->card_amount + (float) $row->cash_amount;
+            }), 2);
+        }
+
+        $query = $this->debtPayments();
+        if ($cutoff) {
+            $query->where('paid_at', '<=', $cutoff->format('Y-m-d H:i:s'));
+        }
+
+        return round((float) $query->get()->sum(function (PurchaseDebtPayment $row) {
+            return (float) $row->card_amount + (float) $row->cash_amount;
+        }), 2);
     }
 
     /**

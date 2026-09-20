@@ -5,9 +5,11 @@ namespace App\Services;
 use App\Models\Installment;
 use App\Models\Product;
 use App\Models\Purchase;
+use App\Models\PurchaseDebtPayment;
 use App\Models\ReturnedProduct;
 use App\Services\ShopSalesReportService;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Schema;
 use Morilog\Jalali\Jalalian;
 
 class ShopDashboardService
@@ -48,10 +50,15 @@ class ShopDashboardService
         $rangeStart = $start->format('Y-m-d H:i:s');
         $rangeEnd = $end->format('Y-m-d H:i:s');
 
+        $with = ['installments', 'purchasedProducts', 'cheque'];
+        if (Schema::hasTable('purchase_debt_payments')) {
+            $with[] = 'debtPayments';
+        }
+
         $purchases = Purchase::query()
             ->forAtelier($atelierId)
             ->whereBetween('created_at', [$rangeStart, $rangeEnd])
-            ->with(['installments', 'purchasedProducts', 'cheque'])
+            ->with($with)
             ->get();
 
         foreach ($purchases as $purchase) {
@@ -96,7 +103,7 @@ class ShopDashboardService
                     ->sum('amount');
             } elseif ($purchase->isDebt() && ! $purchase->isDebtSettled()) {
                 $buckets[$key]['uncollected_debts'] = ($buckets[$key]['uncollected_debts'] ?? 0)
-                    + $purchase->payableAmount();
+                    + $purchase->outstandingDebtAmount();
             }
             $buckets[$key]['purchases_count']++;
         }
@@ -138,6 +145,9 @@ class ShopDashboardService
             ->where('is_debt_settled', true)
             ->whereNotNull('debt_settled_at')
             ->whereBetween('debt_settled_at', [$rangeStart, $rangeEnd])
+            ->when(Schema::hasTable('purchase_debt_payments'), function ($q) {
+                $q->whereDoesntHave('debtPayments');
+            })
             ->get(['debt_settled_at', 'debt_settled_card_amount', 'debt_settled_cash_amount']);
 
         foreach ($paidDebts as $debtPurchase) {
@@ -150,6 +160,26 @@ class ShopDashboardService
             $buckets[$key]['debts_collected'] = ($buckets[$key]['debts_collected'] ?? 0)
                 + (float) $debtPurchase->debt_settled_card_amount
                 + (float) $debtPurchase->debt_settled_cash_amount;
+        }
+
+        if (Schema::hasTable('purchase_debt_payments')) {
+            $debtPayments = PurchaseDebtPayment::query()
+                ->whereNotNull('paid_at')
+                ->whereBetween('paid_at', [$rangeStart, $rangeEnd])
+                ->whereHas('purchase', fn ($q) => $q->forAtelier($atelierId)->where('payment_type', 'debt'))
+                ->get(['card_amount', 'cash_amount', 'paid_at']);
+
+            foreach ($debtPayments as $debtPayment) {
+                $key = Carbon::parse($debtPayment->getRawOriginal('paid_at'))
+                    ->setTimezone('Asia/Tehran')
+                    ->format('Y-m-d');
+                if (! isset($buckets[$key])) {
+                    continue;
+                }
+                $buckets[$key]['debts_collected'] = ($buckets[$key]['debts_collected'] ?? 0)
+                    + (float) $debtPayment->card_amount
+                    + (float) $debtPayment->cash_amount;
+            }
         }
 
         $clearedChequePurchases = Purchase::query()

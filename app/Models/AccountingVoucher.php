@@ -20,6 +20,8 @@ class AccountingVoucher extends Model
 
     public const SOURCE_DEBT_SETTLE = 'debt_settle';
 
+    public const SOURCE_DEBT_PAYMENT = 'debt_payment';
+
     public const SOURCE_CHEQUE_CLEAR = 'cheque_clear';
 
     public const SOURCE_RECON_DEPOSIT = 'recon_deposit';

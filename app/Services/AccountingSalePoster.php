@@ -6,6 +6,8 @@ use App\Models\AccountingVoucher;
 use App\Models\Cheque;
 use App\Models\Installment;
 use App\Models\Purchase;
+use App\Models\PurchaseDebtPayment;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -55,7 +57,11 @@ class AccountingSalePoster
             return;
         }
 
-        $purchase->loadMissing(['installments', 'cheque']);
+        $with = ['installments', 'cheque'];
+        if (Schema::hasTable('purchase_debt_payments')) {
+            $with[] = 'debtPayments';
+        }
+        $purchase->loadMissing($with);
         AccountingReturnPoster::reverseForPurchase($purchase);
         foreach ($purchase->installments as $installment) {
             AccountingVoucherService::reversePostedIfAny(
@@ -70,6 +76,15 @@ class AccountingSalePoster
                 AccountingVoucher::SOURCE_CHEQUE_CLEAR,
                 (int) $purchase->cheque_id
             );
+        }
+        if (Schema::hasTable('purchase_debt_payments')) {
+            foreach ($purchase->debtPayments as $payment) {
+                AccountingVoucherService::reversePostedIfAny(
+                    $atelierId,
+                    AccountingVoucher::SOURCE_DEBT_PAYMENT,
+                    (int) $payment->id
+                );
+            }
         }
         AccountingVoucherService::reversePostedIfAny(
             $atelierId,
@@ -130,6 +145,37 @@ class AccountingSalePoster
             'تسویه نسیه فروش #'.$purchase->id,
             AccountingVoucher::SOURCE_DEBT_SETTLE,
             (int) $purchase->id,
+            $lines
+        );
+    }
+
+    public static function postDebtPayment(PurchaseDebtPayment $payment): ?AccountingVoucher
+    {
+        $payment->loadMissing('purchase');
+        $purchase = $payment->purchase;
+        if (! $purchase) {
+            return null;
+        }
+
+        $atelierId = (int) $purchase->atelier_id;
+        $cash = round((float) $payment->cash_amount, 2);
+        $card = round((float) $payment->card_amount, 2);
+        $amount = round($cash + $card, 2);
+        if ($atelierId <= 0 || $amount < 0.01 || ! AccountingLedger::ready()) {
+            return null;
+        }
+
+        $lines = [];
+        AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL), $cash, 0, 'وصول نقد نسیه');
+        AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_POS), $card, 0, 'وصول کارت نسیه');
+        AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AR), 0, $amount, 'کاهش طلب مشتری');
+
+        return AccountingVoucherService::post(
+            $atelierId,
+            self::eventDate($payment->paid_at),
+            'پرداخت نسیه فروش #'.$purchase->id,
+            AccountingVoucher::SOURCE_DEBT_PAYMENT,
+            (int) $payment->id,
             $lines
         );
     }

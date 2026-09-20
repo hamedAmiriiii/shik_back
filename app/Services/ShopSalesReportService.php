@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Installment;
 use App\Models\Purchase;
+use App\Models\PurchaseDebtPayment;
 use App\Models\ReturnedProduct;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Schema;
@@ -25,7 +26,11 @@ class ShopSalesReportService
         $startDay = $startDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d');
         $endDay = $endDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d');
 
-        $purchasesQuery = Purchase::with(['purchasedProducts', 'installments', 'cheque'])
+        $with = ['purchasedProducts', 'installments', 'cheque'];
+        if (Schema::hasTable('purchase_debt_payments')) {
+            $with[] = 'debtPayments';
+        }
+        $purchasesQuery = Purchase::with($with)
             ->forAtelier($atelierId);
 
         // برای یک روز تقویمی، whereDate پایدارتر از whereBetween روی datetime است
@@ -65,12 +70,7 @@ class ShopSalesReportService
             } elseif ($purchase->isDebt()) {
                 $totalSales += $invoiceSales;
                 $totalPurchase += $lineCost;
-                $settledAsOfEnd = $purchase->isDebtSettled()
-                    && $purchase->debt_settled_at
-                    && Carbon::parse($purchase->debt_settled_at)->lte($endDate);
-                if (! $settledAsOfEnd) {
-                    $uncollectedPeriodDebts += $purchase->payableAmount();
-                }
+                $uncollectedPeriodDebts += $purchase->outstandingDebtAmount($endString);
             } elseif ($purchase->isCheque()) {
                 $saleAmount = (float) $purchase->total_amount;
                 if ($saleAmount <= 0) {
@@ -285,16 +285,37 @@ class ShopSalesReportService
             return 0.0;
         }
 
-        return (float) Purchase::query()
+        $fromPayments = 0.0;
+        if (Schema::hasTable('purchase_debt_payments')) {
+            $fromPayments = (float) PurchaseDebtPayment::query()
+                ->whereBetween('paid_at', [$start, $end])
+                ->whereHas('purchase', function ($q) use ($atelierId) {
+                    $q->forAtelier($atelierId)->where('payment_type', 'debt');
+                })
+                ->get()
+                ->sum(function (PurchaseDebtPayment $payment) {
+                    return (float) $payment->card_amount + (float) $payment->cash_amount;
+                });
+        }
+
+        $legacyQuery = Purchase::query()
             ->forAtelier($atelierId)
             ->where('payment_type', 'debt')
             ->where('is_debt_settled', true)
             ->whereNotNull('debt_settled_at')
-            ->whereBetween('debt_settled_at', [$start, $end])
+            ->whereBetween('debt_settled_at', [$start, $end]);
+
+        if (Schema::hasTable('purchase_debt_payments')) {
+            $legacyQuery->whereDoesntHave('debtPayments');
+        }
+
+        $legacy = (float) $legacyQuery
             ->get()
             ->sum(function (Purchase $purchase) {
                 return (float) $purchase->debt_settled_card_amount + (float) $purchase->debt_settled_cash_amount;
             });
+
+        return round($fromPayments + $legacy, 2);
     }
 
     /**
@@ -482,10 +503,13 @@ class ShopSalesReportService
                             ->where('debt_settled_at', '>', $endString);
                     });
             })
-            ->with('purchasedProducts')
+            ->with(array_filter([
+                'purchasedProducts',
+                Schema::hasTable('purchase_debt_payments') ? 'debtPayments' : null,
+            ]))
             ->get()
-            ->sum(function (Purchase $purchase) {
-                return $purchase->payableAmount();
+            ->sum(function (Purchase $purchase) use ($endString) {
+                return $purchase->outstandingDebtAmount($endString);
             });
     }
 

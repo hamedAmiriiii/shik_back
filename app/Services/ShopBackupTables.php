@@ -414,6 +414,15 @@ class ShopBackupTables
                 ],
             ],
             [
+                'name' => 'purchase_debt_payments',
+                'scope' => 'parent',
+                'parent' => 'purchases',
+                'parent_key' => 'purchase_id',
+                'fks' => [
+                    'purchase_id' => 'purchases',
+                ],
+            ],
+            [
                 'name' => 'user_credit_grants',
                 'scope' => 'atelier',
                 'fks' => [
@@ -571,6 +580,7 @@ class ShopBackupTables
             \App\Models\AccountingVoucher::SOURCE_PURCHASE => 'purchases',
             \App\Models\AccountingVoucher::SOURCE_INSTALLMENT_PAY => 'installments',
             \App\Models\AccountingVoucher::SOURCE_DEBT_SETTLE => 'purchases',
+            \App\Models\AccountingVoucher::SOURCE_DEBT_PAYMENT => 'purchase_debt_payments',
             \App\Models\AccountingVoucher::SOURCE_CHEQUE_CLEAR => 'cheques',
             \App\Models\AccountingVoucher::SOURCE_RECON_DEPOSIT => 'daily_shop_reconciliation_account_deposits',
             \App\Models\AccountingVoucher::SOURCE_ACCOUNT_TRANSFER => 'shop_account_transfers',

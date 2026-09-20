@@ -466,10 +466,10 @@ class PurchaseItemReturnService
             return [max(0, $paid), 0.0];
         }
 
-        if ($purchase->isDebt() && $purchase->isDebtSettled()) {
-            $cash = (float) $purchase->debt_settled_cash_amount;
-            $card = (float) $purchase->debt_settled_card_amount;
-            if ($cash + $card < 0.01) {
+        if ($purchase->isDebt()) {
+            $cash = (float) $purchase->cash_amount + (float) $purchase->debt_settled_cash_amount;
+            $card = (float) $purchase->card_amount + (float) $purchase->debt_settled_card_amount;
+            if ($cash + $card < 0.01 && $purchase->isDebtSettled()) {
                 $cash = (float) $purchase->cash_amount;
                 $card = (float) $purchase->card_amount;
             }
