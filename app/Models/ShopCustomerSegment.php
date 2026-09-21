@@ -38,14 +38,14 @@ class ShopCustomerSegment extends Model
     public static function labels(): array
     {
         return [
-            self::VIP => 'VIP',
-            self::AT_RISK => 'در معرض ریزش',
-            self::CHURNED => 'از دست رفته',
-            self::INACTIVE => 'غیرفعال',
-            self::LOYAL => 'وفادار',
-            self::GROWING => 'در حال رشد',
-            self::NEW => 'جدید',
-            self::OTHER => 'سایر',
+            self::VIP => 'ویژه',
+            self::AT_RISK => 'نزدیک به رفتن',
+            self::CHURNED => 'دیگه نمیاد',
+            self::INACTIVE => 'مدتی نخریده',
+            self::LOYAL => 'همیشگی',
+            self::GROWING => 'رو به رشد',
+            self::NEW => 'تازه‌وارد',
+            self::OTHER => 'بقیه',
         ];
     }
 }
