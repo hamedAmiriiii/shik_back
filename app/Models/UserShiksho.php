@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Services\ShopLoyaltyCreditTierService;
 use App\Tools\PriceTools;
+use App\Services\UserCreditGrantService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -90,10 +91,12 @@ class UserShiksho extends Model
      */
     public function useCredit($amount)
     {
+        UserCreditGrantService::expireLapsedForUser($this);
+        $this->refresh();
         if ($this->credit >= $amount) {
             $this->credit -= $amount;
-            // credit_last_updated_at را تغییر نمی‌دهیم چون فقط استفاده شده، نه اعتبار جدید
             $this->save();
+            UserCreditGrantService::consumeRemaining($this, (float) $amount);
             return true;
         }
         return false;

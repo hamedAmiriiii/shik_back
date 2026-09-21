@@ -39,6 +39,9 @@ class ExpireUserCredits extends Command
         $this->info("تعداد روز انقضا: {$expiryDays} روز");
         $this->info("تعداد روز هشدار: {$warningDays} روز");
 
+        $campaignExpired = \App\Services\UserCreditGrantService::expireLapsedForAtelier();
+        $this->info("اعتبار کمپین منقضی‌شده برای {$campaignExpired} مشتری برداشته شد.");
+
         // 1. ارسال هشدار به کاربرانی که 7 روز دیگر اعتبارشان منقضی می‌شود
         $this->sendWarningSms($warningDays);
 

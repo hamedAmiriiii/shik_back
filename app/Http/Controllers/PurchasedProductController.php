@@ -344,6 +344,10 @@ class PurchasedProductController extends Controller
                 $userShikshoQuery->where('atelier_id', $purchaseAtelierId);
             }
             $userShiksho = $userShikshoQuery->first();
+            if ($userShiksho) {
+                \App\Services\UserCreditGrantService::expireLapsedForUser($userShiksho);
+                $userShiksho->refresh();
+            }
             if ($userShiksho && $userShiksho->credit > 0) {
                 $creditUsed = \App\Tools\PriceTools::roundToman(min($userShiksho->credit, $amountAfterDiscount));
             }
@@ -483,6 +487,10 @@ class PurchasedProductController extends Controller
                 }
                 $lockedUser = $lockedQuery->lockForUpdate()->first();
                 if ($creditUsed > 0) {
+                    if ($lockedUser) {
+                        \App\Services\UserCreditGrantService::expireLapsedForUser($lockedUser);
+                        $lockedUser->refresh();
+                    }
                     if (! $lockedUser || (float) $lockedUser->credit + 0.001 < $creditUsed) {
                         throw new \RuntimeException('اعتبار مشتری کافی نیست.');
                     }
@@ -1415,7 +1423,12 @@ class PurchasedProductController extends Controller
             ->where('atelier_id', $atelierId)
             ->first();
 
-        $credit = $userShiksho ? $userShiksho->credit : 0;
+        $credit = 0;
+        if ($userShiksho) {
+            \App\Services\UserCreditGrantService::expireLapsedForUser($userShiksho);
+            $userShiksho->refresh();
+            $credit = $userShiksho->credit;
+        }
 
         return response([
             'phone' => $phone,

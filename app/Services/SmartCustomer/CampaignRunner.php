@@ -233,7 +233,13 @@ class CampaignRunner
             if ($action->type === ShopCampaignAction::TYPE_GRANT_CREDIT) {
                 $amount = round((float) ($config['amount'] ?? 0), 2);
                 if ($amount >= 0.01) {
-                    $results['credit'] = self::addCredit($atelierId, $phone, $amount);
+                    $results['credit'] = self::addCredit(
+                        $atelierId,
+                        $phone,
+                        $amount,
+                        self::creditExpiresAt($config),
+                        (int) $campaign->id
+                    );
                 }
             } elseif ($action->type === ShopCampaignAction::TYPE_SEND_SMS) {
                 $message = trim((string) ($config['message'] ?? ''));
@@ -257,10 +263,15 @@ class CampaignRunner
     /**
      * اعتبار کمپین روی موجودی فعلی جمع می‌شود (add)، نه replace خرید عادی.
      *
-     * @return array{old:float,new:float,added:float}
+     * @return array{old:float,new:float,added:float,expires_at:?string}
      */
-    public static function addCredit(int $atelierId, string $phone, float $amount): array
-    {
+    public static function addCredit(
+        int $atelierId,
+        string $phone,
+        float $amount,
+        ?Carbon $expiresAt = null,
+        ?int $campaignId = null
+    ): array {
         $user = UserShiksho::firstOrCreate(
             ['phone' => $phone, 'atelier_id' => $atelierId],
             [
@@ -279,14 +290,40 @@ class CampaignRunner
         $user->last_warning_sent_at = null;
         $user->save();
 
-        UserCreditGrantService::recordManualChange(
+        UserCreditGrantService::recordCampaignGrant(
             $atelierId,
             $phone,
-            'regular',
-            $old,
-            $new
+            $added,
+            $expiresAt,
+            $campaignId
         );
 
-        return ['old' => $old, 'new' => $new, 'added' => $added];
+        return [
+            'old' => $old,
+            'new' => $new,
+            'added' => $added,
+            'expires_at' => $expiresAt ? $expiresAt->toDateTimeString() : null,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    protected static function creditExpiresAt(array $config): ?Carbon
+    {
+        $rawDate = trim((string) ($config['expires_at'] ?? ''));
+        if ($rawDate !== '') {
+            try {
+                return Carbon::parse($rawDate, 'Asia/Tehran')->endOfDay();
+            } catch (\Throwable $e) {
+                // fall through to days
+            }
+        }
+        $days = (int) ($config['expires_days'] ?? 0);
+        if ($days < 1) {
+            return null;
+        }
+
+        return Carbon::now('Asia/Tehran')->addDays($days)->endOfDay();
     }
 }
