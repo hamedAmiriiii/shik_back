@@ -8,6 +8,7 @@ use App\Models\ShopPartnerSettlement;
 use App\Models\ShopPartnerSettlementLine;
 use App\Tools\PriceTools;
 use Carbon\Carbon;
+use Morilog\Jalali\Jalalian;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use RuntimeException;
@@ -76,8 +77,13 @@ class ShopPartnerService
     {
         $to = self::normalizeDate($toDate) ?: Carbon::now('Asia/Tehran')->toDateString();
         $period = self::currentPeriod($atelierId, $to);
-        $pnl = AccountingReportService::profitLoss($atelierId, $period['from'], $period['to']);
-        $netProfit = round((float) ($pnl['net_profit'] ?? 0), 2);
+        $end = Carbon::parse($period['to'], 'Asia/Tehran')->endOfDay();
+        $start = $period['from']
+            ? Carbon::parse($period['from'], 'Asia/Tehran')->startOfDay()
+            : Carbon::parse('2000-01-01', 'Asia/Tehran')->startOfDay();
+
+        $pos = ShopSalesReportService::posNetProfitForRange($atelierId, $start, $end);
+        $netProfit = round((float) ($pos['net_profit'] ?? 0), 2);
 
         $partners = ShopPartner::query()->forAtelier($atelierId)->active()->orderBy('id')->get();
         $totalCapital = (float) $partners->sum('capital_amount');
@@ -86,15 +92,27 @@ class ShopPartnerService
         return [
             'period_from' => $period['from'],
             'period_to' => $period['to'],
-            'period_from_jalali' => $pnl['from'] ?? null,
-            'period_to_jalali' => $pnl['to'] ?? null,
+            'period_from_jalali' => $period['from']
+                ? Jalalian::fromCarbon(Carbon::parse($period['from'], 'Asia/Tehran'))->format('Y-m-d')
+                : null,
+            'period_to_jalali' => Jalalian::fromCarbon($end)->format('Y-m-d'),
             'last_settlement_at' => $period['last_settlement_at'],
             'last_settlement_at_jalali' => $period['last_settlement_at_jalali'],
             'net_profit' => $netProfit,
             'total_capital' => round($totalCapital, 2),
             'can_settle' => $netProfit >= 0.01 && $totalCapital >= 0.01 && $partners->isNotEmpty(),
             'partners' => $shares,
-            'pnl' => $pnl,
+            'pnl' => [
+                'from' => $period['from']
+                    ? Jalalian::fromCarbon(Carbon::parse($period['from'], 'Asia/Tehran'))->format('Y-m-d')
+                    : null,
+                'to' => Jalalian::fromCarbon($end)->format('Y-m-d'),
+                'sales' => $pos['sales'],
+                'gross_profit' => $pos['gross_profit'],
+                'operating_expense' => $pos['total_expenses'],
+                'net_profit' => $netProfit,
+                'note' => 'سود خالص قابل تقسیم همان سود خالص گزارش سود و ضرر فروشگاه است.',
+            ],
         ];
     }
 

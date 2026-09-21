@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Models\Expense;
 use App\Models\Installment;
+use App\Models\ManualTrade;
 use App\Models\Purchase;
 use App\Models\PurchaseDebtPayment;
 use App\Models\ReturnedProduct;
@@ -530,6 +532,38 @@ class ShopSalesReportService
         $end = $day->copy()->endOfDay();
 
         return self::salesAndProfitForRange($atelierId, $start, $end);
+    }
+
+    /**
+     * سود خالص قابل تقسیم شرکا — همان فرمول گزارش سود و ضرر فروشگاه:
+     * سود ناخالص فروش منهای هزینه‌های جاری و سند خرید دستی.
+     *
+     * @return array{sales: float, gross_profit: float, operating_expense: float, manual_purchases: float, total_expenses: float, net_profit: float}
+     */
+    public static function posNetProfitForRange(int $atelierId, Carbon $startDate, Carbon $endDate): array
+    {
+        $metrics = self::salesAndProfitForRange($atelierId, $startDate, $endDate);
+        $from = $startDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d');
+        $to = $endDate->copy()->setTimezone('Asia/Tehran')->format('Y-m-d');
+
+        $expenseBase = Expense::where('atelier_id', $atelierId)
+            ->where('type', 'جاری')
+            ->whereDate('date', '>=', $from)
+            ->whereDate('date', '<=', $to);
+
+        $operatingExpenses = (float) CustomerCreditExpenseService::excludeFromTotals(clone $expenseBase)->sum('amount');
+        $manualPurchases = ManualTrade::sumAmount($atelierId, ManualTrade::TYPE_PURCHASE, $from, $to);
+        $totalExpenses = $operatingExpenses + $manualPurchases;
+        $grossProfit = (float) ($metrics['profit'] ?? 0);
+
+        return [
+            'sales' => round((float) ($metrics['sales'] ?? 0), 2),
+            'gross_profit' => round($grossProfit, 2),
+            'operating_expense' => round($operatingExpenses, 2),
+            'manual_purchases' => round($manualPurchases, 2),
+            'total_expenses' => round($totalExpenses, 2),
+            'net_profit' => round($grossProfit - $totalExpenses, 2),
+        ];
     }
 
     /**
