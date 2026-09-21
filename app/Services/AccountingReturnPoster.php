@@ -21,6 +21,7 @@ class AccountingReturnPoster
      *   wallet?: float,
      *   ar?: float,
      *   cheque?: float,
+     *   pos?: float,
      *   shop_account_id?: int|null
      * }  $settlement
      */
@@ -58,17 +59,18 @@ class AccountingReturnPoster
         $cardAccount = round((float) ($settlement['card_account'] ?? 0), 2);
         $ar = round((float) ($settlement['ar'] ?? 0), 2);
         $cheque = round((float) ($settlement['cheque'] ?? 0), 2);
+        $pos = round((float) ($settlement['pos'] ?? 0), 2);
         $shopAccountId = (int) ($settlement['shop_account_id'] ?? 0);
 
         // سازگاری با settlement قدیمی که فقط wallet داشت
-        if ($cash < 0.01 && $cardCredit < 0.01 && $cardAccount < 0.01) {
+        if ($cash < 0.01 && $cardCredit < 0.01 && $cardAccount < 0.01 && $pos < 0.01) {
             $wallet = round((float) ($settlement['wallet'] ?? 0), 2);
             if ($wallet >= 0.01) {
                 $cardCredit = $wallet;
             }
         }
 
-        $credits = round($loyalty + $cash + $cardCredit + $cardAccount + $ar + $cheque, 2);
+        $credits = round($loyalty + $cash + $cardCredit + $cardAccount + $ar + $cheque + $pos, 2);
         if ($sale >= 0.01 && $credits < 0.01) {
             $cash = $sale;
             $credits = $sale;
@@ -96,6 +98,13 @@ class AccountingReturnPoster
                 0,
                 $cash,
                 'برگشت نقد از صندوق'
+            );
+            AccountingLedger::push(
+                $lines,
+                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_POS),
+                0,
+                $pos,
+                'برگشت کارت از کارتخوان'
             );
             AccountingLedger::push(
                 $lines,

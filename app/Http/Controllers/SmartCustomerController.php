@@ -9,6 +9,7 @@ use App\Models\UserShiksho;
 use App\Services\SmartCustomer\CampaignRunner;
 use App\Services\SmartCustomer\ShopSegmentThresholdService;
 use App\Services\SmartCustomer\SmartCustomerPipeline;
+use App\Services\SmartCustomer\SmartDashboardService;
 use App\Services\ShopFeatureFlags;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -33,109 +34,7 @@ class SmartCustomerController extends Controller
             ], 200);
         }
 
-        $labels = ShopCustomerSegment::labels();
-        $counts = ShopCustomerSegment::query()
-            ->where('atelier_id', $atelierId)
-            ->select('primary_segment', DB::raw('COUNT(*) as c'))
-            ->groupBy('primary_segment')
-            ->pluck('c', 'primary_segment')
-            ->map(fn ($c) => (int) $c)
-            ->all();
-
-        $nearVip = 0;
-        $ready = 0;
-        if (Schema::hasTable('shop_customer_segments')) {
-            $nearVip = (int) ShopCustomerSegment::query()
-                ->where('atelier_id', $atelierId)
-                ->whereJsonContains('tags', ShopCustomerSegment::TAG_NEAR_VIP)
-                ->count();
-            $ready = (int) ShopCustomerSegment::query()
-                ->where('atelier_id', $atelierId)
-                ->whereJsonContains('tags', ShopCustomerSegment::TAG_READY_REPURCHASE)
-                ->count();
-        }
-
-        $suggestions = [];
-        if (Schema::hasTable('shop_smart_actions')) {
-            $winback = ShopSmartAction::query()
-                ->where('atelier_id', $atelierId)
-                ->where('status', ShopSmartAction::STATUS_SUGGESTED)
-                ->where('action_type', ShopSmartAction::TYPE_WINBACK)
-                ->get();
-
-            if ($winback->isNotEmpty()) {
-                $suggestions[] = [
-                    'key' => 'winback',
-                    'title' => 'کمپین بازگشت مشتری',
-                    'count' => $winback->count(),
-                    'estimated_revenue' => round((float) $winback->sum('estimated_revenue'), 0),
-                    'severity' => 'danger',
-                ];
-            }
-
-            $readyActions = ShopSmartAction::query()
-                ->where('atelier_id', $atelierId)
-                ->where('status', ShopSmartAction::STATUS_SUGGESTED)
-                ->where('action_type', ShopSmartAction::TYPE_READY_REPURCHASE)
-                ->count();
-            if ($readyActions > 0) {
-                $suggestions[] = [
-                    'key' => 'ready_repurchase',
-                    'title' => 'آماده خرید مجدد',
-                    'count' => $readyActions,
-                    'estimated_revenue' => null,
-                    'severity' => 'warning',
-                ];
-            }
-
-            $nearActions = ShopSmartAction::query()
-                ->where('atelier_id', $atelierId)
-                ->where('status', ShopSmartAction::STATUS_SUGGESTED)
-                ->where('action_type', ShopSmartAction::TYPE_NEAR_VIP)
-                ->count();
-            if ($nearActions > 0) {
-                $suggestions[] = [
-                    'key' => 'near_vip',
-                    'title' => 'نزدیک به VIP',
-                    'count' => $nearActions,
-                    'estimated_revenue' => null,
-                    'severity' => 'success',
-                ];
-            }
-        }
-
-        $lastComputed = null;
-        if (Schema::hasTable('shop_customer_metrics')) {
-            $lastComputed = ShopCustomerMetric::query()
-                ->where('atelier_id', $atelierId)
-                ->max('computed_at');
-        }
-
-        $headline = [];
-        $atRisk = (int) ($counts[ShopCustomerSegment::AT_RISK] ?? 0);
-        if ($atRisk > 0) {
-            $headline[] = ['tone' => 'danger', 'text' => "{$atRisk} مشتری در معرض ریزش"];
-        }
-        if ($ready > 0) {
-            $headline[] = ['tone' => 'warning', 'text' => "{$ready} مشتری آماده خرید مجدد"];
-        }
-        if ($nearVip > 0) {
-            $headline[] = ['tone' => 'success', 'text' => "{$nearVip} مشتری به VIP نزدیک شده‌اند"];
-        }
-
-        return response([
-            'ready' => true,
-            'last_computed_at' => $lastComputed,
-            'segment_labels' => $labels,
-            'counts' => $counts,
-            'tag_counts' => [
-                'near_vip' => $nearVip,
-                'ready_repurchase' => $ready,
-            ],
-            'headline' => $headline,
-            'suggestions' => $suggestions,
-            'total_customers' => array_sum($counts),
-        ], 200);
+        return response(SmartDashboardService::overview($atelierId), 200);
     }
 
     public function customers(Request $request)

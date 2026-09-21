@@ -476,6 +476,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     });
 
     Route::get('shop-health', [\App\Http\Controllers\ShopDataHealthController::class, 'show']);
+    Route::post('shop-health/fix-voided-credit-returns', [\App\Http\Controllers\ShopDataHealthController::class, 'fixVoidedCreditReturns']);
 
     // Admin routes
     Route::name('admin.')->prefix('admin')->group(function () {

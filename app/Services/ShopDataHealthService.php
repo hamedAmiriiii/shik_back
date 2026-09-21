@@ -2,7 +2,11 @@
 
 namespace App\Services;
 
+use App\Models\AccountingVoucher;
 use App\Models\Purchase;
+use App\Models\PurchaseItemReturn;
+use App\Models\UserShiksho;
+use App\Tools\PriceTools;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -44,6 +48,177 @@ class ShopDataHealthService
         self::checkUnbalancedVouchers($atelierId, $findings);
 
         return self::payload($atelierId, $findings);
+    }
+
+    /**
+     * برگشت فروش نقد/کارت به کیف پول را به برگشت نقد/کارتخوان تبدیل می‌کند
+     * و اعتبار اضافه‌شده را از مشتری کم می‌کند.
+     *
+     * @return array{fixed: int, credit_removed: float}
+     */
+    public static function fixVoidedCreditReturns(int $atelierId): array
+    {
+        if ($atelierId <= 0 || ! Schema::hasTable('purchase_item_returns')) {
+            return ['fixed' => 0, 'credit_removed' => 0.0];
+        }
+
+        return DB::transaction(function () use ($atelierId) {
+            $logs = self::voidedCreditReturnLogs($atelierId);
+            $removed = 0.0;
+            $fixed = 0;
+
+            foreach ($logs as $log) {
+                $net = max(0, round(
+                    (float) $log->credit_used_refund - (float) $log->credit_earned_reversed,
+                    2
+                ));
+                if ($net < 1) {
+                    continue;
+                }
+
+                $purchase = Purchase::query()->find($log->purchase_id);
+                $phone = (string) ($log->phone ?: $purchase?->phone ?: '');
+                if ($phone !== '') {
+                    $customer = UserShiksho::query()
+                        ->where('atelier_id', $atelierId)
+                        ->where('phone', $phone)
+                        ->lockForUpdate()
+                        ->first();
+                    if ($customer) {
+                        $take = min((float) $customer->credit, $net);
+                        if ($take >= 0.01) {
+                            $customer->credit = PriceTools::roundToman(max(0, (float) $customer->credit - $take));
+                            $customer->credit_last_updated_at = now();
+                            $customer->save();
+                            $removed += $take;
+                        }
+                    }
+                }
+
+                [$cashPart, $posPart] = self::cashPosSplit($atelierId, $purchase, $net);
+
+                AccountingVoucherService::reversePostedIfAny(
+                    $atelierId,
+                    AccountingVoucher::SOURCE_PURCHASE_RETURN,
+                    (int) $log->id
+                );
+
+                $update = ['credit_used_refund' => 0];
+                if (Schema::hasColumn('purchase_item_returns', 'cash_refunded')) {
+                    $update['cash_refunded'] = round((float) $log->cash_refunded + $cashPart, 2);
+                }
+                if (Schema::hasColumn('purchase_item_returns', 'card_refunded')) {
+                    $update['card_refunded'] = round((float) $log->card_refunded + $posPart, 2);
+                }
+                $log->update($update);
+
+                CustomerCreditExpenseService::removePurchaseReturn($atelierId, (int) $log->id);
+
+                AccountingReturnPoster::post($log->fresh(), [
+                    'loyalty' => 0,
+                    'cash' => $cashPart,
+                    'pos' => $posPart,
+                    'card_credit' => 0,
+                    'card_account' => 0,
+                    'ar' => 0,
+                    'cheque' => 0,
+                ]);
+
+                $fixed++;
+            }
+
+            return [
+                'fixed' => $fixed,
+                'credit_removed' => round($removed, 2),
+            ];
+        });
+    }
+
+    /**
+     * @return \Illuminate\Support\Collection<int, PurchaseItemReturn>
+     */
+    protected static function voidedCreditReturnLogs(int $atelierId)
+    {
+        $query = PurchaseItemReturn::query()
+            ->where('atelier_id', $atelierId)
+            ->whereRaw('IFNULL(credit_used_refund, 0) >= 1000')
+            ->whereHas('purchase', function ($q) use ($atelierId) {
+                $q->where('atelier_id', $atelierId)
+                    ->where('total_amount', 0)
+                    ->where(function ($w) {
+                        $w->whereNull('payment_type')->orWhere('payment_type', 'cash');
+                    });
+            });
+        if (Schema::hasColumn('purchase_item_returns', 'cash_refunded')) {
+            $query->whereRaw('IFNULL(cash_refunded, 0) < 1');
+        }
+
+        return $query->orderBy('id')->get();
+    }
+
+    /**
+     * @return array{0: float, 1: float}
+     */
+    protected static function cashPosSplit(int $atelierId, ?Purchase $purchase, float $amount): array
+    {
+        $cashAmt = 0.0;
+        $cardAmt = 0.0;
+        if ($purchase) {
+            $cashAmt = (float) $purchase->cash_amount;
+            $cardAmt = (float) $purchase->card_amount;
+            if ($cashAmt + $cardAmt < 0.01) {
+                [$cashAmt, $cardAmt] = self::saleTillPosFromVoucher($atelierId, (int) $purchase->id);
+            }
+        }
+
+        $paid = $cashAmt + $cardAmt;
+        if ($paid >= 0.01) {
+            $cashPart = round($amount * ($cashAmt / $paid), 2);
+
+            return [$cashPart, round($amount - $cashPart, 2)];
+        }
+
+        return [0.0, $amount];
+    }
+
+    /**
+     * @return array{0: float, 1: float}
+     */
+    protected static function saleTillPosFromVoucher(int $atelierId, int $purchaseId): array
+    {
+        if ($purchaseId <= 0 || ! AccountingLedger::ready()) {
+            return [0.0, 0.0];
+        }
+
+        $voucher = AccountingVoucherService::findPosted(
+            $atelierId,
+            AccountingVoucher::SOURCE_PURCHASE,
+            $purchaseId
+        );
+        if (! $voucher) {
+            return [0.0, 0.0];
+        }
+
+        try {
+            $tillId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL);
+            $posId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_POS);
+        } catch (\Throwable $e) {
+            return [0.0, 0.0];
+        }
+
+        $till = 0.0;
+        $pos = 0.0;
+        foreach ($voucher->lines as $line) {
+            $accountId = (int) $line->account_id;
+            $debit = (float) $line->debit;
+            if ($accountId === $tillId) {
+                $till += $debit;
+            } elseif ($accountId === $posId) {
+                $pos += $debit;
+            }
+        }
+
+        return [round($till, 2), round($pos, 2)];
     }
 
     /**
@@ -96,7 +271,8 @@ class ShopDataHealthService
         array $samples,
         ?string $href = null,
         ?string $hrefLabel = null,
-        ?float $amount = null
+        ?float $amount = null,
+        ?string $action = null
     ): void {
         if ($count <= 0) {
             return;
@@ -113,6 +289,7 @@ class ShopDataHealthService
             'amount' => $amount,
             'href' => $href,
             'href_label' => $hrefLabel,
+            'action' => $action,
             'samples' => $samples,
         ];
     }
@@ -500,12 +677,14 @@ class ShopDataHealthService
             'error',
             'entry',
             'فروش نقدی کامل برگشت خورده و به اعتبار رفته',
-            $rows->count().' فاکتور الان مبلغ صفر دارد ولی برگشت به کیف پول مشتری زده شده. اگر فروش اشتباه بوده و پولی رد و بدل نشده، باید فاکتور را حذف می‌کردید نه برگشت به اعتبار.',
-            'اگر پولی جابه‌جا نشده، اعتبار همان مشتری را صفر کنید و با پشتیبانی برای اصلاح دفتر هماهنگ شوید. برای دفعات بعد از حذف فاکتور استفاده کنید.',
+            $rows->count().' فاکتور الان مبلغ صفر دارد ولی برگشت به کیف پول مشتری زده شده. اگر فروش اشتباه بوده و پولی رد و بدل نشده، این اعتبار الکی است و مشتری می‌تواند با آن خرید کند.',
+            'دکمهٔ «برداشتن اعتبار اشتباه» را بزنید: اعتبار از کیف پول کم می‌شود و سند برگشت به‌جای اعتبار، نقد/کارتخوان می‌شود. برای دفعات بعد در برگشت، مبلغ را به اعتبار مشتری نزنید.',
             $rows->count(),
             self::mapPurchaseSamples($rows),
             '/admin/customers',
-            'مشتریان'
+            'مشتریان',
+            null,
+            'fix_voided_credit_returns'
         );
     }
 
@@ -542,7 +721,7 @@ class ShopDataHealthService
             'operation',
             'اعتبار مشتری از برگشت مانده، بدون فاکتور باز',
             $rows->count().' مشتری اعتبار دارد ولی فروش باز ندارد. معمولاً بعد از برگشت کامل فروش نقدی پیش می‌آید.',
-            'اگر برگشت واقعی بوده، اعتبار درست است. اگر فروش اشتباه بوده و پولی رد نشده، اعتبار را دستی صفر کنید.',
+            'اگر مورد «فروش نقدی کامل برگشت خورده و به اعتبار رفته» هم هست، اول دکمهٔ «برداشتن اعتبار اشتباه» را بزنید. وگرنه اعتبار را در صفحه مشتری کم کنید.',
             $rows->count(),
             $rows->map(fn ($r) => [
                 'id' => 0,

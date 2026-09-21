@@ -31,4 +31,26 @@ class ShopDataHealthController extends Controller
             'findings' => $report['findings'],
         ], 200);
     }
+
+    /**
+     * POST /api/shop-health/fix-voided-credit-returns
+     */
+    public function fixVoidedCreditReturns(Request $request)
+    {
+        $this->requireStaffShopUser($request);
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $result = ShopDataHealthService::fixVoidedCreditReturns($atelierId);
+
+        $fixed = (int) $result['fixed'];
+        $removed = (float) $result['credit_removed'];
+        $message = $fixed < 1
+            ? 'موردی برای اصلاح نبود.'
+            : $fixed.' برگشت اصلاح شد و '.number_format($removed, 0).' تومان از اعتبار مشتری کم شد.';
+
+        return response([
+            'message' => $message,
+            'fixed' => $fixed,
+            'credit_removed' => $removed,
+        ], 200);
+    }
 }

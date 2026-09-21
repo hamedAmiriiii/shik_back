@@ -113,6 +113,21 @@ class CustomerCreditExpenseService
         );
     }
 
+    public static function removePurchaseReturn(int $atelierId, int $returnId): void
+    {
+        if (! self::supports() || $returnId <= 0) {
+            return;
+        }
+
+        $expense = self::find($atelierId, self::SOURCE_RETURN, $returnId);
+        if (! $expense) {
+            return;
+        }
+
+        AccountingDocumentPoster::reverseExpense($expense);
+        $expense->delete();
+    }
+
     public static function recordManualGrant(
         int $atelierId,
         string $phone,
