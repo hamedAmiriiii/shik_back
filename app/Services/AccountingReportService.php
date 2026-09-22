@@ -222,8 +222,13 @@ class AccountingReportService
             }
         }
 
-        $pnl = self::profitLoss($atelierId, null, $asOfG);
-        $currentProfit = (float) $pnl['net_profit'];
+        $profitFrom = AccountingPeriodCloseService::currentProfitFrom($atelierId, $asOfG);
+        if ($profitFrom === '__empty__') {
+            $currentProfit = 0.0;
+        } else {
+            $pnl = self::profitLoss($atelierId, $profitFrom, $asOfG);
+            $currentProfit = (float) $pnl['net_profit'];
+        }
         $assetTotal = round($assetTotal, 2);
         $liabilityTotal = round($liabilityTotal, 2);
         $equityTotal = round($equityTotal, 2);

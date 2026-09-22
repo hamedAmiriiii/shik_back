@@ -326,6 +326,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('accounting/vouchers/{accountingVoucher}', [\App\Http\Controllers\AccountingVoucherController::class, 'show']);
     Route::post('accounting/vouchers/{accountingVoucher}/reverse', [\App\Http\Controllers\AccountingVoucherController::class, 'reverse']);
     Route::post('accounting/opening', [\App\Http\Controllers\AccountingVoucherController::class, 'opening']);
+    Route::get('accounting/period-close/preview', [\App\Http\Controllers\AccountingPeriodCloseController::class, 'preview']);
+    Route::post('accounting/period-close/reopen', [\App\Http\Controllers\AccountingPeriodCloseController::class, 'reopen']);
+    Route::get('accounting/period-close', [\App\Http\Controllers\AccountingPeriodCloseController::class, 'status']);
+    Route::post('accounting/period-close', [\App\Http\Controllers\AccountingPeriodCloseController::class, 'store']);
+    Route::post('accounting/year-close', [\App\Http\Controllers\AccountingPeriodCloseController::class, 'store']);
 
     Route::get('accounting/trial-balance', [\App\Http\Controllers\AccountingReportController::class, 'trialBalance']);
     Route::get('accounting/ledger', [\App\Http\Controllers\AccountingReportController::class, 'ledger']);

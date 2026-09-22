@@ -51,15 +51,16 @@ class AccountingHealthCheck extends Command
                     ChartOfAccountsSeeder::CODE_EQUITY,
                     ChartOfAccountsSeeder::CODE_REVENUE,
                     ChartOfAccountsSeeder::CODE_AR,
+                    ChartOfAccountsSeeder::CODE_RETAINED,
                 ])
                 ->pluck('code')
                 ->all();
-            $seeded = count($codes) === 5;
+            $seeded = count($codes) === 6;
         }
         $checks[] = $this->check(
             'بذر درخت',
             $seeded,
-            'حساب‌های قفل‌شده (۱۱۱۰۱، ۱۱۱۰۲، ۳۱۱، ۴۱۱، ۱۱۲۰۱) موجودند',
+            'حساب‌های قفل‌شده (۱۱۱۰۱، ۱۱۱۰۲، ۳۱۱، ۳۵، ۴۱۱، ۱۱۲۰۱) موجودند',
             'ChartOfAccountsSeeder برای این فروشگاه اجرا نشد'
         );
 

@@ -59,6 +59,8 @@ class ChartOfAccountsSeeder
 
     public const CODE_EQUITY = '311';
 
+    public const CODE_RETAINED = '35';
+
     /**
      * درخت قفل‌شدهٔ نقشه راه. parent_code تهی = ریشه.
      *

@@ -81,6 +81,11 @@ class AccountingVoucherController extends Controller
                     'message' => 'افتتاحیه را از POST /api/accounting/opening ثبت کنید.',
                 ], 422);
             }
+            if ($sourceType === AccountingVoucher::SOURCE_YEAR_CLOSE) {
+                return response()->json([
+                    'message' => 'بستن دوره را از POST /api/accounting/period-close ثبت کنید.',
+                ], 422);
+            }
             $sourceId = (int) ($fields['source_id'] ?? 0);
             if ($sourceId <= 0) {
                 $sourceId = (int) AccountingVoucher::query()

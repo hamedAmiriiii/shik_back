@@ -38,8 +38,11 @@ class AccountingVoucherService
             throw new RuntimeException('کلید رویداد سند نامعتبر است.');
         }
 
-        $normalized = self::normalizeLines($atelierId, $lines);
+            $normalized = self::normalizeLines($atelierId, $lines);
         $dateString = self::normalizeDate($date);
+        if ($sourceType !== AccountingVoucher::SOURCE_YEAR_CLOSE) {
+            AccountingPeriodCloseService::assertDateUnlocked($atelierId, $dateString);
+        }
         $createdBy = $createdBy ?? (Auth::id() ? (int) Auth::id() : null);
 
         return DB::transaction(function () use (
@@ -94,6 +97,8 @@ class AccountingVoucherService
             if ($locked->status !== AccountingVoucher::STATUS_POSTED || $locked->reverses_voucher_id) {
                 throw new RuntimeException('فقط سند ثبت‌شدهٔ غیربرگشتی را می‌توان برگشت زد.');
             }
+
+            AccountingPeriodCloseService::assertReversible($locked);
 
             $already = AccountingVoucher::query()
                 ->forAtelier((int) $locked->atelier_id)
