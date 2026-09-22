@@ -10,7 +10,7 @@ class ShopBackupTables
 {
     public const FORMAT = 'atelier-shop-backup';
 
-    public const VERSION = 2;
+    public const VERSION = 3;
 
     /**
      * تنظیماتی که متعلق به پلتفرم است و با بازگردانی عوض نمی‌شود.
@@ -50,6 +50,16 @@ class ShopBackupTables
                 'scope' => 'atelier',
                 'fks' => [],
                 'preserve_keys' => self::PRESERVED_SETTING_KEYS,
+            ],
+            [
+                'name' => 'formal_invoice_seller_profiles',
+                'scope' => 'atelier',
+                'fks' => [],
+            ],
+            [
+                'name' => 'formal_invoice_buyer_profiles',
+                'scope' => 'atelier',
+                'fks' => [],
             ],
             [
                 'name' => 'shop_loyalty_credit_tiers',
@@ -125,6 +135,11 @@ class ShopBackupTables
                     'produced_good_id' => 'produced_goods',
                     'raw_material_id' => 'raw_materials',
                 ],
+            ],
+            [
+                'name' => 'oil_products',
+                'scope' => 'atelier',
+                'fks' => [],
             ],
             [
                 'name' => 'shop_employees',
@@ -208,7 +223,9 @@ class ShopBackupTables
             [
                 'name' => 'shop_smart_actions',
                 'scope' => 'atelier',
-                'fks' => [],
+                'fks' => [
+                    'campaign_id' => 'shop_campaigns',
+                ],
             ],
             [
                 'name' => 'shop_campaigns',
@@ -249,6 +266,7 @@ class ShopBackupTables
                 'parent_key' => 'campaign_id',
                 'fks' => [
                     'campaign_id' => 'shop_campaigns',
+                    'run_id' => 'shop_campaign_runs',
                 ],
             ],
             [
@@ -373,12 +391,36 @@ class ShopBackupTables
                 ],
             ],
             [
+                'name' => 'oil_visits',
+                'scope' => 'atelier',
+                'fks' => [],
+                'skip_columns' => ['created_by'],
+            ],
+            [
+                'name' => 'oil_visit_items',
+                'scope' => 'parent',
+                'parent' => 'oil_visits',
+                'parent_key' => 'oil_visit_id',
+                'fks' => [
+                    'oil_visit_id' => 'oil_visits',
+                    'oil_product_id' => 'oil_products',
+                ],
+            ],
+            [
+                'name' => 'oil_reminder_sms',
+                'scope' => 'atelier',
+                'fks' => [
+                    'oil_visit_id' => 'oil_visits',
+                ],
+            ],
+            [
                 'name' => 'purchases',
                 'scope' => 'atelier',
                 'fks' => [
                     'cart_id' => 'carts',
                     'cheque_id' => 'cheques',
                     'shop_table_id' => 'shop_tables',
+                    'oil_visit_id' => 'oil_visits',
                 ],
             ],
             [
@@ -392,6 +434,11 @@ class ShopBackupTables
                     'produced_good_id' => 'produced_goods',
                     'raw_material_id' => 'raw_materials',
                 ],
+            ],
+            [
+                'name' => 'shop_daily_ticket_counters',
+                'scope' => 'atelier',
+                'fks' => [],
             ],
             [
                 'name' => 'purchase_stock_consumptions',
@@ -427,6 +474,7 @@ class ShopBackupTables
                 'scope' => 'atelier',
                 'fks' => [
                     'purchase_id' => 'purchases',
+                    'campaign_id' => 'shop_campaigns',
                 ],
             ],
             [
@@ -571,6 +619,8 @@ class ShopBackupTables
 
     /**
      * source_type سند → جدول عملیاتی برای remap هنگام بازگردانی.
+     *
+     * source_id سندهای opening / year_close / manual عدد ثابت یا تاریخ است، جدول عملیاتی ندارند.
      *
      * @return array<string, string>
      */

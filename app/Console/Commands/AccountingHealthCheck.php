@@ -85,18 +85,24 @@ class AccountingHealthCheck extends Command
                 break;
             }
         }
-        $backupOk = ShopBackupTables::VERSION >= 2
+        $backupOk = ShopBackupTables::VERSION >= 3
             && $accountIdx !== false
             && $voucherIdx !== false
             && $lineIdx !== false
             && $purchaseIdx !== false
             && $voucherIdx > $purchaseIdx
             && $lineIdx > $voucherIdx
-            && $sourceOk;
+            && $sourceOk
+            && in_array('oil_visits', $backupNames, true)
+            && in_array('oil_products', $backupNames, true)
+            && in_array('formal_invoice_seller_profiles', $backupNames, true)
+            && in_array('user_credit_grants', $backupNames, true)
+            && in_array('shop_campaigns', $backupNames, true)
+            && in_array('shop_daily_ticket_counters', $backupNames, true);
         $checks[] = $this->check(
             'بکاپ',
             $backupOk,
-            'نسخه ۲، سه جدول دفتر، remap منبع سند، و ترتیب درج درست است',
+            'نسخه ۳، دفتر، روغن، فاکتور رسمی، کمپین اعتبار و شمارنده فیش در پشتیبان است',
             'تعریف پشتیبان حسابداری ناقص است'
         );
 
