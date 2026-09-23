@@ -14,6 +14,8 @@ class Product extends Model
 
     public const UNIT_KG = 'kg';
 
+    public const UNIT_METER = 'meter';
+
     public const DEFAULT_DISPLAY_ORDER = 50;
 
     protected $fillable = ["name", "description", "display_order", "price_buy", "quantity", "unit_type", "barcode", "sale_price", "purchase_price", "original_sale_price", "sizes", "colors", "manufacturer_id", "atelier_id"];
@@ -30,7 +32,7 @@ class Product extends Model
 
     public function isWeightBased(): bool
     {
-        return ($this->unit_type ?? self::UNIT_PIECE) === self::UNIT_KG;
+        return in_array($this->unit_type ?? self::UNIT_PIECE, [self::UNIT_KG, self::UNIT_METER], true);
     }
 
     public function scopeFilterByPrice($query, $minPrice, $maxPrice)

@@ -14,17 +14,25 @@ class ProductQuantityTools
 
     public static function isWeightUnit(?string $unitType): bool
     {
-        return ($unitType ?? Product::UNIT_PIECE) === Product::UNIT_KG;
+        return in_array($unitType, [Product::UNIT_KG, Product::UNIT_METER], true);
     }
 
     public static function unitLabel(?string $unitType): string
     {
-        return self::isWeightUnit($unitType) ? 'کیلو' : 'عدد';
+        return match ($unitType) {
+            Product::UNIT_KG => 'کیلو',
+            Product::UNIT_METER => 'متر',
+            default => 'عدد',
+        };
     }
 
     public static function priceUnitLabel(?string $unitType): string
     {
-        return self::isWeightUnit($unitType) ? 'هر کیلو' : 'هر عدد';
+        return match ($unitType) {
+            Product::UNIT_KG => 'هر کیلو',
+            Product::UNIT_METER => 'هر متر',
+            default => 'هر عدد',
+        };
     }
 
     public static function minQuantity(?string $unitType): float
