@@ -11,6 +11,7 @@ use App\Services\CustomerCreditExpenseService;
 use App\Services\DocumentPaymentService;
 use App\Services\ShopAccountBalanceService;
 use App\Services\ShopSalesReportService;
+use App\Services\AccountingPeriodCloseService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Morilog\Jalali\Jalalian;
@@ -61,7 +62,23 @@ class FinancialReportController extends Controller
                 }
             }
 
+            $period = (string) $request->input('period', 'current');
+            if (! in_array($period, ['current', 'all'], true)) {
+                $period = 'current';
+            }
+            $periodMeta = AccountingPeriodCloseService::openPeriodMeta($atelierId);
+            $explicitRange = (bool) ($startDate || $endDate);
+
             // اگر تاریخ شروع مشخص نشده، اولین تاریخی که داده داریم را پیدا می‌کنیم
+            if (!$startCarbon) {
+                if (! $explicitRange && $period === 'current') {
+                    $openStart = AccountingPeriodCloseService::openPeriodStartGregorian($atelierId);
+                    if ($openStart) {
+                        $startCarbon = $openStart;
+                    }
+                }
+            }
+
             if (!$startCarbon) {
                 $firstPurchaseDate = Purchase::forAtelier($atelierId)->min('created_at');
                 $firstExpenseDate = Expense::where('atelier_id', $atelierId)->min('date');
@@ -184,10 +201,15 @@ class FinancialReportController extends Controller
             $totals['reconstructed_account_balance'] = round((float) $totals['total_account_balance'], 2);
             $totals['total_account_balance'] = ShopAccountBalanceService::listedShopCashTotal($atelierId);
 
+            $periodMeta['scope'] = $explicitRange ? 'custom' : $period;
+            $periodMeta['applied_start'] = Jalalian::fromCarbon($startCarbon)->format('Y-m-d');
+            $periodMeta['applied_end'] = Jalalian::fromCarbon($endCarbon)->format('Y-m-d');
+
             return response([
                 'meta' => [
                     'atelier_id' => $atelierId,
                     'total_uncollected_installments' => ShopSalesReportService::totalUncollectedInstallments($atelierId),
+                    'period' => $periodMeta,
                 ],
                 'data' => $monthlyData,
                 'totals' => $totals,

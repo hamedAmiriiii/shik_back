@@ -41,6 +41,39 @@ class AccountingPeriodCloseService
         return Carbon::parse($date)->toDateString();
     }
 
+    /**
+     * شروع دورهٔ باز: روز بعد از آخرین بستن. اگر هنوز بسته‌ای نباشد null.
+     */
+    public static function openPeriodStartGregorian(int $atelierId): ?Carbon
+    {
+        $closed = self::closedThrough($atelierId);
+        if (! $closed) {
+            return null;
+        }
+
+        return Carbon::parse($closed)->addDay()->startOfDay();
+    }
+
+    /**
+     * @return array{closed_through: ?string, start: ?string, today: string}
+     */
+    public static function openPeriodMeta(int $atelierId): array
+    {
+        $closed = self::closedThrough($atelierId);
+        $today = Jalalian::fromCarbon(Carbon::now('Asia/Tehran'))->format('Y-m-d');
+        $start = $closed
+            ? Jalalian::fromCarbon(Carbon::parse($closed)->addDay())->format('Y-m-d')
+            : null;
+
+        return [
+            'closed_through' => $closed
+                ? Jalalian::fromCarbon(Carbon::parse($closed))->format('Y-m-d')
+                : null,
+            'start' => $start,
+            'today' => $today,
+        ];
+    }
+
     public static function assertDateUnlocked(int $atelierId, $date): void
     {
         $dateString = AccountingLedger::eventDate($date);
