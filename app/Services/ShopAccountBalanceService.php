@@ -238,6 +238,31 @@ class ShopAccountBalanceService
         );
     }
 
+    /**
+     * جمع نقد عملیاتی فعال: صندوق + حساب‌های فروشگاه + تنخواه.
+     * حساب غیرفعال (حذف‌شده) داخل این جمع نیست.
+     */
+    public static function listedShopCashTotal(int $atelierId): float
+    {
+        if ($atelierId <= 0 || ! Schema::hasTable('shop_accounts')) {
+            return 0.0;
+        }
+
+        $ids = ShopAccount::query()
+            ->forAtelier($atelierId)
+            ->active()
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+        if ($ids === []) {
+            return 0.0;
+        }
+
+        return round(array_sum(self::balances($atelierId, $ids)), 2);
+    }
+
     public static function balanceFor(ShopAccount $account): float
     {
         $balances = self::balances((int) $account->atelier_id, [(int) $account->id]);

@@ -172,9 +172,27 @@ class ShopAccountController extends Controller
             return response()->json(['message' => 'یافت نشد'], 404);
         }
 
+        if ($shopAccount->isTill()) {
+            return response()->json([
+                'message' => 'صندوق نقد قابل حذف نیست.',
+            ], 422);
+        }
+
         if ($shopAccount->legacy_slot) {
             return response()->json([
                 'message' => 'حساب‌های پیش‌فرض (حساب ۱ و حساب ۲) قابل حذف نیستند. می‌توانید نامشان را ویرایش کنید.',
+            ], 422);
+        }
+
+        $balance = ShopAccountBalanceService::balanceFor($shopAccount);
+        if (round(abs($balance), 2) >= 0.01) {
+            $kind = $shopAccount->isPettyCash() ? 'تنخواه' : 'حساب';
+            $amount = number_format(abs($balance), 0, '.', ',');
+            $state = $balance < 0 ? 'بدهکار' : 'مانده';
+
+            return response()->json([
+                'message' => "این {$kind} «{$shopAccount->name}» هنوز {$state} {$amount} تومان دارد. اول موجودی را به حساب فروشگاه برگردانید یا صفر کنید، بعد حذف کنید.",
+                'balance' => round($balance, 2),
             ], 422);
         }
 
