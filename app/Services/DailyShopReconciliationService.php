@@ -20,7 +20,7 @@ class DailyShopReconciliationService
     public const EDITABLE_DAYS_BACK = 30;
 
     /**
-     * گرید روزانه یک ماه شمسی (پیش‌فرض: ماه جاری).
+     * گرید روزانه یک ماه  شمسی  (پیش‌فرض: ماه جاری).
      *
      * @return array<string, mixed>
      */
