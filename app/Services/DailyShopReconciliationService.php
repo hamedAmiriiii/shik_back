@@ -7,6 +7,8 @@ use App\Models\DailyShopReconciliationAccountDeposit;
 use App\Models\DailyShopReconciliationDeposit;
 use App\Models\Purchase;
 use App\Models\ShopAccount;
+use App\Models\ShopAccountBalanceAdjustment;
+use App\Models\AccountingVoucher;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -44,7 +46,8 @@ class DailyShopReconciliationService
         $accountBalances = self::balancesByAccountId($atelierId, $shopAccounts->pluck('id')->all());
 
         $reconciliations = self::reconciliationsInRange($atelierId, $fromDate, $toDate);
-        $earlierDiscrepancySum = self::sumEarlierDiscrepancy($atelierId, $fromDate);
+        $resetFrom = self::cumulativeResetFromDate($atelierId);
+        $earlierDiscrepancySum = self::openingCumulativeForMonth($atelierId, $fromDate, $toDate, $resetFrom);
 
         $cumulative = $earlierDiscrepancySum;
         $daily = [];
@@ -55,6 +58,10 @@ class DailyShopReconciliationService
                 ->toCarbon()
                 ->startOfDay();
             $dateKey = $dayCarbon->format('Y-m-d');
+
+            if ($resetFrom && $dateKey === $resetFrom) {
+                $cumulative = 0.0;
+            }
 
             $daily[] = self::buildDayRow(
                 $atelierId,
@@ -89,6 +96,10 @@ class DailyShopReconciliationService
             'period_total_sales' => round($periodTotalSales, 2),
             'opening_cumulative_discrepancy' => round($earlierDiscrepancySum, 2),
             'closing_cumulative_discrepancy' => round($cumulative, 2),
+            'period_start' => $resetFrom,
+            'period_start_jalali' => $resetFrom
+                ? Jalalian::fromCarbon(Carbon::parse($resetFrom))->format('Y-m-d')
+                : null,
             'shop_accounts' => $shopAccounts->map(fn (ShopAccount $a) => [
                 'id' => $a->id,
                 'name' => $a->name,
@@ -338,16 +349,80 @@ class DailyShopReconciliationService
             ->keyBy(fn (DailyShopReconciliation $r) => Carbon::parse($r->getRawOriginal('date'))->format('Y-m-d'));
     }
 
-    protected static function sumEarlierDiscrepancy(int $atelierId, string $fromDate): float
+    protected static function sumEarlierDiscrepancy(int $atelierId, string $fromDate, ?string $notBefore = null): float
     {
         if (! Schema::hasTable('daily_shop_reconciliations')) {
             return 0.0;
         }
 
-        return (float) DailyShopReconciliation::query()
+        $query = DailyShopReconciliation::query()
             ->where('atelier_id', $atelierId)
-            ->where('date', '<', $fromDate)
-            ->sum('daily_discrepancy');
+            ->where('date', '<', $fromDate);
+        if ($notBefore) {
+            $query->where('date', '>=', $notBefore);
+        }
+
+        return (float) $query->sum('daily_discrepancy');
+    }
+
+    /**
+     * از این تاریخ (شامل خود روز) اختلاف روزهای بسته/اصلاح‌شده به تجمعی جدید نمی‌آید.
+     */
+    protected static function cumulativeResetFromDate(int $atelierId): ?string
+    {
+        $dates = [];
+
+        $periodStart = AccountingPeriodCloseService::openPeriodStartGregorian($atelierId);
+        if ($periodStart) {
+            $dates[] = $periodStart->format('Y-m-d');
+        }
+
+        if (Schema::hasTable('shop_account_balance_adjustments')) {
+            $adj = ShopAccountBalanceAdjustment::query()
+                ->where('atelier_id', $atelierId)
+                ->max('date');
+            if ($adj) {
+                $dates[] = Carbon::parse($adj)->toDateString();
+            }
+        }
+
+        if (AccountingVoucher::tablesReady()) {
+            $voucherDate = AccountingVoucher::query()
+                ->forAtelier($atelierId)
+                ->posted()
+                ->where('source_type', AccountingVoucher::SOURCE_BALANCE_ADJUST)
+                ->max('date');
+            if ($voucherDate) {
+                $dates[] = Carbon::parse($voucherDate)->toDateString();
+            }
+        }
+
+        if ($dates === []) {
+            return null;
+        }
+
+        return max($dates);
+    }
+
+    protected static function openingCumulativeForMonth(
+        int $atelierId,
+        string $fromDate,
+        string $toDate,
+        ?string $periodStartDate
+    ): float {
+        if (! $periodStartDate) {
+            return self::sumEarlierDiscrepancy($atelierId, $fromDate);
+        }
+
+        if ($toDate < $periodStartDate) {
+            return self::sumEarlierDiscrepancy($atelierId, $fromDate);
+        }
+
+        if ($fromDate > $periodStartDate) {
+            return self::sumEarlierDiscrepancy($atelierId, $fromDate, $periodStartDate);
+        }
+
+        return 0.0;
     }
 
     /**
