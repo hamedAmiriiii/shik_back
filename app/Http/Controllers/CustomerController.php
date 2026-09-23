@@ -65,6 +65,7 @@ class CustomerController extends Controller
 
         $smsSent = false;
         $smsError = null;
+        $smsQuotaExhausted = false;
         $shopBrand = SmsTools::shopSmsBrand($atelierId);
         if ($userShiksho->wasRecentlyCreated) {
             $welcomeMessage = "به باشگاه مشتریان {$shopBrand} خوش آمدید";
@@ -80,7 +81,8 @@ class CustomerController extends Controller
                 $smsSent = true;
             } catch (\App\Exceptions\InsufficientShopSmsQuotaException $e) {
                 $smsSent = false;
-                $smsError = $e->getMessage();
+                $smsError = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectNotice();
+                $smsQuotaExhausted = true;
             } catch (\Exception $e) {
                 $smsSent = false;
                 $smsError = $e->getMessage();
@@ -98,6 +100,7 @@ class CustomerController extends Controller
             'updated' => $updatedExisting,
             'sms_sent' => $smsSent,
             'sms_error' => $smsError,
+            'sms_quota_exhausted' => $smsQuotaExhausted,
             'data' => $userShiksho
         ], $userShiksho->wasRecentlyCreated ? 201 : 200);
     }

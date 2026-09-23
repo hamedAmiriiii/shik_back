@@ -384,6 +384,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::post('recompute', [\App\Http\Controllers\SmartCustomerController::class, 'recompute']);
         Route::get('product-signals', [\App\Http\Controllers\SmartCustomerController::class, 'productSignals']);
         Route::get('actions', [\App\Http\Controllers\SmartCustomerController::class, 'actions']);
+        Route::post('actions/bulk', [\App\Http\Controllers\SmartCustomerController::class, 'bulkActions']);
         Route::post('actions/{action}/dismiss', [\App\Http\Controllers\SmartCustomerController::class, 'dismissAction'])
             ->where('action', '[0-9]+');
         Route::post('actions/{action}/execute', [\App\Http\Controllers\SmartCustomerController::class, 'executeAction'])

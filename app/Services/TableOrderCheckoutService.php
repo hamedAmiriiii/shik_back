@@ -113,8 +113,12 @@ class TableOrderCheckoutService
                     $text = "{$shopName}\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
                     try {
                         SmsTools::sendShopSms($phone, $text, (string) $purchase->id, $creditEarned, 'credit', $atelierId);
+                        $purchase->setAttribute('sms_sent', true);
+                        $purchase->setAttribute('sms_quota_exhausted', false);
                     } catch (InsufficientShopSmsQuotaException $e) {
-                        //
+                        $purchase->setAttribute('sms_sent', false);
+                        $purchase->setAttribute('sms_quota_exhausted', true);
+                        $purchase->setAttribute('sms_error', InsufficientShopSmsQuotaException::sideEffectNotice());
                     }
                 }
                 CustomerPhone::createNewPhone($phone);

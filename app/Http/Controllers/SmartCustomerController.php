@@ -11,9 +11,11 @@ use App\Services\SmartCustomer\ShopSegmentThresholdService;
 use App\Services\SmartCustomer\SmartCustomerPipeline;
 use App\Services\SmartCustomer\SmartDashboardService;
 use App\Services\ShopFeatureFlags;
+use App\Exceptions\InsufficientShopSmsQuotaException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use RuntimeException;
 
 class SmartCustomerController extends Controller
 {
@@ -277,13 +279,11 @@ class SmartCustomerController extends Controller
             'باشگاه مشتریان برای این فروشگاه فعال نیست.'
         );
 
-        $row = ShopSmartAction::query()
-            ->where('atelier_id', $atelierId)
-            ->where('id', $action)
-            ->firstOrFail();
-
-        $row->status = ShopSmartAction::STATUS_DISMISSED;
-        $row->save();
+        try {
+            $row = $this->dismissSuggested($atelierId, $action);
+        } catch (RuntimeException $e) {
+            return response(['message' => $e->getMessage()], 422);
+        }
 
         return response(['message' => 'پیشنهاد رد شد.', 'action' => $row], 200);
     }
@@ -296,11 +296,104 @@ class SmartCustomerController extends Controller
             'باشگاه مشتریان برای این فروشگاه فعال نیست.'
         );
 
+        try {
+            [$row, $results] = $this->executeSuggested($atelierId, $action);
+        } catch (InsufficientShopSmsQuotaException $e) {
+            return response(['message' => $e->getMessage()], 422);
+        } catch (RuntimeException $e) {
+            return response(['message' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'message' => 'اقدام اجرا شد.',
+            'action' => $row,
+            'results' => $results,
+        ], 200);
+    }
+
+    /**
+     * رد یا اجرای چند پیشنهاد با هم.
+     * POST /api/smart-customer/actions/bulk  { "op": "execute"|"dismiss", "ids": [1,2] }
+     */
+    public function bulkActions(Request $request)
+    {
+        $atelierId = $this->assertShopFeature(
+            $request,
+            ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
+
+        $fields = $request->validate([
+            'op' => 'required|string|in:execute,dismiss',
+            'ids' => 'required|array|min:1|max:200',
+            'ids.*' => 'integer|min:1',
+        ]);
+
+        $ids = array_values(array_unique(array_map('intval', $fields['ids'])));
+        $ok = 0;
+        $failed = [];
+
+        foreach ($ids as $id) {
+            try {
+                if ($fields['op'] === 'dismiss') {
+                    $this->dismissSuggested($atelierId, $id);
+                } else {
+                    $this->executeSuggested($atelierId, $id);
+                }
+                $ok++;
+            } catch (InsufficientShopSmsQuotaException $e) {
+                $failed[] = ['id' => $id, 'message' => $e->getMessage()];
+                break;
+            } catch (RuntimeException $e) {
+                $failed[] = ['id' => $id, 'message' => $e->getMessage()];
+            }
+        }
+
+        $opLabel = $fields['op'] === 'dismiss' ? 'رد' : 'اجرا';
+        $message = $ok.' پیشنهاد '.$opLabel.' شد.';
+        if ($failed !== []) {
+            $message .= ' '.$this->failedCountLabel(count($failed)).' انجام نشد.';
+        }
+
+        return response([
+            'message' => $message,
+            'ok' => $ok,
+            'failed' => $failed,
+        ], $ok > 0 ? 200 : 422);
+    }
+
+    protected function dismissSuggested(int $atelierId, int $actionId): ShopSmartAction
+    {
         $row = ShopSmartAction::query()
             ->where('atelier_id', $atelierId)
-            ->where('id', $action)
+            ->where('id', $actionId)
+            ->first();
+        if (! $row) {
+            throw new RuntimeException('پیشنهاد پیدا نشد.');
+        }
+        if ($row->status !== ShopSmartAction::STATUS_SUGGESTED) {
+            throw new RuntimeException('این پیشنهاد قابل رد نیست.');
+        }
+
+        $row->status = ShopSmartAction::STATUS_DISMISSED;
+        $row->save();
+
+        return $row;
+    }
+
+    /**
+     * @return array{0: ShopSmartAction, 1: array<string, mixed>}
+     */
+    protected function executeSuggested(int $atelierId, int $actionId): array
+    {
+        $row = ShopSmartAction::query()
+            ->where('atelier_id', $atelierId)
+            ->where('id', $actionId)
             ->where('status', ShopSmartAction::STATUS_SUGGESTED)
-            ->firstOrFail();
+            ->first();
+        if (! $row) {
+            throw new RuntimeException('این پیشنهاد قابل اجرا نیست.');
+        }
 
         $payload = $row->payload ?? [];
         $results = [];
@@ -312,28 +405,25 @@ class SmartCustomerController extends Controller
 
         if (! empty($payload['sms'])) {
             $message = trim((string) ($payload['template'] ?? 'پیام باشگاه مشتریان'));
-            try {
-                \App\Tools\SmsTools::sendShopSms(
-                    $row->phone,
-                    $message,
-                    null,
-                    $credit > 0 ? $credit : null,
-                    'campaign',
-                    $atelierId
-                );
-                $results['sms'] = true;
-            } catch (\App\Exceptions\InsufficientShopSmsQuotaException $e) {
-                return response(['message' => $e->getMessage()], 422);
-            }
+            \App\Tools\SmsTools::sendShopSms(
+                $row->phone,
+                $message,
+                null,
+                $credit > 0 ? $credit : null,
+                'campaign',
+                $atelierId
+            );
+            $results['sms'] = true;
         }
 
         $row->status = ShopSmartAction::STATUS_EXECUTED;
         $row->save();
 
-        return response([
-            'message' => 'اقدام اجرا شد.',
-            'action' => $row,
-            'results' => $results,
-        ], 200);
+        return [$row, $results];
+    }
+
+    protected function failedCountLabel(int $count): string
+    {
+        return $count.' مورد';
     }
 }

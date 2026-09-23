@@ -116,18 +116,19 @@ class InstallmentCreditController extends Controller
         $text = "{$shopName}\nاعتبار خرید اقساطی شما تا {$installmentFormatted} تومان و اعتبار عادی تا {$creditFormatted} تومان شارژ شد";
         try {
             SmsTools::sendShopSms($phone, $text, null, $installmentCredit, 'installment_credit', $atelierId);
+            $sms = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(false);
         } catch (\App\Exceptions\InsufficientShopSmsQuotaException $e) {
-            return $e->toResponse($request);
+            $sms = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(true);
         }
 
-        return response([
+        return response(array_merge([
             'message' => 'اعتبار اقساطی و اعتبار عادی با موفقیت ثبت شد',
             'user' => $user,
             'old_installment_credit' => $oldInstallmentCredit,
             'new_installment_credit' => $installmentCredit,
             'old_regular_credit' => $oldRegularCredit,
             'new_regular_credit' => $regularCredit,
-        ], 201);
+        ], $sms), 201);
     }
 
     /**
@@ -190,18 +191,19 @@ class InstallmentCreditController extends Controller
         $text = "{$shopName}\nاعتبار خرید اقساطی شما {$installmentFormatted} تومان و اعتبار عادی {$creditFormatted} تومان ثبت شد";
         try {
             SmsTools::sendShopSms($phone, $text, null, $newInstallmentCredit, 'installment_credit', $atelierId);
+            $sms = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(false);
         } catch (\App\Exceptions\InsufficientShopSmsQuotaException $e) {
-            return $e->toResponse($request);
+            $sms = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(true);
         }
 
-        return response([
+        return response(array_merge([
             'message' => 'اعتبارات با موفقیت به‌روزرسانی شد',
             'user' => $user,
             'old_installment_credit' => $oldInstallmentCredit,
             'new_installment_credit' => $newInstallmentCredit,
             'old_regular_credit' => $oldRegularCredit,
             'new_regular_credit' => $newRegularCredit,
-        ], 200);
+        ], $sms), 200);
     }
 
     /**

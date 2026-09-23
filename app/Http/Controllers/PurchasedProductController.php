@@ -634,6 +634,7 @@ class PurchasedProductController extends Controller
         }
 
         // اگر شماره تلفن وجود دارد (ویرایش فاکتور پیامک جدید نمی‌فرستد)
+        $smsMeta = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(false, false);
         if ($phone && ! $replacePurchase) {
             $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
             
@@ -647,8 +648,9 @@ class PurchasedProductController extends Controller
                 $text = "{$shopName}\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
                 try {
                     SmsTools::sendShopSms($phone, $text, (string) $purchase->id, $creditEarned, 'credit', $purchaseAtelierId);
+                    $smsMeta = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(false);
                 } catch (\App\Exceptions\InsufficientShopSmsQuotaException) {
-                    // خرید ثبت می‌شود؛ پیامک بدون اعتبار ارسال نمی‌شود
+                    $smsMeta = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(true);
                 }
             } else {
                 // اگر اعتبار غیرفعال باشد یا اعتبار کسب نشده باشد (به دلیل تخفیف)، فقط پیام ساده بفرست
@@ -656,8 +658,9 @@ class PurchasedProductController extends Controller
                 $text = "{$shopName}\nبا تشکر از خرید شما";
                 try {
                     SmsTools::sendShopSms($phone, $text, (string) $purchase->id, null, 'purchase', $purchaseAtelierId);
+                    $smsMeta = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(false);
                 } catch (\App\Exceptions\InsufficientShopSmsQuotaException) {
-                    //
+                    $smsMeta = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(true);
                 }
             }
 
@@ -665,7 +668,7 @@ class PurchasedProductController extends Controller
             CustomerPhone::createNewPhone($phone);
         }
 
-        return $this->storePurchaseResponse($purchase, false, (bool) $replacePurchase);
+        return $this->storePurchaseResponse($purchase, false, (bool) $replacePurchase, $smsMeta);
     }
 
     protected function normalizeClientId($clientId): ?string
@@ -699,7 +702,7 @@ class PurchasedProductController extends Controller
         return $errorCode === 1062 || strpos(strtolower($e->getMessage()), 'duplicate') !== false;
     }
 
-    protected function storePurchaseResponse(Purchase $purchase, bool $alreadyExists, bool $replaced = false)
+    protected function storePurchaseResponse(Purchase $purchase, bool $alreadyExists, bool $replaced = false, array $smsMeta = [])
     {
         $purchase->load(['purchasedProducts.product', 'purchasedProducts.producedGood', 'purchasedProducts.rawMaterial']);
         if ($purchase->isInstallment()) {
@@ -728,6 +731,9 @@ class PurchasedProductController extends Controller
         $payload['dailyTicketNumber'] = $purchase->daily_ticket_number;
         $payload['already_exists'] = $alreadyExists;
         $payload['replaced'] = $replaced;
+        if ($smsMeta !== []) {
+            $payload = array_merge($payload, $smsMeta);
+        }
 
         if ($alreadyExists) {
             $payload['code'] = 'duplicate_client_id';

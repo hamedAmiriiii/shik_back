@@ -312,11 +312,16 @@ class TableOrderController extends Controller
         $purchase->load(['purchasedProducts.product', 'shopTable']);
         $tableOrder->refresh()->load(['items.product', 'shopTable']);
 
-        return response()->json([
+        $smsFields = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(
+            (bool) $purchase->getAttribute('sms_quota_exhausted'),
+            $purchase->getAttribute('sms_sent') === true || (bool) $purchase->getAttribute('sms_quota_exhausted')
+        );
+
+        return response()->json(array_merge([
             'message' => 'پرداخت ثبت شد و فاکتور ساخته شد',
             'table_order' => $tableOrder->toPublicArray(),
             'purchase' => $purchase,
-        ], 200);
+        ], $smsFields), 200);
     }
 
     /**
