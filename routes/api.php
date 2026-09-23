@@ -302,6 +302,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         ->where('date', '[0-9]{4}-[0-9]{2}-[0-9]{2}');
 
     Route::get('shop-accounts', [\App\Http\Controllers\ShopAccountController::class, 'index']);
+    Route::post('shop-accounts/set-balances', [\App\Http\Controllers\ShopAccountController::class, 'setBalances']);
     Route::post('shop-accounts', [\App\Http\Controllers\ShopAccountController::class, 'store']);
     Route::put('shop-accounts/{shopAccount}', [\App\Http\Controllers\ShopAccountController::class, 'update']);
     Route::delete('shop-accounts/{shopAccount}', [\App\Http\Controllers\ShopAccountController::class, 'destroy']);

@@ -569,6 +569,13 @@ class ShopBackupTables
                 ],
             ],
             [
+                'name' => 'shop_account_balance_adjustments',
+                'scope' => 'atelier',
+                'fks' => [
+                    'shop_account_id' => 'shop_accounts',
+                ],
+            ],
+            [
                 'name' => 'manual_trades',
                 'scope' => 'atelier',
                 'fks' => [
@@ -634,6 +641,7 @@ class ShopBackupTables
             \App\Models\AccountingVoucher::SOURCE_CHEQUE_CLEAR => 'cheques',
             \App\Models\AccountingVoucher::SOURCE_RECON_DEPOSIT => 'daily_shop_reconciliation_account_deposits',
             \App\Models\AccountingVoucher::SOURCE_ACCOUNT_TRANSFER => 'shop_account_transfers',
+            \App\Models\AccountingVoucher::SOURCE_BALANCE_ADJUST => 'shop_account_balance_adjustments',
             \App\Models\AccountingVoucher::SOURCE_EXPENSE => 'expenses',
             \App\Models\AccountingVoucher::SOURCE_INVOICE => 'invoices',
             \App\Models\AccountingVoucher::SOURCE_DOCUMENT_PAYMENT => 'document_payments',

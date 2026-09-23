@@ -86,6 +86,11 @@ class AccountingVoucherController extends Controller
                     'message' => 'بستن دوره را از POST /api/accounting/period-close ثبت کنید.',
                 ], 422);
             }
+            if ($sourceType === AccountingVoucher::SOURCE_BALANCE_ADJUST) {
+                return response()->json([
+                    'message' => 'اصلاح مانده حساب را از POST /api/shop-accounts/set-balances ثبت کنید.',
+                ], 422);
+            }
             $sourceId = (int) ($fields['source_id'] ?? 0);
             if ($sourceId <= 0) {
                 $sourceId = (int) AccountingVoucher::query()

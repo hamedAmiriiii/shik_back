@@ -10,6 +10,7 @@ use App\Models\ManualTrade;
 use App\Models\Cheque;
 use App\Models\PurchaseItemReturn;
 use App\Models\ShopAccount;
+use App\Models\ShopAccountBalanceAdjustment;
 use App\Models\ShopAccountTransfer;
 use App\Models\ShopPartnerSettlement;
 use App\Services\ChartOfAccountsSeeder;
@@ -21,8 +22,8 @@ use Illuminate\Support\Facades\Schema;
  * موجودی حساب‌های فروشگاه و تنخواه.
  *
  * حساب فروشگاه: واریزهای تطبیق روزانه − شارژ تنخواه − هزینه/فاکتور پرداخت‌شده از آن
- *               − برگشت فروش از حساب − تقسیم سود شرکا
- * تنخواه: شارژ دریافتی − هزینه/فاکتور پرداخت‌شده از آن − برگشت/برداشت‌های مشابه
+ *               − برگشت فروش از حساب − تقسیم سود شرکا + اصلاح مانده واقعی
+ * تنخواه: شارژ دریافتی − هزینه/فاکتور پرداخت‌شده از آن − برگشت/برداشت‌های مشابه + اصلاح مانده
  * صندوق نقد: مانده دفتر حسابداری (۱۱۱۰۱)
  */
 class ShopAccountBalanceService
@@ -52,6 +53,7 @@ class ShopAccountBalanceService
                 'cheque_clears' => 0.0,
                 'sale_return_refunds' => 0.0,
                 'partner_settlements' => 0.0,
+                'adjustments' => 0.0,
                 'balance' => 0.0,
             ];
         }
@@ -116,12 +118,19 @@ class ShopAccountBalanceService
             }
         }
 
+        foreach (self::adjustmentTotals($atelierId, $accountIds) as $id => $total) {
+            if (isset($result[$id])) {
+                $result[$id]['adjustments'] = $total;
+            }
+        }
+
         foreach ($result as $id => $row) {
             $chequeClears = (float) ($row['cheque_clears'] ?? 0);
             $saleReturns = (float) ($row['sale_return_refunds'] ?? 0);
             $partnerSettlements = (float) ($row['partner_settlements'] ?? 0);
+            $adjustments = (float) ($row['adjustments'] ?? 0);
             $result[$id]['balance'] = round(
-                $row['deposits'] + $row['transfers_in'] + $row['manual_sales'] + $chequeClears
+                $row['deposits'] + $row['transfers_in'] + $row['manual_sales'] + $chequeClears + $adjustments
                     - $row['transfers_out'] - $row['expenses'] - $row['invoices'] - $row['manual_purchases']
                     - $saleReturns - $partnerSettlements,
                 2
@@ -468,6 +477,28 @@ class ShopAccountBalanceService
             ->whereIn('shop_account_id', $accountIds)
             ->whereNotNull('shop_account_id')
             ->selectRaw('shop_account_id, SUM(COALESCE(total_distributed, 0)) as total')
+            ->groupBy('shop_account_id')
+            ->pluck('total', 'shop_account_id')
+            ->mapWithKeys(fn ($v, $k) => [(int) $k => (float) $v])
+            ->all();
+    }
+
+    /**
+     * اصلاح دستی مانده برای رساندن موجودی عملیاتی به رقم واقعی.
+     *
+     * @param  array<int>  $accountIds
+     * @return array<int, float>
+     */
+    protected static function adjustmentTotals(int $atelierId, array $accountIds): array
+    {
+        if (! Schema::hasTable('shop_account_balance_adjustments')) {
+            return [];
+        }
+
+        return ShopAccountBalanceAdjustment::query()
+            ->where('atelier_id', $atelierId)
+            ->whereIn('shop_account_id', $accountIds)
+            ->selectRaw('shop_account_id, SUM(amount) as total')
             ->groupBy('shop_account_id')
             ->pluck('total', 'shop_account_id')
             ->mapWithKeys(fn ($v, $k) => [(int) $k => (float) $v])

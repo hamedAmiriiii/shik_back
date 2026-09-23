@@ -192,6 +192,59 @@ class ShopAccountController extends Controller
     }
 
     /**
+     * موجودی عملیاتی و دفتر هر حساب را به رقم واقعی می‌رساند.
+     * POST /api/shop-accounts/set-balances
+     */
+    public function setBalances(Request $request)
+    {
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            return response()->json([
+                'message' => 'تنظیم مانده فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
+            ], 422);
+        }
+
+        $fields = $request->validate([
+            'date' => 'nullable|string',
+            'description' => 'nullable|string|max:255',
+            'items' => 'required|array|min:1',
+            'items.*.shop_account_id' => 'required|integer|min:1',
+            'items.*.target_balance' => 'required|numeric',
+        ]);
+
+        try {
+            $date = \App\Services\ShopAccountBalanceSetService::parseDate($fields['date'] ?? null);
+            $result = \App\Services\ShopAccountBalanceSetService::apply(
+                $atelierId,
+                $fields['items'],
+                $date,
+                $fields['description'] ?? null
+            );
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $ids = [];
+        foreach ($fields['items'] as $item) {
+            $ids[] = (int) $item['shop_account_id'];
+        }
+        $accounts = ShopAccount::query()->forAtelier($atelierId)->whereIn('id', $ids)->orderBy('id')->get();
+        $breakdown = ShopAccountBalanceService::breakdown($atelierId, $ids);
+
+        return response([
+            'ok' => true,
+            'message' => $result['voucher']
+                ? 'ماندهٔ حساب‌ها و دفتر با رقم واقعی یکی شد.'
+                : 'ماندهٔ عملیاتی حساب‌ها اصلاح شد.',
+            'data' => [
+                'accounts' => $accounts->map(fn (ShopAccount $a) => $this->serialize($a, $breakdown))->values(),
+                'items' => $result['items'],
+                'voucher' => $result['voucher'] ? $result['voucher']->toApiArray() : null,
+            ],
+        ], 201);
+    }
+
+    /**
      * @param  array<int, array<string, float>>  $breakdown
      * @return array<string, mixed>
      */
@@ -220,6 +273,7 @@ class ShopAccountController extends Controller
             'manual_sales_total' => round((float) ($row['manual_sales'] ?? 0), 2),
             'sale_return_refunds_total' => round((float) ($row['sale_return_refunds'] ?? 0), 2),
             'partner_settlements_total' => round((float) ($row['partner_settlements'] ?? 0), 2),
+            'adjustments_total' => round((float) ($row['adjustments'] ?? 0), 2),
         ];
     }
 }

@@ -98,7 +98,8 @@ class AccountingHealthCheck extends Command
             && in_array('formal_invoice_seller_profiles', $backupNames, true)
             && in_array('user_credit_grants', $backupNames, true)
             && in_array('shop_campaigns', $backupNames, true)
-            && in_array('shop_daily_ticket_counters', $backupNames, true);
+            && in_array('shop_daily_ticket_counters', $backupNames, true)
+            && in_array('shop_account_balance_adjustments', $backupNames, true);
         $checks[] = $this->check(
             'بکاپ',
             $backupOk,
