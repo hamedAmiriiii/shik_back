@@ -7,11 +7,14 @@ use App\Models\Income;
 use App\Models\Invoice;
 use App\Models\ManualTrade;
 use App\Models\Purchase;
+use App\Models\ShopAccount;
 use App\Services\CustomerCreditExpenseService;
 use App\Services\DocumentPaymentService;
+use App\Services\ShopAccountBalanceService;
 use App\Services\ShopSalesReportService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Morilog\Jalali\Jalalian;
 use Carbon\Carbon;
 
@@ -179,6 +182,9 @@ class FinancialReportController extends Controller
             $totals['invoice_unpaid'] += $monthData['invoice_unpaid'];
             $totals['expense_cash_out'] += $monthData['expense_cash_out'];
         }
+
+            $totals['reconstructed_account_balance'] = round((float) $totals['total_account_balance'], 2);
+            $totals['total_account_balance'] = $this->actualShopAccountBalance($atelierId);
 
             return response([
                 'meta' => [
@@ -455,6 +461,27 @@ class FinancialReportController extends Controller
         ];
 
         return $months[$month] ?? '';
+    }
+
+    /**
+     * ماندهٔ واقعی صندوق + حساب‌های فروشگاه + تنخواه همین لحظه.
+     */
+    private function actualShopAccountBalance(int $atelierId): float
+    {
+        if ($atelierId <= 0 || ! Schema::hasTable('shop_accounts')) {
+            return 0.0;
+        }
+
+        $ids = ShopAccount::query()->forAtelier($atelierId)->pluck('id')->map(function ($id) {
+            return (int) $id;
+        })->all();
+        if ($ids === []) {
+            return 0.0;
+        }
+
+        $balances = ShopAccountBalanceService::balances($atelierId, $ids);
+
+        return round(array_sum($balances), 2);
     }
 }
 
