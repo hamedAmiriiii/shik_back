@@ -220,6 +220,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
     Route::post('expenses/{expense}/settle', [\App\Http\Controllers\ExpenseController::class, 'settle']);
     Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);
+    Route::get('proforma-invoices', [\App\Http\Controllers\ProformaInvoiceController::class, 'index']);
+    Route::post('proforma-invoices', [\App\Http\Controllers\ProformaInvoiceController::class, 'store']);
+    Route::post('proforma-invoices/{proformaInvoice}/sell', [\App\Http\Controllers\ProformaInvoiceController::class, 'sell']);
+    Route::delete('proforma-invoices/{proformaInvoice}', [\App\Http\Controllers\ProformaInvoiceController::class, 'destroy']);
 
     // چک‌ها (صادره / دریافتی) — وصول دستی: هزینه یا درآمد
     Route::get('cheques/upcoming', [\App\Http\Controllers\ChequeController::class, 'upcoming']);
