@@ -887,6 +887,29 @@ class PurchasedProductController extends Controller
      *   amount_paid_now: float
      * }
      */
+    /**
+     * @return array<int, int>
+     */
+    private function saleChequeIds(Request $request): array
+    {
+        $ids = [];
+        $many = $request->input('cheque_ids', []);
+        if (is_array($many)) {
+            foreach ($many as $id) {
+                $n = (int) $id;
+                if ($n > 0) {
+                    $ids[] = $n;
+                }
+            }
+        }
+        $single = (int) $request->input('cheque_id');
+        if ($single > 0) {
+            $ids[] = $single;
+        }
+
+        return array_values(array_unique($ids));
+    }
+
     private function resolvePosPaymentMethod(
         Request $request,
         string $paymentType,
