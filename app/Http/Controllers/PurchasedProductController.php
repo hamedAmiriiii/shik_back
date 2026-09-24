@@ -195,6 +195,7 @@ class PurchasedProductController extends Controller
                 ? 'نقد/کارت + چک'
                 : 'چکی';
             $purchaseData['cheque_id'] = $purchase->cheque_id;
+            $purchaseData['received_cheques'] = $purchase->saleChequeRows()->values()->all();
         }
         $purchaseData['daily_ticket_number'] = $purchase?->daily_ticket_number;
         $purchaseData['dailyTicketNumber'] = $purchase?->daily_ticket_number;
@@ -509,9 +510,10 @@ class PurchasedProductController extends Controller
                 $userShiksho = $lockedUser;
             }
 
-            if ($chequeId) {
-                $linkedCheque = Cheque::query()
-                    ->where('id', $chequeId)
+            $lockedCheques = collect();
+            foreach ($chequeIds as $id) {
+                $row = Cheque::query()
+                    ->where('id', $id)
                     ->where('type', Cheque::TYPE_RECEIVED)
                     ->where('status', Cheque::STATUS_PENDING)
                     ->where(function ($q) use ($replacePurchase) {
@@ -523,12 +525,14 @@ class PurchasedProductController extends Controller
                     ->lockForUpdate()
                     ->first();
 
-                if (! $linkedCheque) {
+                if (! $row) {
                     DB::rollBack();
 
                     return response(['error' => 'چک برای اتصال به فروش در دسترس نیست.'], 422);
                 }
+                $lockedCheques->push($row);
             }
+            $linkedCheque = $lockedCheques->first();
 
             $purchasePayload = [
                 'phone' => $phone,
@@ -580,8 +584,8 @@ class PurchasedProductController extends Controller
                 \App\Services\DailyTicketNumberService::assign($purchase);
             }
 
-            if ($linkedCheque) {
-                $linkedCheque->update(['purchase_id' => $purchase->id]);
+            foreach ($lockedCheques as $row) {
+                $row->update(['purchase_id' => $purchase->id]);
             }
 
             $purchasedProducts = [];
@@ -932,15 +936,25 @@ class PurchasedProductController extends Controller
 
         $linkedCheque = null;
         $chequeAmount = 0.0;
-        if ($chequeId) {
-            $linkedCheque = $this->assertSaleChequeAvailable(
-                $chequeId,
-                $payableAmount,
-                $replacePurchase,
-                $purchaseAtelierId,
-                in_array($paymentType, ['cheque', 'mixed', 'debt'], true)
-            );
-            $chequeAmount = round((float) $linkedCheque->amount, 2);
+        $saleChequeIdList = $this->saleChequeIds($request);
+        if ($saleChequeIdList !== []) {
+            foreach ($saleChequeIdList as $id) {
+                $row = $this->assertSaleChequeAvailable(
+                    $id,
+                    $payableAmount,
+                    $replacePurchase,
+                    $purchaseAtelierId,
+                    in_array($paymentType, ['cheque', 'mixed', 'debt'], true)
+                );
+                $chequeAmount += round((float) $row->amount, 2);
+                if (! $linkedCheque) {
+                    $linkedCheque = $row;
+                }
+            }
+            $chequeAmount = round($chequeAmount, 2);
+            if ($chequeAmount > $payableAmount + 0.02) {
+                throw new \RuntimeException('جمع چک‌ها بیشتر از مبلغ قابل پرداخت فروش است.');
+            }
         } elseif ($paymentType === 'cheque') {
             throw new \RuntimeException('برای فروش چکی، cheque_id الزامی است.');
         }

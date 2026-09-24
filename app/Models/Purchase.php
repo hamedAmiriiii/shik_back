@@ -125,7 +125,7 @@ class Purchase extends Model
         return $this->hasMany(Cheque::class, 'purchase_id')->where('type', Cheque::TYPE_RECEIVED);
     }
 
-    protected function saleChequeRows()
+    public function saleChequeRows()
     {
         if ($this->relationLoaded('receivedCheques') && $this->receivedCheques->isNotEmpty()) {
             return $this->receivedCheques;
