@@ -44,6 +44,7 @@ class PurchasedProductController extends Controller
             'purchasedProducts.rawMaterial',
             'installments',
             'cheque',
+            'receivedCheques',
         ]);
     if (Schema::hasTable('purchase_item_returns')) {
         $query->withCount('itemReturns');
@@ -248,6 +249,8 @@ class PurchasedProductController extends Controller
             'discount_amount' => 'nullable|numeric|min:0',
             'payment_type' => 'nullable|string|in:cash,installment,debt,cheque,mixed',
             'cheque_id' => 'nullable|integer|exists:cheques,id',
+            'cheque_ids' => 'nullable|array|max:20',
+            'cheque_ids.*' => 'integer|exists:cheques,id',
             'installment_count' => 'required_if:payment_type,installment|integer|min:2|max:24',
             'card_amount' => 'nullable|numeric|min:0',
             'cash_amount' => 'nullable|numeric|min:0',
@@ -260,7 +263,8 @@ class PurchasedProductController extends Controller
         $useCredit = $request->input('use_credit', false);
         $paymentType = $request->input('payment_type', 'cash');
         $installmentCount = $request->input('installment_count');
-        $chequeId = $request->input('cheque_id');
+        $chequeIds = $this->saleChequeIds($request);
+        $chequeId = $chequeIds[0] ?? null;
 
         $staffAtelierId = $this->staffShopAtelierId($request);
         $posSale = app(ShopPosSaleService::class);
@@ -819,6 +823,12 @@ class PurchasedProductController extends Controller
                 }
             }
             $this->restoreCustomerOnVoidedSale($purchase);
+            if (Schema::hasColumn('cheques', 'purchase_id')) {
+                Cheque::query()
+                    ->where('purchase_id', $purchase->id)
+                    ->where('status', Cheque::STATUS_PENDING)
+                    ->update(['purchase_id' => null]);
+            }
             if ($purchase->cheque && $purchase->cheque->status === Cheque::STATUS_PENDING) {
                 $purchase->cheque->update(['purchase_id' => null]);
             }

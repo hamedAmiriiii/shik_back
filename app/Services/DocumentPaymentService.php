@@ -753,6 +753,30 @@ class DocumentPaymentService
         return $cheque;
     }
 
+    /**
+     * @param  array<string, mixed>  $fields
+     */
+    protected static function applyIssuedChequeEdits(Cheque $cheque, array $fields): void
+    {
+        $payload = [];
+        if (! empty($fields['cheque_number'])) {
+            $payload['cheque_number'] = $fields['cheque_number'];
+        }
+        if (array_key_exists('bank_name', $fields)) {
+            $payload['bank_name'] = $fields['bank_name'] ?: null;
+        }
+        if (array_key_exists('payee', $fields)) {
+            $payload['payee'] = $fields['payee'] ?: null;
+        }
+        $due = self::parseJalaliDate($fields['due_date'] ?? null);
+        if ($due) {
+            $payload['due_date'] = $due;
+        }
+        if ($payload !== []) {
+            $cheque->update($payload);
+        }
+    }
+
     public static function linkExistingCheque(Model $model, int $chequeId, ?float $amount = null): Cheque
     {
         $cheque = Cheque::find($chequeId);
@@ -826,6 +850,9 @@ class DocumentPaymentService
             if ($split['method'] === self::METHOD_CHEQUE) {
                 if (! empty($split['cheque_id'])) {
                     $cheque = self::linkExistingCheque($model, (int) $split['cheque_id'], (float) $split['amount']);
+                    if (! empty($split['cheque']) && is_array($split['cheque'])) {
+                        self::applyIssuedChequeEdits($cheque, $split['cheque']);
+                    }
                 } else {
                     $chequePayload = $split['cheque'] ?? [];
                     $chequePayload['due_date'] = self::parseJalaliDate($chequePayload['due_date'] ?? null);
@@ -868,13 +895,26 @@ class DocumentPaymentService
             return;
         }
 
+        $model->loadMissing('payments.cheque');
+        $upcoming = self::splitsFromFields($fields, (float) $model->amount, $model);
+        $keepChequeIds = [];
+        foreach ($upcoming as $split) {
+            if (! empty($split['cheque_id'])) {
+                $keepChequeIds[] = (int) $split['cheque_id'];
+            }
+        }
+
         foreach ($model->payments as $row) {
             if ($row->cheque && $row->cheque->status === Cheque::STATUS_CLEARED) {
                 throw new RuntimeException('این سند چک وصول‌شده دارد و روش پرداخت قابل تغییر نیست.');
             }
         }
         foreach ($model->payments as $row) {
-            if ($row->cheque && $row->cheque->status === Cheque::STATUS_PENDING) {
+            if (
+                $row->cheque
+                && $row->cheque->status === Cheque::STATUS_PENDING
+                && ! in_array((int) $row->cheque_id, $keepChequeIds, true)
+            ) {
                 $row->cheque->update([
                     'status' => Cheque::STATUS_CANCELLED,
                     'invoice_id' => $model instanceof Invoice ? null : $row->cheque->invoice_id,

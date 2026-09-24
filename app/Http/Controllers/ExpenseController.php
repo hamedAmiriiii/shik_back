@@ -34,7 +34,7 @@ class ExpenseController extends Controller
         }
 
         if (DocumentPaymentService::supportsSplits()) {
-            $query->with('payments');
+            $query->with('payments.cheque');
         }
 
         if (ShopBeneficiaryService::supports('expenses')) {

@@ -203,9 +203,9 @@ class ProductController extends Controller
 
         $existingByBarcode = collect();
         if (! empty($barcodesInRequest)) {
-            $existingByBarcode = Product::where('atelier_id', $atelierId)
+            $existingByBarcode = Product::withTrashed()
+                ->where('atelier_id', $atelierId)
                 ->whereIn('barcode', array_keys($barcodesInRequest))
-                ->whereNull('deleted_at')
                 ->get()
                 ->keyBy('barcode');
         }
@@ -239,6 +239,10 @@ class ProductController extends Controller
 
                     $barcode = $productData['barcode'] ?? null;
                     $existing = $barcode !== null ? $existingByBarcode->get($barcode) : null;
+
+                    if ($existing && $existing->trashed()) {
+                        throw new \InvalidArgumentException("بارکد «{$barcode}» قبلاً برای کالای دیگری در همین فروشگاه ثبت شده است.");
+                    }
 
                     if ($existing) {
                         $prepared = $this->prepareProductFieldsForUpdate($productData, $existing);
@@ -331,12 +335,13 @@ class ProductController extends Controller
     }
 
     /**
-     * قانون یکتایی بارکد در همان فروشگاه (محصول‌های حذف‌شده از لیست شمرده نمی‌شوند).
+     * قانون یکتایی بارکد در همان فروشگاه.
+     * ایندکس دیتابیس کالای حذف‌شده را هم نگه می‌دارد، پس آن‌ها هم تکراری حساب می‌شوند.
      */
     private function uniqueBarcodeRule(int $atelierId, ?int $ignoreProductId = null): \Illuminate\Validation\Rules\Unique
     {
         $rule = Rule::unique('products', 'barcode')->where(function ($query) use ($atelierId) {
-            return $query->where('atelier_id', $atelierId)->whereNull('deleted_at');
+            return $query->where('atelier_id', $atelierId);
         });
 
         if ($ignoreProductId !== null) {
@@ -776,10 +781,10 @@ class ProductController extends Controller
         }
 
         foreach ($barcodesInRequest as $barcode => $productId) {
-            $exists = Product::where('barcode', $barcode)
+            $exists = Product::withTrashed()
+                ->where('barcode', $barcode)
                 ->where('atelier_id', $atelierId)
                 ->where('id', '!=', $productId)
-                ->whereNull('deleted_at')
                 ->exists();
 
             if ($exists) {

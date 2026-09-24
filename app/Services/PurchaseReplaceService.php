@@ -101,6 +101,12 @@ class PurchaseReplaceService
 
         AccountingSalePoster::reversePurchase($purchase);
 
+        if (Schema::hasTable('cheques') && Schema::hasColumn('cheques', 'purchase_id')) {
+            Cheque::query()
+                ->where('purchase_id', $purchase->id)
+                ->where('status', Cheque::STATUS_PENDING)
+                ->update(['purchase_id' => null]);
+        }
         if ($purchase->cheque && $purchase->cheque->status === Cheque::STATUS_PENDING) {
             $purchase->cheque->update(['purchase_id' => null]);
         }

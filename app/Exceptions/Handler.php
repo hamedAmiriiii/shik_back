@@ -3,6 +3,7 @@
 namespace App\Exceptions;
 
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -65,6 +66,15 @@ class Handler extends ExceptionHandler
             }
         }
 
+        if ($request instanceof Request && ($request->is('api/*') || $request->segment(1) === 'api') && $e instanceof QueryException) {
+            $duplicateMessage = $this->duplicateKeyMessage($e);
+            if ($duplicateMessage !== null) {
+                return response()->json([
+                    'message' => $duplicateMessage,
+                ], 422);
+            }
+        }
+
         if ($request instanceof Request && $request->is('api/*') && $e instanceof \Symfony\Component\HttpKernel\Exception\HttpException && $e->getStatusCode() === 403) {
             $msg = trim((string) $e->getMessage());
             if ($msg === '' || $msg === 'This action is unauthorized.' || $msg === 'Unauthorized.') {
@@ -102,6 +112,30 @@ class Handler extends ExceptionHandler
         return response()->json([
             'message' => 'احراز هویت نشد. توکن را در هدر Authorization: Bearer ... یا در body (access_token / token) بفرستید.',
         ], 401);
+    }
+
+    private function duplicateKeyMessage(QueryException $e): ?string
+    {
+        $code = (int) ($e->errorInfo[1] ?? 0);
+        $raw = $e->getMessage();
+        if ($code !== 1062 && ! str_contains($raw, 'Duplicate entry')) {
+            return null;
+        }
+
+        if (str_contains($raw, 'products_atelier_id_barcode_unique')) {
+            $barcode = null;
+            if (preg_match("/Duplicate entry '([^']+)'/", $raw, $match)) {
+                $parts = explode('-', $match[1], 2);
+                $barcode = $parts[1] ?? null;
+            }
+            if ($barcode !== null && $barcode !== '') {
+                return "بارکد «{$barcode}» قبلاً برای کالای دیگری در همین فروشگاه ثبت شده است.";
+            }
+
+            return 'این بارکد قبلاً برای کالای دیگری در همین فروشگاه ثبت شده است.';
+        }
+
+        return 'این مورد قبلاً ثبت شده و تکراری است.';
     }
 
     /**

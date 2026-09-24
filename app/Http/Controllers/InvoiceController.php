@@ -37,7 +37,7 @@ class InvoiceController extends Controller
             $query->with('items');
         }
         if (DocumentPaymentService::supportsSplits()) {
-            $query->with('payments');
+            $query->with('payments.cheque');
         }
 
         if (ShopBeneficiaryService::supports('invoices')) {

@@ -118,6 +118,64 @@ class Purchase extends Model
     }
 
     /**
+     * همه چک‌های دریافتی وصل‌شده به این فروش
+     */
+    public function receivedCheques()
+    {
+        return $this->hasMany(Cheque::class, 'purchase_id')->where('type', Cheque::TYPE_RECEIVED);
+    }
+
+    protected function saleChequeRows()
+    {
+        if ($this->relationLoaded('receivedCheques') && $this->receivedCheques->isNotEmpty()) {
+            return $this->receivedCheques;
+        }
+        if ($this->relationLoaded('cheque') && $this->cheque) {
+            return collect([$this->cheque]);
+        }
+        $rows = $this->receivedCheques()->get();
+        if ($rows->isNotEmpty()) {
+            return $rows;
+        }
+        if ($this->cheque_id) {
+            $one = Cheque::query()->find($this->cheque_id);
+
+            return $one ? collect([$one]) : collect();
+        }
+
+        return collect();
+    }
+
+    /**
+     * چک‌های دریافتی وصل‌شده به این فروش
+     */
+    public function receivedCheques()
+    {
+        return $this->hasMany(Cheque::class, 'purchase_id')->where('type', Cheque::TYPE_RECEIVED);
+    }
+
+    protected function saleChequeRows()
+    {
+        if ($this->relationLoaded('receivedCheques') && $this->receivedCheques->isNotEmpty()) {
+            return $this->receivedCheques;
+        }
+        if ($this->relationLoaded('cheque') && $this->cheque) {
+            return collect([$this->cheque]);
+        }
+        $rows = $this->receivedCheques()->get();
+        if ($rows->isNotEmpty()) {
+            return $rows;
+        }
+        if ($this->cheque_id) {
+            $one = $this->cheque()->first();
+
+            return $one ? collect([$one]) : collect();
+        }
+
+        return collect();
+    }
+
+    /**
      * قسط‌های این خرید
      */
     public function installments()
@@ -176,14 +234,9 @@ class Purchase extends Model
             return 0.0;
         }
 
-        if ($this->relationLoaded('cheque') && $this->cheque) {
-            return round((float) $this->cheque->amount, 2);
-        }
-
-        if ($this->cheque_id) {
-            $amount = $this->cheque()->value('amount');
-
-            return round((float) $amount, 2);
+        $rows = $this->saleChequeRows();
+        if ($rows->isNotEmpty()) {
+            return round((float) $rows->sum(fn ($cheque) => (float) $cheque->amount), 2);
         }
 
         return 0.0;
@@ -203,17 +256,25 @@ class Purchase extends Model
             return false;
         }
 
-        if ($this->relationLoaded('cheque')) {
-            return $this->cheque && $this->cheque->status === Cheque::STATUS_CLEARED;
+        $rows = $this->saleChequeRows();
+        if ($rows->isEmpty()) {
+            return false;
         }
 
-        return $this->cheque()->where('status', Cheque::STATUS_CLEARED)->exists();
+        return $rows->every(fn ($cheque) => $cheque->status === Cheque::STATUS_CLEARED);
     }
 
     public function outstandingChequeAmount(): float
     {
         if (! $this->isCheque() || $this->isChequeSettled()) {
             return 0.0;
+        }
+
+        $rows = $this->saleChequeRows();
+        if ($rows->isNotEmpty()) {
+            return round((float) $rows
+                ->filter(fn ($cheque) => $cheque->status !== Cheque::STATUS_CLEARED)
+                ->sum(fn ($cheque) => (float) $cheque->amount), 2);
         }
 
         $chequeAmount = $this->chequeAmount();
