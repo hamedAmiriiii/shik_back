@@ -147,35 +147,6 @@ class Purchase extends Model
     }
 
     /**
-     * چک‌های دریافتی وصل‌شده به این فروش
-     */
-    public function receivedCheques()
-    {
-        return $this->hasMany(Cheque::class, 'purchase_id')->where('type', Cheque::TYPE_RECEIVED);
-    }
-
-    protected function saleChequeRows()
-    {
-        if ($this->relationLoaded('receivedCheques') && $this->receivedCheques->isNotEmpty()) {
-            return $this->receivedCheques;
-        }
-        if ($this->relationLoaded('cheque') && $this->cheque) {
-            return collect([$this->cheque]);
-        }
-        $rows = $this->receivedCheques()->get();
-        if ($rows->isNotEmpty()) {
-            return $rows;
-        }
-        if ($this->cheque_id) {
-            $one = $this->cheque()->first();
-
-            return $one ? collect([$one]) : collect();
-        }
-
-        return collect();
-    }
-
-    /**
      * قسط‌های این خرید
      */
     public function installments()
