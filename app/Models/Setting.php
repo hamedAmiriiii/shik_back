@@ -58,6 +58,7 @@ class Setting extends Model
             'accounting_enabled' => '0',
             'customer_club_enabled' => \App\Services\ShopFeatureFlags::customerClubDefaultForAtelier($atelierId) ? '1' : '0',
             'receipt_print_settings' => '',
+            'shop_browser_settings' => '',
         ];
 
         foreach ($defaults as $key => $value) {
