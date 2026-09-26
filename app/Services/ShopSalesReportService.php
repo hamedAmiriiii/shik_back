@@ -50,6 +50,7 @@ class ShopSalesReportService
         $cardAmount = 0.0;
         $cashAmount = 0.0;
         $creditUsedTotal = 0.0;
+        $creditCost = 0.0;
         $uncollectedFromPeriodSales = 0.0;
         $uncollectedPeriodDebts = 0.0;
         $discountGiven = 0.0;
@@ -101,7 +102,10 @@ class ShopSalesReportService
             }
 
             $creditEarnedFromPurchases += (float) $purchase->credit_earned;
-            $creditUsedTotal += (float) $purchase->credit_used;
+            $used = (float) $purchase->credit_used;
+            $creditUsedTotal += $used;
+            $funded = CustomerCreditExpenseService::returnFundedForPurchase($atelierId, (int) $purchase->id);
+            $creditCost += CustomerCreditExpenseService::loyaltyPortion($used, $funded);
 
             [$card, $cash] = self::settlementForPurchase($purchase, $invoiceSales);
             $cardAmount += $card;
@@ -143,8 +147,8 @@ class ShopSalesReportService
         );
 
         $totalCreditGranted = $creditEarnedFromPurchases + $manualCreditGranted;
-        // سود تعهدی: فروش ناخالص − تخفیف فاکتور − بها − اعتبار مصرف‌شده
-        $totalProfit = round($netSales - $discountGiven - $netPurchase - $creditUsedTotal, 2);
+        // سود: فروش − تخفیف − بها − اعتبار وفاداری. اعتبار برگشت خرید هزینه نیست.
+        $totalProfit = round($netSales - $discountGiven - $netPurchase - $creditCost, 2);
 
         return [
             'sales' => (float) $netSales,

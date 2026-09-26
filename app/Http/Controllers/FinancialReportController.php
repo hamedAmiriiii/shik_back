@@ -29,6 +29,7 @@ class FinancialReportController extends Controller
     {
         try {
             $atelierId = $this->shopAtelierIdOrAbort($request);
+            CustomerCreditExpenseService::alignLoyaltyExpenses($atelierId);
 
             // دریافت محدوده تاریخ (اختیاری)
             $startDate = $request->input('start_date'); // فرمت: YYYY-MM-DD (شمسی)

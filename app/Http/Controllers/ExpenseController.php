@@ -22,6 +22,7 @@ class ExpenseController extends Controller
     public function index(Request $request)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
+        CustomerCreditExpenseService::alignLoyaltyExpenses($atelierId);
         $query = Expense::where('atelier_id', $atelierId)->orderBy('id', 'desc');
 
         if ($this->supportsPaymentAccount('expenses')) {
@@ -78,6 +79,11 @@ class ExpenseController extends Controller
             ], true)) {
                 $query->where('credit_source', $source);
             }
+        } elseif (CustomerCreditExpenseService::supports()) {
+            $query->where(function ($q) {
+                $q->whereNull('credit_source')
+                    ->orWhere('credit_source', '!=', CustomerCreditExpenseService::SOURCE_RETURN);
+            });
         }
 
         // جستجو بر اساس searchFilterModel

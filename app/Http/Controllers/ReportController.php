@@ -19,6 +19,7 @@ class ReportController extends Controller
     public function index(Request $request)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
+        CustomerCreditExpenseService::alignLoyaltyExpenses($atelierId);
         $reports = [];
 
         $todayTehran = Carbon::now()->setTimezone('Asia/Tehran');
