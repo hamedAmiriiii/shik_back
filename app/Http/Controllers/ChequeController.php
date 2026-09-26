@@ -271,22 +271,11 @@ class ChequeController extends Controller
 
         $message = $cleared->type === Cheque::TYPE_RECEIVED
             ? 'چک دریافتی وصول و به حساب انتخاب‌شده واریز شد.'
-            : 'چک صادره وصول شد.';
-
-        $doc = $cleared->invoice ?: $cleared->expense;
-        $accountDebited = $doc
-            && \App\Services\DocumentPaymentService::isPaid($doc)
-            && $doc->shop_account_id;
-
-        if ($cleared->type === Cheque::TYPE_ISSUED && ! $accountDebited) {
-            $message .= ' موجودی حساب کافی نبود؛ مبلغ از حساب کسر نشد. بعد از تأمین موجودی تسویه کنید.';
-        } elseif ($cleared->type === Cheque::TYPE_ISSUED && $accountDebited) {
-            $message .= ' مبلغ از حساب کسر شد.';
-        }
+            : 'چک صادره وصول شد و مبلغ از حساب کسر شد.';
 
         return response([
             'message' => $message,
-            'account_debited' => (bool) $accountDebited,
+            'account_debited' => $cleared->type === Cheque::TYPE_ISSUED,
             'cheque' => $cleared,
         ], 200);
     }

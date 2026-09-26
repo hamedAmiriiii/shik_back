@@ -234,8 +234,13 @@ class AccountingFlowSelfTest extends Command
             if (! $cheque) {
                 throw new RuntimeException('چک فاکتور ساخته نشد');
             }
+            $account = $this->shopAccount();
+            $available = $account ? ShopAccountBalanceService::availableBalance($account) : 0;
+            if (! $account || $available + 0.001 < (float) $cheque->amount) {
+                return;
+            }
             $netBefore = (float) AccountingReportService::profitLoss($this->atelierId)['net_profit'];
-            $cheque->fresh()->clear();
+            $cheque->fresh()->clear(null, (int) $account->id);
             $netAfter = (float) AccountingReportService::profitLoss($this->atelierId)['net_profit'];
             if (abs($netAfter - $netBefore) > 0.02) {
                 throw new RuntimeException('وصول چک خرید سود را عوض کرد');

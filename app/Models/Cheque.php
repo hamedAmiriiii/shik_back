@@ -259,6 +259,10 @@ class Cheque extends Model
                     $debited = DocumentPaymentService::trySettleAfterClear($expense, $accountId ? (int) $accountId : null, (int) $locked->id);
                 }
 
+                if (! $debited) {
+                    throw new RuntimeException('موجودی حساب برای وصول این چک کافی نیست. چک وصول نشد و مبلغی کسر نشد.');
+                }
+
                 $locked->update([
                     'status' => self::STATUS_CLEARED,
                     'expense_id' => $expense ? $expense->id : $locked->expense_id,

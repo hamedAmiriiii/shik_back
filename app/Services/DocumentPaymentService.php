@@ -539,31 +539,23 @@ class DocumentPaymentService
 
                 return false;
             }
-            try {
-                self::assertCanDebit((int) $model->atelier_id, $shopAccountId, (float) $row->amount, $model);
-                $row->update([
-                    'settled' => true,
-                    'shop_account_id' => $shopAccountId,
-                ]);
-                self::refreshDocumentSummary($model);
+            self::assertCanDebit((int) $model->atelier_id, $shopAccountId, (float) $row->amount, $model);
+            $row->update([
+                'settled' => true,
+                'shop_account_id' => $shopAccountId,
+            ]);
+            self::refreshDocumentSummary($model);
 
-                return true;
-            } catch (RuntimeException $e) {
-                return false;
-            }
+            return true;
         }
 
         if (self::supports($model) && self::isPaid($model) && $model->shop_account_id) {
             return true;
         }
 
-        try {
-            self::settle($model, $shopAccountId, null, false);
+        self::settle($model, $shopAccountId, null, false);
 
-            return true;
-        } catch (RuntimeException $e) {
-            return false;
-        }
+        return true;
     }
 
     public static function unpayCheque(Model $model, int $chequeId): void
