@@ -82,7 +82,10 @@ class ExpenseController extends Controller
         } elseif (CustomerCreditExpenseService::supports()) {
             $query->where(function ($q) {
                 $q->whereNull('credit_source')
-                    ->orWhere('credit_source', '!=', CustomerCreditExpenseService::SOURCE_RETURN);
+                    ->orWhereNotIn('credit_source', [
+                        CustomerCreditExpenseService::SOURCE_RETURN,
+                        CustomerCreditExpenseService::SOURCE_MANUAL,
+                    ]);
             });
         }
 

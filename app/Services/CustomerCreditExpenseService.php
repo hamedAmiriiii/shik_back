@@ -10,9 +10,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * ثبت مصرف اعتبار وفاداری و اعطای دستی به‌صورت هزینه، بدون اثر روی موجودی حساب.
- * برگشت خرید نوع جداست: در لیست و جمع هزینه‌ها نمی‌آید و از سود کم نمی‌شود.
- * اعتباری که از برگشت شارژ شده و دوباره خرج می‌شود روش پرداخت است، نه هزینه.
+ * هزینه فقط وقتی ساخته می‌شود که مشتری اعتبار را در خرید خرج کند.
+ * افزایش دستی تا آن لحظه هزینه نیست. برگشت خرید هم هزینه نیست و از سود کم نمی‌شود.
  */
 class CustomerCreditExpenseService
 {
@@ -141,18 +140,7 @@ class CustomerCreditExpenseService
         int $grantId,
         ?string $userName = null
     ): ?Expense {
-        if (! self::supports() || $atelierId <= 0 || $amount < 0.01 || $grantId <= 0) {
-            return null;
-        }
-
-        return self::upsert(
-            $atelierId,
-            round($amount, 2),
-            self::titleManual($phone),
-            self::SOURCE_MANUAL,
-            $grantId,
-            $userName
-        );
+        return null;
     }
 
     /**
@@ -169,7 +157,7 @@ class CustomerCreditExpenseService
 
         return $query->where(function ($q) {
             $q->whereNull('credit_source')
-                ->orWhereNotIn('credit_source', [self::SOURCE_RETURN, self::SOURCE_LOYALTY]);
+                ->orWhereNotIn('credit_source', [self::SOURCE_RETURN, self::SOURCE_LOYALTY, self::SOURCE_MANUAL]);
         });
     }
 
@@ -257,7 +245,7 @@ class CustomerCreditExpenseService
 
     protected static function titleLoyaltyUsed(int $purchaseId, string $phone): string
     {
-        return 'اعتبار مشتری — مصرف اعتبار وفاداری #'.$purchaseId.' — '.$phone;
+        return 'اعتبار مشتری — مصرف اعتبار در خرید #'.$purchaseId.' — '.$phone;
     }
 
     protected static function titleReturn(int $purchaseId, string $phone): string
@@ -310,6 +298,7 @@ class CustomerCreditExpenseService
         }
 
         self::forgetFundedCache($atelierId);
+        self::dropManualGrantExpenses($atelierId);
         $map = self::fundedMap($atelierId);
         $expenses = Expense::query()
             ->where('atelier_id', $atelierId)
@@ -350,6 +339,26 @@ class CustomerCreditExpenseService
             ->where('credit_source', self::SOURCE_RETURN)
             ->where('type', '!=', self::TYPE_RETURN)
             ->update(['type' => self::TYPE_RETURN]);
+    }
+
+    /**
+     * افزایش دستی تا خرج شدن در خرید هزینه نیست؛ ردیف‌های قبلی حذف می‌شوند.
+     */
+    public static function dropManualGrantExpenses(int $atelierId): void
+    {
+        if (! self::supports() || $atelierId <= 0) {
+            return;
+        }
+
+        $expenses = Expense::query()
+            ->where('atelier_id', $atelierId)
+            ->where('credit_source', self::SOURCE_MANUAL)
+            ->get();
+
+        foreach ($expenses as $expense) {
+            AccountingDocumentPoster::reverseExpense($expense);
+            $expense->delete();
+        }
     }
 
     /**
