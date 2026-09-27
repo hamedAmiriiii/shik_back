@@ -473,6 +473,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     });
 
     Route::prefix('purchase-debts')->name('purchase-debts.')->group(function () {
+        Route::post('/', [\App\Http\Controllers\PurchaseDebtController::class, 'store']);
         Route::get('/grid', [\App\Http\Controllers\PurchaseDebtController::class, 'grid']);
         Route::get('/by-phone', [\App\Http\Controllers\PurchaseDebtController::class, 'byPhone']);
         Route::get('/{purchase}', [\App\Http\Controllers\PurchaseDebtController::class, 'show']);

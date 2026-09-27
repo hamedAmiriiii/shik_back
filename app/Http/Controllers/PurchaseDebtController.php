@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\Purchase;
 use App\Models\PurchaseDebtPayment;
+use App\Models\PurchasedProduct;
 use App\Models\Product;
 use App\Models\UserShiksho;
 use App\Services\AccountingSalePoster;
+use App\Services\DailyTicketNumberService;
 use App\Tools\PhoneTools;
 use App\Tools\PriceTools;
 use App\Tools\ProductQuantityTools;
@@ -16,6 +18,178 @@ use Illuminate\Support\Facades\Schema;
 
 class PurchaseDebtController extends Controller
 {
+    /**
+     * ثبت بدهی دستی یک مشتری؛ در همین فهرست می‌ماند و قابل تسویه است.
+     */
+    public function store(Request $request)
+    {
+        $this->requireStaffShopUser($request);
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            return response()->json([
+                'message' => 'ثبت بدهی فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
+            ], 422);
+        }
+
+        if ($request->has('phone')) {
+            $request->merge([
+                'phone' => PhoneTools::normalizeIranPhone($request->input('phone')),
+            ]);
+        }
+
+        $fields = $request->validate([
+            'phone' => 'required|string|regex:/^09\d{9}$/',
+            'amount' => 'required|numeric|min:1',
+            'name' => 'nullable|string|max:120',
+            'note' => 'nullable|string|max:255',
+        ]);
+
+        $amount = PriceTools::roundToman((float) $fields['amount']);
+        if ($amount < 1) {
+            return response()->json(['message' => 'مبلغ بدهی باید حداقل ۱ تومان باشد.'], 422);
+        }
+
+        $phone = (string) $fields['phone'];
+        $note = trim((string) ($fields['note'] ?? ''));
+        $title = $note !== '' ? $note : 'بدهی دستی';
+        $name = trim((string) ($fields['name'] ?? ''));
+
+        $purchase = DB::transaction(function () use ($atelierId, $phone, $amount, $title, $name) {
+            $this->rememberCustomerName($atelierId, $phone, $name);
+
+            $purchase = Purchase::create([
+                'phone' => $phone,
+                'total_amount' => $amount,
+                'discount_amount' => 0,
+                'credit_used' => 0,
+                'credit_earned' => 0,
+                'payment_type' => 'debt',
+                'card_amount' => 0,
+                'cash_amount' => 0,
+                'is_debt_settled' => false,
+                'atelier_id' => $atelierId,
+            ]);
+            \App\Services\DailyTicketNumberService::assign($purchase);
+
+            PurchasedProduct::create([
+                'purchase_id' => $purchase->id,
+                'product_id' => null,
+                'item_name' => $title,
+                'quantity' => 1,
+                'purchase_price' => 0,
+                'sale_price' => $amount,
+            ]);
+
+            $purchase->load('purchasedProducts');
+            AccountingSalePoster::post($purchase);
+
+            return $purchase;
+        });
+
+        $names = $this->customerNamesByPhone($atelierId, [$phone]);
+
+        return response([
+            'message' => 'بدهی ثبت شد و از همین فهرست قابل تسویه است.',
+            'purchase' => $this->formatDebtPurchase($purchase->fresh(['purchasedProducts.product']), $names[$phone] ?? null),
+        ], 201);
+    }
+
+    /**
+     * بدهی دستی یک مشتری؛ در بدهکاران می‌آید و با همان تسویهٔ نسیه بسته می‌شود.
+     */
+    public function store(Request $request)
+    {
+        $this->requireStaffShopUser($request);
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            return response()->json([
+                'message' => 'ثبت بدهی فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
+            ], 422);
+        }
+
+        if ($request->has('phone')) {
+            $request->merge([
+                'phone' => PhoneTools::normalizeIranPhone($request->input('phone')),
+            ]);
+        }
+
+        $fields = $request->validate([
+            'phone' => 'required|string|regex:/^09\d{9}$/',
+            'amount' => 'required|numeric|min:1',
+            'name' => 'nullable|string|max:120',
+            'note' => 'nullable|string|max:255',
+        ]);
+
+        $amount = PriceTools::roundToman((float) $fields['amount']);
+        if ($amount < 1) {
+            return response()->json(['message' => 'مبلغ بدهی باید حداقل ۱ تومان باشد.'], 422);
+        }
+
+        $phone = (string) $fields['phone'];
+        $note = trim((string) ($fields['note'] ?? ''));
+        $title = $note !== '' ? $note : 'بدهی دستی';
+        $name = trim((string) ($fields['name'] ?? ''));
+
+        $purchase = DB::transaction(function () use ($atelierId, $phone, $amount, $title, $name) {
+            if ($name !== '' && Schema::hasTable('user_shiksho')) {
+                $create = [
+                    'credit' => 0,
+                    'installment_credit' => 0,
+                    'credit_last_updated_at' => now(),
+                ];
+                if (Schema::hasColumn('user_shiksho', 'name')) {
+                    $create['name'] = $name;
+                }
+                $customer = UserShiksho::firstOrCreate(
+                    ['phone' => $phone, 'atelier_id' => $atelierId],
+                    $create
+                );
+                if (! $customer->wasRecentlyCreated
+                    && Schema::hasColumn('user_shiksho', 'name')
+                    && trim((string) $customer->name) === ''
+                ) {
+                    $customer->name = $name;
+                    $customer->save();
+                }
+            }
+
+            $purchase = Purchase::create([
+                'phone' => $phone,
+                'total_amount' => $amount,
+                'discount_amount' => 0,
+                'credit_used' => 0,
+                'credit_earned' => 0,
+                'payment_type' => 'debt',
+                'card_amount' => 0,
+                'cash_amount' => 0,
+                'is_debt_settled' => false,
+                'atelier_id' => $atelierId,
+            ]);
+            DailyTicketNumberService::assign($purchase);
+
+            PurchasedProduct::create([
+                'purchase_id' => $purchase->id,
+                'product_id' => null,
+                'item_name' => $title,
+                'quantity' => 1,
+                'purchase_price' => 0,
+                'sale_price' => $amount,
+            ]);
+
+            $purchase->load('purchasedProducts');
+            AccountingSalePoster::post($purchase);
+
+            return $purchase;
+        });
+
+        $names = $this->customerNamesByPhone($atelierId, [$phone]);
+
+        return response([
+            'message' => 'بدهی ثبت شد و از همین صفحه قابل تسویه است.',
+            'purchase' => $this->formatDebtPurchase($purchase->fresh(['purchasedProducts.product']), $names[$phone] ?? ($name !== '' ? $name : null)),
+        ], 201);
+    }
+
     /**
      * گرید بدهکاران: شماره تلفن، نام، تعداد قرض، مبلغ کل بدهی.
      */
@@ -395,7 +569,7 @@ class PurchaseDebtController extends Controller
                 return [
                     'id' => $item->id,
                     'product_id' => $item->product_id,
-                    'product_name' => $product ? $product->name : null,
+                    'product_name' => $product ? $product->name : ($item->item_name ?: null),
                     'quantity' => (float) $item->quantity,
                     'unit_type' => $product?->unit_type ?? Product::UNIT_PIECE,
                     'unit_label' => ProductQuantityTools::unitLabel($product?->unit_type),
