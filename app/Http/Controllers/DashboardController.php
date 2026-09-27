@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Purchase;
+use App\Services\CustomerCreditExpenseService;
 use App\Services\ShopDashboardService;
 use App\Services\ShopSalesReportService;
 use Carbon\Carbon;
@@ -17,6 +18,7 @@ class DashboardController extends Controller
     public function summary(Request $request)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
+        CustomerCreditExpenseService::alignLoyaltyExpenses($atelierId);
 
         $date = null;
         if ($request->filled('date')) {
@@ -59,6 +61,7 @@ class DashboardController extends Controller
     public function dailySales(Request $request)
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
+        CustomerCreditExpenseService::alignLoyaltyExpenses($atelierId);
 
         $request->validate(['date' => 'sometimes|date']);
         $dateTehran = $request->filled('date')
