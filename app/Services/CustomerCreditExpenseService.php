@@ -2,9 +2,11 @@
 
 namespace App\Services;
 
+use App\Models\AccountingVoucher;
 use App\Models\Expense;
 use App\Models\Purchase;
 use App\Models\PurchaseItemReturn;
+use RuntimeException;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -319,8 +321,7 @@ class CustomerCreditExpenseService
             $used = (float) ($usedById[$purchaseId] ?? 0);
             $portion = self::loyaltyPortion($used, (float) ($map[$purchaseId] ?? 0));
             if ($portion < 0.01) {
-                AccountingDocumentPoster::reverseExpense($expense);
-                $expense->delete();
+                self::reverseAndDeleteIfOpen($expense);
 
                 continue;
             }
@@ -356,9 +357,35 @@ class CustomerCreditExpenseService
             ->get();
 
         foreach ($expenses as $expense) {
-            AccountingDocumentPoster::reverseExpense($expense);
-            $expense->delete();
+            self::reverseAndDeleteIfOpen($expense);
         }
+    }
+
+    /**
+     * سند دورهٔ بسته برگشت نمی‌خورد؛ ردیف هزینه هم می‌ماند تا لیست ۵۰۰ ندهد.
+     */
+    protected static function reverseAndDeleteIfOpen(Expense $expense): void
+    {
+        $voucher = AccountingVoucherService::findPosted(
+            (int) $expense->atelier_id,
+            AccountingVoucher::SOURCE_EXPENSE,
+            (int) $expense->id
+        );
+        if ($voucher) {
+            try {
+                AccountingPeriodCloseService::assertReversible($voucher);
+            } catch (RuntimeException $e) {
+                return;
+            }
+        }
+
+        try {
+            AccountingDocumentPoster::reverseExpense($expense);
+        } catch (RuntimeException $e) {
+            return;
+        }
+
+        $expense->delete();
     }
 
     /**
