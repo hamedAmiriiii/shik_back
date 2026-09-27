@@ -207,7 +207,8 @@ class CustomerCreditExpenseService
         string $title,
         string $source,
         int $sourceId,
-        ?string $userName
+        ?string $userName,
+        ?string $date = null
     ): Expense {
         $existing = self::find($atelierId, $source, $sourceId);
         if ($existing) {
@@ -216,15 +217,20 @@ class CustomerCreditExpenseService
             if ($userName) {
                 $existing->user_name = $userName;
             }
+            if ($date) {
+                $existing->date = $date;
+            }
             $existing->save();
-            AccountingDocumentPoster::syncExpense($existing);
+            if ($source !== self::SOURCE_LOYALTY && $source !== self::SOURCE_RETURN) {
+                AccountingDocumentPoster::syncExpense($existing);
+            }
 
             return $existing;
         }
 
         $payload = [
             'atelier_id' => $atelierId,
-            'date' => Carbon::now()->format('Y-m-d'),
+            'date' => $date ?: Carbon::now()->format('Y-m-d'),
             'amount' => $amount,
             'title' => $title,
             'type' => $source === self::SOURCE_RETURN ? self::returnExpenseType() : 'جاری',
@@ -240,7 +246,9 @@ class CustomerCreditExpenseService
         }
 
         $expense = Expense::create($payload);
-        AccountingDocumentPoster::postExpense($expense);
+        if ($source !== self::SOURCE_LOYALTY && $source !== self::SOURCE_RETURN) {
+            AccountingDocumentPoster::postExpense($expense);
+        }
 
         return $expense;
     }
@@ -302,33 +310,47 @@ class CustomerCreditExpenseService
         self::forgetFundedCache($atelierId);
         self::dropManualGrantExpenses($atelierId);
         $map = self::fundedMap($atelierId);
-        $expenses = Expense::query()
+
+        $purchases = DB::table('purchases')
             ->where('atelier_id', $atelierId)
-            ->where('credit_source', self::SOURCE_LOYALTY)
-            ->get();
+            ->where('credit_used', '>=', 0.01)
+            ->get(['id', 'phone', 'credit_used', 'created_at']);
 
-        $usedById = [];
-        $ids = $expenses->pluck('credit_source_id')->filter()->map(fn ($id) => (int) $id)->all();
-        if ($ids !== []) {
-            $usedById = DB::table('purchases')
-                ->whereIn('id', $ids)
-                ->pluck('credit_used', 'id')
-                ->all();
-        }
-
-        foreach ($expenses as $expense) {
-            $purchaseId = (int) $expense->credit_source_id;
-            $used = (float) ($usedById[$purchaseId] ?? 0);
-            $portion = self::loyaltyPortion($used, (float) ($map[$purchaseId] ?? 0));
+        $activeIds = [];
+        foreach ($purchases as $row) {
+            $purchaseId = (int) $row->id;
+            $portion = self::loyaltyPortion((float) $row->credit_used, (float) ($map[$purchaseId] ?? 0));
             if ($portion < 0.01) {
-                self::reverseAndDeleteIfOpen($expense);
-
                 continue;
             }
-            if (abs((float) $expense->amount - $portion) >= 0.01) {
-                $expense->amount = $portion;
-                $expense->save();
+            $activeIds[] = $purchaseId;
+            $phone = trim((string) ($row->phone ?? ''));
+            if ($phone === '') {
+                $phone = 'بدون شماره';
             }
+            $date = null;
+            if (! empty($row->created_at)) {
+                $date = Carbon::parse($row->created_at)->timezone('Asia/Tehran')->toDateString();
+            }
+            self::upsert(
+                $atelierId,
+                $portion,
+                self::titleLoyaltyUsed($purchaseId, $phone),
+                self::SOURCE_LOYALTY,
+                $purchaseId,
+                null,
+                $date
+            );
+        }
+
+        $stale = Expense::query()
+            ->where('atelier_id', $atelierId)
+            ->where('credit_source', self::SOURCE_LOYALTY);
+        if ($activeIds !== []) {
+            $stale->whereNotIn('credit_source_id', $activeIds);
+        }
+        foreach ($stale->get() as $expense) {
+            self::reverseAndDeleteIfOpen($expense);
         }
 
         if (self::returnExpenseType() !== self::TYPE_RETURN) {
