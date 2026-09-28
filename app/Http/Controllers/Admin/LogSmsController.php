@@ -3,69 +3,74 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Customer;
 use App\Models\LogSms;
+use App\Models\User;
 use Illuminate\Http\Request;
 
 class LogSmsController extends Controller
 {
     /**
-     * Display a listing of the resource.
-     *
-     * @return \Illuminate\Http\Response
+     * لیست پیامک‌های سیستمی (کدهای دوعاملی و ...) — فقط ادمین سامانه.
      */
     public function index(Request $request)
     {
-        $user = auth()->user();
-        
-        $query = LogSms::query();
+        $this->requirePlatformAdmin($request);
 
-        // فیلتر شهر برای همه کاربران (حتی ادمین‌ها) اعمال می‌شود
-        if ($user->city_id) {
-            $query->whereHas('creator', function($q) use ($user) {
-                $q->where('city_id', $user->city_id);
-            });
+        $query = LogSms::query()->with('creator:id,name');
+
+        $searchDataModel = json_decode((string) $request->input('searchFilterModel'));
+        $terms = [];
+        if (is_object($searchDataModel)) {
+            foreach (['receivers', 'text', 'number', 'creator_name', 'search'] as $key) {
+                if (isset($searchDataModel->{$key}) && trim((string) $searchDataModel->{$key}) !== '') {
+                    $terms[$key] = trim((string) $searchDataModel->{$key});
+                }
+            }
+        } elseif (is_string($searchDataModel) && trim($searchDataModel) !== '') {
+            $terms['search'] = trim($searchDataModel);
+        }
+        if ($request->filled('search')) {
+            $terms['search'] = trim((string) $request->input('search'));
         }
 
-        // جستجو بر اساس searchFilterModel
-        $searchDataModel = json_decode($request->input('searchFilterModel'));
-        if ($searchDataModel) {
-            $query->where(function($q) use ($searchDataModel) {
-                if (is_object($searchDataModel)) {
-                    // جستجو بر اساس شماره تلفن
-                    if (isset($searchDataModel->number)) {
-                        $q->where('number', 'like', '%' . $searchDataModel->number . '%');
+        if (! empty($terms)) {
+            $query->where(function ($q) use ($terms) {
+                foreach ($terms as $key => $term) {
+                    $like = '%'.$term.'%';
+                    if ($key === 'creator_name') {
+                        $q->orWhereHas('creator', fn ($uq) => $uq->where('name', 'like', $like));
+                    } elseif ($key === 'search') {
+                        $q->orWhere('receivers', 'like', $like)
+                            ->orWhere('text', 'like', $like)
+                            ->orWhere('number', 'like', $like);
+                    } else {
+                        $q->orWhere($key, 'like', $like);
                     }
-                    // جستجو بر اساس متن پیام
-                    if (isset($searchDataModel->text)) {
-                        $q->orWhere('text', 'like', '%' . $searchDataModel->text . '%');
-                    }
-                    // جستجو بر اساس گیرندگان
-                    if (isset($searchDataModel->receivers)) {
-                        $q->orWhere('receivers', 'like', '%' . $searchDataModel->receivers . '%');
-                    }
-                    // جستجو بر اساس نام کاربر
-                    if (isset($searchDataModel->creator_name)) {
-                        $q->orWhereHas('creator', function($userQuery) use ($searchDataModel) {
-                            $userQuery->where('name', 'like', '%' . $searchDataModel->creator_name . '%');
-                        });
-                    }
-                } else if (is_string($searchDataModel)) {
-                    // اگر یک رشته ساده بود، در شماره تلفن، متن پیام، گیرندگان و نام کاربر جستجو می‌کند
-                    $q->where('number', 'like', '%' . $searchDataModel . '%')
-                      ->orWhere('text', 'like', '%' . $searchDataModel . '%')
-                      ->orWhere('receivers', 'like', '%' . $searchDataModel . '%')
-                      ->orWhereHas('creator', function($userQuery) use ($searchDataModel) {
-                          $userQuery->where('name', 'like', '%' . $searchDataModel . '%');
-                      });
                 }
             });
         }
 
-        $logSms = $query->with('creator')
-                       ->orderBy('id', 'desc')
-                       ->paginate();
-                       
-        return response($logSms);
+        $perPage = (int) $request->input('per_page', 20);
+        $perPage = $perPage > 0 ? min($perPage, 100) : 20;
+
+        return response($query->orderByDesc('id')->paginate($perPage));
+    }
+
+    protected function requirePlatformAdmin(Request $request): User
+    {
+        $actor = $this->shopRequestActor($request);
+        if ($actor instanceof Customer) {
+            abort(response()->json(['message' => 'این عملیات فقط برای ادمین است.'], 403));
+        }
+        if (! $actor instanceof User) {
+            abort(response()->json(['message' => 'لطفاً وارد شوید.'], 401));
+        }
+        if (! $actor->roles()->where('id', User::USER_TYPE_KEY['ادمین'])->exists()) {
+            abort(response()->json(['message' => 'فقط ادمین سامانه می‌تواند کدهای دوعاملی را ببیند.'], 403));
+        }
+
+        return $actor;
     }
 
     /**
