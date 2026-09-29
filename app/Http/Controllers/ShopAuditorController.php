@@ -5,14 +5,13 @@ namespace App\Http\Controllers;
 use App\Models\ShopAuditor;
 use App\Models\User;
 use App\Services\ShopAuditorAccess;
-use App\Services\ShopPermissionCatalog;
 use App\Services\ShopStaffAccess;
 use App\Tools\PhoneTools;
 use Illuminate\Http\Request;
 use RuntimeException;
 
 /**
- * مدیریت حسابرس‌های فروشگاه — فقط صاحب فروشگاه.
+ * مدیریت حسابرس‌های فروشگاه — فقط صاحب اصلی فروشگاه (نه خود حسابرس).
  */
 class ShopAuditorController extends Controller
 {
@@ -28,11 +27,7 @@ class ShopAuditorController extends Controller
             ->map(fn (ShopAuditor $link) => $this->present($link))
             ->values();
 
-        return response([
-            'data' => $items,
-            'permissions' => ShopPermissionCatalog::options(),
-            'excluded_permissions' => ShopAuditorAccess::EXCLUDED_PERMISSION_KEYS,
-        ], 200);
+        return response(['data' => $items], 200);
     }
 
     public function store(Request $request)
@@ -44,8 +39,6 @@ class ShopAuditorController extends Controller
             'name' => 'required|string|max:255',
             'phone' => 'required|string|regex:/^09\d{9}$/',
             'password' => 'nullable|string|min:6|max:255',
-            'permissions' => 'sometimes|nullable|array',
-            'permissions.*' => 'string|in:'.implode(',', ShopPermissionCatalog::keys()),
             'note' => 'nullable|string|max:2000',
         ], $this->ruleMessages());
 
@@ -55,7 +48,6 @@ class ShopAuditorController extends Controller
                 $fields['phone'],
                 $fields['name'],
                 $fields['password'] ?? null,
-                $request->exists('permissions') ? ($fields['permissions'] ?? []) : null,
                 $fields['note'] ?? null
             );
         } catch (RuntimeException $e) {
@@ -75,16 +67,8 @@ class ShopAuditorController extends Controller
         $fields = $request->validate([
             'name' => 'sometimes|required|string|max:255',
             'is_active' => 'sometimes|boolean',
-            'permissions' => 'sometimes|nullable|array',
-            'permissions.*' => 'string|in:'.implode(',', ShopPermissionCatalog::keys()),
             'note' => 'sometimes|nullable|string|max:2000',
         ], $this->ruleMessages());
-
-        if (array_key_exists('permissions', $fields)) {
-            $fields['permissions'] = $fields['permissions'] === null
-                ? null
-                : ShopPermissionCatalog::sanitize($fields['permissions']);
-        }
 
         $shopAuditor->update($fields);
 
@@ -111,7 +95,7 @@ class ShopAuditorController extends Controller
     private function ownerAtelierIdOrAbort(Request $request): int
     {
         $actor = $this->requireStaffShopUser($request);
-        if (! ShopStaffAccess::isOwner($actor)) {
+        if (ShopStaffAccess::isAuditor($actor) || ! ShopStaffAccess::isOwner($actor)) {
             abort(response()->json([
                 'message' => 'فقط صاحب فروشگاه می‌تواند حسابرس اضافه یا حذف کند.',
             ], 403));
@@ -134,7 +118,7 @@ class ShopAuditorController extends Controller
 
     private function normalizePhone(Request $request): void
     {
-        $this->mergeRequestPayload($request, ['name', 'phone', 'username', 'password', 'permissions', 'note']);
+        $this->mergeRequestPayload($request, ['name', 'phone', 'username', 'password', 'note']);
         if (! $request->filled('phone') && $request->filled('username')) {
             $request->merge(['phone' => $request->input('username')]);
         }
@@ -155,8 +139,6 @@ class ShopAuditorController extends Controller
             'name' => $link->name,
             'phone' => $user instanceof User ? $user->phone : null,
             'is_active' => (bool) $link->is_active,
-            'permissions' => $link->permissions,
-            'permission_keys' => ShopAuditorAccess::permissionKeys($link),
             'note' => $link->note,
             'created_at' => $link->created_at,
         ];
@@ -170,8 +152,6 @@ class ShopAuditorController extends Controller
         return [
             'phone.regex' => 'شماره موبایل حسابرس باید ۱۱ رقمی و با ۰۹ شروع شود.',
             'password.min' => 'رمز ورود حسابرس باید حداقل ۶ کاراکتر باشد.',
-            'permissions.array' => 'لیست دسترسی باید آرایه باشد.',
-            'permissions.*.in' => 'یکی از دسترسی‌های انتخاب‌شده معتبر نیست.',
         ];
     }
 }

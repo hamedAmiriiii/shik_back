@@ -1,5 +1,5 @@
 -- Shop auditors — same as migration 2026_09_29_100000_create_shop_auditors_table.
--- One auditor user (users.shop_staff_role = 'auditor') can be linked to many shops, read-only.
+-- One auditor user (users.shop_staff_role = 'auditor') can be linked to many shops, with full owner access in the selected shop.
 -- users.atelier_id of an auditor = the shop currently selected by that auditor.
 
 CREATE TABLE IF NOT EXISTS `shop_auditors` (
@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS `shop_auditors` (
   `user_id` BIGINT UNSIGNED NOT NULL,
   `name` VARCHAR(255) NULL,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
-  `permissions` JSON NULL,
   `note` VARCHAR(2000) NULL,
   `created_at` TIMESTAMP NULL,
   `updated_at` TIMESTAMP NULL,

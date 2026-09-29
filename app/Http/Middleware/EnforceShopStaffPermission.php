@@ -11,7 +11,7 @@ use Illuminate\Http\Request;
 
 /**
  * کارمند فروشگاه فقط APIهایی را می‌زند که در لیست دسترسی‌اش باشد.
- * حسابرس فقط مشاهده می‌کند و فقط در فروشگاهی که انتخاب کرده.
+ * حسابرس در فروشگاهی که انتخاب کرده دسترسی کامل دارد، ولی بدون انتخاب فروشگاه به دیتایی نمی‌رسد.
  * صاحب فروشگاه و ادمین سامانه محدود نمی‌شوند.
  * نقش‌های عروسی/ادمین به این دسترسی‌ها ربطی ندارند.
  */
@@ -62,34 +62,14 @@ class EnforceShopStaffPermission
             return $next($request);
         }
 
-        $link = ShopAuditorAccess::activeLink($user);
-        if (! $link) {
-            $message = 'ابتدا فروشگاهی را که می‌خواهید بررسی کنید انتخاب کنید.';
+        if (! ShopAuditorAccess::activeLink($user)) {
+            $message = 'ابتدا فروشگاهی را که می‌خواهید وارد آن شوید انتخاب کنید.';
 
             return response()->json([
                 'message' => $message,
                 'error' => $message,
                 'requires_shop_selection' => true,
             ], 403);
-        }
-
-        $readMethod = in_array(strtoupper($request->method()), ['GET', 'HEAD', 'OPTIONS'], true);
-        if (! $readMethod && ! ShopPermissionCatalog::pathStartsWith($path, ShopAuditorAccess::READ_ONLY_POST_PREFIXES)) {
-            $message = 'حساب حسابرس فقط اجازهٔ مشاهده دارد و نمی‌تواند چیزی ثبت، ویرایش یا حذف کند.';
-
-            return response()->json([
-                'message' => $message,
-                'error' => $message,
-                'read_only' => true,
-            ], 403);
-        }
-
-        $permission = ShopPermissionCatalog::permissionForPath($path);
-        if ($permission !== null && ! in_array($permission, ShopAuditorAccess::permissionKeys($link), true)) {
-            return response()->json(
-                ShopPermissionCatalog::deniedPayload($permission, $request->method()),
-                403
-            );
         }
 
         return $next($request);

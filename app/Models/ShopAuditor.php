@@ -6,8 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * اتصال یک حساب حسابرس به یک فروشگاه (فقط مشاهده).
- * permissions = null یعنی همهٔ بخش‌ها.
+ * اتصال یک حساب حسابرس به یک فروشگاه (دسترسی کامل در همان فروشگاه).
  */
 class ShopAuditor extends Model
 {
@@ -16,13 +15,11 @@ class ShopAuditor extends Model
         'user_id',
         'name',
         'is_active',
-        'permissions',
         'note',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
-        'permissions' => 'array',
     ];
 
     public function atelier(): BelongsTo

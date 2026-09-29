@@ -18,7 +18,6 @@ class CreateShopAuditorsTable extends Migration
             $table->unsignedBigInteger('user_id');
             $table->string('name')->nullable();
             $table->boolean('is_active')->default(true);
-            $table->json('permissions')->nullable();
             $table->string('note', 2000)->nullable();
             $table->timestamps();
 

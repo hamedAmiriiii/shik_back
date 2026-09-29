@@ -33,8 +33,11 @@ class ShopStaffAccess
         if (! $user) {
             return false;
         }
-        if (in_array($user->shop_staff_role ?? null, [self::ROLE_STAFF, self::ROLE_AUDITOR], true)) {
+        if (($user->shop_staff_role ?? null) === self::ROLE_STAFF) {
             return false;
+        }
+        if (self::isAuditor($user)) {
+            return ShopAuditorAccess::activeLink($user) !== null;
         }
         if (self::isPlatformAdmin($user)) {
             return true;
@@ -76,7 +79,7 @@ class ShopStaffAccess
             return ShopPermissionCatalog::keys();
         }
         if (self::isAuditor($user)) {
-            return ShopAuditorAccess::permissionKeys(ShopAuditorAccess::activeLink($user));
+            return [];
         }
 
         $employee = self::employeeFor($user);
@@ -144,11 +147,10 @@ class ShopStaffAccess
             'shop_employee_id' => $employee ? (int) $employee->id : null,
             'shop_features' => ShopFeatureFlags::forAtelier($user->atelier_id ? (int) $user->atelier_id : null),
             'shop_is_auditor' => $auditor,
-            'shop_read_only' => $auditor,
         ];
         if ($auditor) {
             $fields['auditor_shops'] = ShopAuditorAccess::shopsFor($user);
-            $fields['requires_shop_selection'] = ShopAuditorAccess::activeLink($user) === null;
+            $fields['requires_shop_selection'] = ! $owner;
         }
 
         return $fields;

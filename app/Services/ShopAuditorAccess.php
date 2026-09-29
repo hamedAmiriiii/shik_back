@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
 /**
- * حسابرس: یک حساب که به چند فروشگاه وصل است و فقط می‌تواند ببیند.
+ * حسابرس: یک حساب که به چند فروشگاه وصل است و در فروشگاه انتخاب‌شده دسترسی کامل صاحب فروشگاه را دارد.
  * فروشگاه فعال حسابرس همان users.atelier_id است و با انتخاب فروشگاه عوض می‌شود.
  */
 class ShopAuditorAccess
@@ -29,23 +29,6 @@ class ShopAuditorAccess
         'reset-password',
         'atelier/profile/reset-password',
     ];
-
-    /**
-     * درخواست‌های POST که فقط محاسبه/پیش‌نمایش‌اند و چیزی ثبت نمی‌کنند.
-     *
-     * @var array<int, string>
-     */
-    public const READ_ONLY_POST_PREFIXES = [
-        'purchased-products/calculate-installments',
-        'shop-sms-quota/estimate',
-    ];
-
-    /**
-     * بخش‌هایی که حسابرس هرگز نمی‌گیرد (خروجی کامل دیتابیس فروشگاه).
-     *
-     * @var array<int, string>
-     */
-    public const EXCLUDED_PERMISSION_KEYS = ['backup'];
 
     public static function tableReady(): bool
     {
@@ -102,21 +85,6 @@ class ShopAuditorAccess
     }
 
     /**
-     * @return array<int, string>
-     */
-    public static function permissionKeys(?ShopAuditor $link): array
-    {
-        if (! $link) {
-            return [];
-        }
-        $keys = is_array($link->permissions)
-            ? ShopPermissionCatalog::sanitize($link->permissions)
-            : ShopPermissionCatalog::keys();
-
-        return array_values(array_diff($keys, self::EXCLUDED_PERMISSION_KEYS));
-    }
-
-    /**
      * فروشگاه فعال حسابرس را عوض می‌کند؛ اگر اتصال فعالی نباشد null.
      */
     public static function select(User $user, int $atelierId): ?ShopAuditor
@@ -167,8 +135,6 @@ class ShopAuditorAccess
      * صاحب فروشگاه حسابرس را با شمارهٔ موبایل اضافه می‌کند.
      * اگر حساب حسابرس از قبل باشد (مثلاً فروشگاه دیگری اضافه‌اش کرده) فقط وصل می‌شود و رمزش دست نمی‌خورد.
      *
-     * @param  array<int, string>|null  $permissions
-     *
      * @throws RuntimeException
      */
     public static function link(
@@ -176,7 +142,6 @@ class ShopAuditorAccess
         string $phone,
         string $name,
         ?string $password,
-        ?array $permissions,
         ?string $note
     ): ShopAuditor {
         if (! self::tableReady()) {
@@ -221,7 +186,6 @@ class ShopAuditorAccess
             'user_id' => $user->id,
             'name' => $name,
             'is_active' => true,
-            'permissions' => $permissions === null ? null : ShopPermissionCatalog::sanitize($permissions),
             'note' => $note,
         ]);
     }
