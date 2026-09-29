@@ -323,6 +323,14 @@ class AuthController extends Controller
             ], 403);
         }
 
+        $isAuditor = \App\Services\ShopStaffAccess::isAuditor($user);
+        if ($isAuditor) {
+            $auditorError = \App\Services\ShopAuditorAccess::prepareLogin($user);
+            if ($auditorError !== null) {
+                return response(['message' => $auditorError, 'error' => $auditorError], 403);
+            }
+        }
+
         // وضعیت اعتبار فروشگاه در پاسخ (برای نمایش در فرانت) — ورود مسدود نمی‌شود
         $loginError = \App\Services\ShopStaffAccess::assertStaffMayLogin($user);
         if ($loginError !== null) {
@@ -352,6 +360,10 @@ class AuthController extends Controller
         ], $shopFields);
         if ($shopAccess !== null) {
             $payload['shop_access'] = $shopAccess;
+        }
+        if ($isAuditor && count($shopFields['auditor_shops'] ?? []) > 1) {
+            $payload['requires_shop_selection'] = true;
+            $payload['user']['requires_shop_selection'] = true;
         }
 
         return response($payload, 201);

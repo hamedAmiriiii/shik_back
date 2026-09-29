@@ -32,6 +32,9 @@ class ShopEmployeeAccountService
         }
 
         if ($user) {
+            if (ShopStaffAccess::isAuditor($user)) {
+                throw new RuntimeException('این شماره موبایل حساب حسابرس است و نمی‌تواند کارمند فروشگاه شود.');
+            }
             if ((int) $user->atelier_id !== $atelierId && $user->atelier_id) {
                 throw new RuntimeException('این شماره موبایل قبلاً برای فروشگاه دیگری ثبت شده است.');
             }
@@ -49,7 +52,13 @@ class ShopEmployeeAccountService
             if (! $password) {
                 throw new RuntimeException('برای اولین ورود کارمند باید رمز عبور تعیین شود.');
             }
-            $user = self::createStaffUser($employee, $atelierId, $password);
+            $user = self::createShopLoginUser(
+                (string) $employee->name,
+                $phone,
+                $password,
+                ShopStaffAccess::ROLE_STAFF,
+                $atelierId
+            );
             $password = null;
         }
 
@@ -108,17 +117,20 @@ class ShopEmployeeAccountService
         }
     }
 
-    private static function createStaffUser(ShopEmployee $employee, int $atelierId, string $password): User
+    /**
+     * یوزر ورود پرسنل (کارمند یا حسابرس) با تصاویر خالی و کد ملی ساختگی.
+     */
+    public static function createShopLoginUser(string $name, string $phone, string $password, string $role, ?int $atelierId): User
     {
-        $nationalCode = self::uniqueNationalCode($employee->phone);
+        $nationalCode = self::uniqueNationalCode($phone);
         $attrs = [
-            'name' => $employee->name,
+            'name' => $name,
             'last_name' => '—',
-            'phone' => $employee->phone,
+            'phone' => $phone,
             'national_code' => $nationalCode,
             'password' => Hash::make($password),
             'atelier_id' => $atelierId,
-            'shop_staff_role' => ShopStaffAccess::ROLE_STAFF,
+            'shop_staff_role' => $role,
             'national_cart' => '-',
         ];
         if (Schema::hasColumn('users', 'gender')) {

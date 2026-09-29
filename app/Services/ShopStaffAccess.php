@@ -12,6 +12,13 @@ class ShopStaffAccess
 
     public const ROLE_STAFF = 'staff';
 
+    public const ROLE_AUDITOR = 'auditor';
+
+    public static function isAuditor(?User $user): bool
+    {
+        return $user !== null && ($user->shop_staff_role ?? null) === self::ROLE_AUDITOR;
+    }
+
     public static function isPlatformAdmin(?User $user): bool
     {
         if (! $user) {
@@ -26,7 +33,7 @@ class ShopStaffAccess
         if (! $user) {
             return false;
         }
-        if (($user->shop_staff_role ?? null) === self::ROLE_STAFF) {
+        if (in_array($user->shop_staff_role ?? null, [self::ROLE_STAFF, self::ROLE_AUDITOR], true)) {
             return false;
         }
         if (self::isPlatformAdmin($user)) {
@@ -49,7 +56,7 @@ class ShopStaffAccess
 
     public static function isShopStaff(?User $user): bool
     {
-        if (! $user || ! $user->atelier_id) {
+        if (! $user || ! $user->atelier_id || self::isAuditor($user)) {
             return false;
         }
 
@@ -67,6 +74,9 @@ class ShopStaffAccess
         }
         if (self::isOwner($user)) {
             return ShopPermissionCatalog::keys();
+        }
+        if (self::isAuditor($user)) {
+            return ShopAuditorAccess::permissionKeys(ShopAuditorAccess::activeLink($user));
         }
 
         $employee = self::employeeFor($user);
@@ -125,13 +135,43 @@ class ShopStaffAccess
     {
         $keys = self::permissionKeysFor($user);
         $owner = self::isOwner($user);
-        $employee = self::employeeFor($user);
+        $auditor = self::isAuditor($user);
+        $employee = $auditor ? null : self::employeeFor($user);
 
-        return [
+        $fields = [
             'shop_is_owner' => $owner,
             'shop_permissions' => $keys,
             'shop_employee_id' => $employee ? (int) $employee->id : null,
             'shop_features' => ShopFeatureFlags::forAtelier($user->atelier_id ? (int) $user->atelier_id : null),
+            'shop_is_auditor' => $auditor,
+            'shop_read_only' => $auditor,
         ];
+        if ($auditor) {
+            $fields['auditor_shops'] = ShopAuditorAccess::shopsFor($user);
+            $fields['requires_shop_selection'] = ShopAuditorAccess::activeLink($user) === null;
+        }
+
+        return $fields;
+    }
+
+    /**
+     * پاسخ کامل نشست (مثل پاسخ لاگین، بدون توکن).
+     *
+     * @return array<string, mixed>
+     */
+    public static function sessionPayload(User $user): array
+    {
+        $user->load(['roles', 'atelier']);
+        $shopFields = self::sessionFields($user);
+        $userArr = $user->toArray();
+        if (isset($userArr['atelier']) && is_array($userArr['atelier'])) {
+            $userArr['atelier']['shop_features'] = $shopFields['shop_features'];
+        }
+        $payload = array_merge(['user' => array_merge($userArr, $shopFields)], $shopFields);
+        if ($user->atelier) {
+            $payload['shop_access'] = $user->atelier->accessStatusForApi();
+        }
+
+        return $payload;
     }
 }

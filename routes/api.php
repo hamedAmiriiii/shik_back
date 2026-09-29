@@ -276,6 +276,15 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('shop-access', [\App\Http\Controllers\ShopAccessController::class, 'show']);
     Route::get('shop-permissions', [\App\Http\Controllers\ShopEmployeeController::class, 'permissionOptions']);
 
+    // حسابرس: صاحب فروشگاه مدیریت می‌کند، حسابرس بین فروشگاه‌هایش جابه‌جا می‌شود
+    Route::get('shop-auditors', [\App\Http\Controllers\ShopAuditorController::class, 'index']);
+    Route::post('shop-auditors', [\App\Http\Controllers\ShopAuditorController::class, 'store']);
+    Route::put('shop-auditors/{shopAuditor}', [\App\Http\Controllers\ShopAuditorController::class, 'update']);
+    Route::delete('shop-auditors/{shopAuditor}', [\App\Http\Controllers\ShopAuditorController::class, 'destroy']);
+    Route::get('auditor/shops', [\App\Http\Controllers\AuditorShopController::class, 'index']);
+    Route::post('auditor/shops/{atelier}/select', [\App\Http\Controllers\AuditorShopController::class, 'select'])
+        ->where('atelier', '[0-9]+');
+
     Route::prefix('formal-invoice')->group(function () {
         Route::get('seller', [\App\Http\Controllers\FormalInvoiceController::class, 'sellerShow']);
         Route::put('seller', [\App\Http\Controllers\FormalInvoiceController::class, 'sellerUpdate']);
