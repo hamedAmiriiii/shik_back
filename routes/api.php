@@ -341,6 +341,26 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('accounting/profit-loss', [\App\Http\Controllers\AccountingReportController::class, 'profitLoss']);
     Route::get('accounting/balance-sheet', [\App\Http\Controllers\AccountingReportController::class, 'balanceSheet']);
 
+    // سامانه مؤدیان (زیر حسابداری)
+    Route::prefix('accounting/moadian')->group(function () {
+        Route::get('summary', [\App\Http\Controllers\MoadianController::class, 'summary']);
+        Route::get('settings', [\App\Http\Controllers\MoadianController::class, 'showSettings']);
+        Route::put('settings', [\App\Http\Controllers\MoadianController::class, 'updateSettings']);
+        Route::post('generate-key', [\App\Http\Controllers\MoadianController::class, 'generateKey']);
+        Route::post('test-connection', [\App\Http\Controllers\MoadianController::class, 'testConnection']);
+        Route::post('run', [\App\Http\Controllers\MoadianController::class, 'runNow']);
+        Route::get('documents', [\App\Http\Controllers\MoadianController::class, 'documents']);
+        Route::post('documents/retry-failed', [\App\Http\Controllers\MoadianController::class, 'retryFailed']);
+        Route::get('documents/{id}', [\App\Http\Controllers\MoadianController::class, 'showDocument'])->where('id', '[0-9]+');
+        Route::post('documents/{id}/retry', [\App\Http\Controllers\MoadianController::class, 'retryDocument'])->where('id', '[0-9]+');
+        Route::get('stuff-ids', [\App\Http\Controllers\MoadianController::class, 'stuffIds']);
+        Route::post('stuff-ids', [\App\Http\Controllers\MoadianController::class, 'storeStuffId']);
+        Route::put('stuff-ids/{id}', [\App\Http\Controllers\MoadianController::class, 'updateStuffId'])->where('id', '[0-9]+');
+        Route::delete('stuff-ids/{id}', [\App\Http\Controllers\MoadianController::class, 'destroyStuffId'])->where('id', '[0-9]+');
+        Route::get('products', [\App\Http\Controllers\MoadianController::class, 'products']);
+        Route::post('products/assign', [\App\Http\Controllers\MoadianController::class, 'assignProducts']);
+    });
+
     // شارژ تنخواه از حساب‌های اصلی فروشگاه
     Route::get('shop-account-transfers', [\App\Http\Controllers\ShopAccountTransferController::class, 'index']);
     Route::post('shop-account-transfers', [\App\Http\Controllers\ShopAccountTransferController::class, 'store']);

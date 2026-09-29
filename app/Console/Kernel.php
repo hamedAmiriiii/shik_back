@@ -85,6 +85,16 @@ class Kernel extends ConsoleKernel
             ->after(function () {
                 \Log::info('Scheduled task: smart-customer:nightly - اجرا شد');
             });
+
+        // سامانه مؤدیان: فقط فروشگاه‌هایی که در تنظیمات فعال کرده‌اند
+        $schedule->command('moadian:run')
+            ->everyMinute()
+            ->withoutOverlapping(15)
+            ->runInBackground();
+
+        $schedule->command('moadian:prune-logs')
+            ->dailyAt('03:30')
+            ->withoutOverlapping();
     }
 
     /**

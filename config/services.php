@@ -30,4 +30,12 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'moadian' => [
+        'production_url' => env('MOADIAN_PRODUCTION_URL', 'https://tp.tax.gov.ir/requestsmanager/api/v2'),
+        'sandbox_url' => env('MOADIAN_SANDBOX_URL', 'https://sandboxrc.tax.gov.ir/requestsmanager/api/v2'),
+        'timeout' => (int) env('MOADIAN_TIMEOUT', 30),
+        'batch_size' => (int) env('MOADIAN_BATCH_SIZE', 20),
+        'log_retention_days' => (int) env('MOADIAN_LOG_RETENTION_DAYS', 90),
+    ],
+
 ];

@@ -23,7 +23,9 @@ class ExpenseController extends Controller
     {
         $atelierId = $this->shopAtelierIdOrAbort($request);
         CustomerCreditExpenseService::alignLoyaltyExpenses($atelierId);
-        $query = Expense::where('atelier_id', $atelierId)->orderBy('id', 'desc');
+        $query = Expense::where('atelier_id', $atelierId)
+            ->orderBy('date', 'desc')
+            ->orderBy('id', 'desc');
 
         if ($this->supportsPaymentAccount('expenses')) {
             $query->with(['shopAccount', 'cheque']);
