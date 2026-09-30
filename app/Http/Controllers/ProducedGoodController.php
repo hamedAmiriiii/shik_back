@@ -83,7 +83,7 @@ class ProducedGoodController extends Controller
 
         $fields = $this->validatedGood($request, $atelierId);
         $this->assertIngredientsBelongToShop($fields['ingredients'] ?? [], $atelierId);
-        $pricing = $this->pricingFromFields($fields);
+        $pricing = $this->pricingFromFields($fields, null, $atelierId);
 
         $good = DB::transaction(function () use ($atelierId, $fields, $pricing) {
             $good = ProducedGood::create([
@@ -148,7 +148,7 @@ class ProducedGoodController extends Controller
                 $payload['round_sale_price'] = $this->boolField($fields, 'round_sale_price', false);
             }
             if (array_key_exists('markup_percent', $fields) || array_key_exists('sale_price', $fields)) {
-                $pricing = $this->pricingFromFields($fields, $producedGood);
+                $pricing = $this->pricingFromFields($fields, $producedGood, (int) $producedGood->atelier_id);
                 $payload['sale_price'] = $pricing['sale_price'];
                 $payload['markup_percent'] = $pricing['markup_percent'];
             }
@@ -341,7 +341,7 @@ class ProducedGoodController extends Controller
      *
      * @return array{sale_price: float, markup_percent: float|null}
      */
-    private function pricingFromFields(array $fields, ?ProducedGood $existing = null): array
+    private function pricingFromFields(array $fields, ?ProducedGood $existing = null, ?int $atelierId = null): array
     {
         $hasMarkup = array_key_exists('markup_percent', $fields);
         $hasSale = array_key_exists('sale_price', $fields);
@@ -358,7 +358,7 @@ class ProducedGoodController extends Controller
 
             return [
                 'markup_percent' => round((float) $fields['markup_percent'], 2),
-                'sale_price' => $round ? PriceTools::roundSalePrice($sale) : $sale,
+                'sale_price' => $round ? PriceTools::roundSalePrice($sale, $atelierId) : $sale,
             ];
         }
 
@@ -367,13 +367,13 @@ class ProducedGoodController extends Controller
 
             return [
                 'markup_percent' => null,
-                'sale_price' => $round ? PriceTools::roundSalePrice($sale) : $sale,
+                'sale_price' => $round ? PriceTools::roundSalePrice($sale, $atelierId) : $sale,
             ];
         }
 
         return [
             'markup_percent' => $currentMarkup,
-            'sale_price' => $round ? PriceTools::roundSalePrice($currentSale) : $currentSale,
+            'sale_price' => $round ? PriceTools::roundSalePrice($currentSale, $atelierId) : $currentSale,
         ];
     }
 

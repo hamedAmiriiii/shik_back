@@ -131,7 +131,7 @@ class ProductController extends Controller
             $this->productValidationMessages()
         );
 
-        $prepared = $this->prepareProductFieldsForCreate($fields);
+        $prepared = $this->prepareProductFieldsForCreate($fields, $atelierId);
         if (is_string($prepared)) {
             return response(['message' => $prepared], 422);
         }
@@ -255,7 +255,7 @@ class ProductController extends Controller
                         $existing->load(['images', 'categories']);
                         $updatedProducts[] = $this->appendProductPricingMeta($existing);
                     } else {
-                        $prepared = $this->prepareProductFieldsForCreate($productData);
+                        $prepared = $this->prepareProductFieldsForCreate($productData, $atelierId);
                         if (is_string($prepared)) {
                             throw new \InvalidArgumentException($prepared);
                         }
@@ -656,19 +656,19 @@ class ProductController extends Controller
                 ? (float) $fields['sale_price']
                 : $currentOriginal;
             $discountAmount = ($basePrice * (float) $fields['discount_percent']) / 100;
-            $payload['sale_price'] = PriceTools::roundSalePrice((float) max(0, $basePrice - $discountAmount));
+            $payload['sale_price'] = PriceTools::roundSalePrice((float) max(0, $basePrice - $discountAmount), $atelierId);
             if ($hasOriginalColumn) {
-                $payload['original_sale_price'] = PriceTools::roundSalePrice($basePrice);
+                $payload['original_sale_price'] = PriceTools::roundSalePrice($basePrice, $atelierId);
             }
             $payload['markup_percent'] = null;
         } elseif (array_key_exists('sale_price', $fields) && $fields['sale_price'] !== null) {
-            $payload['sale_price'] = PriceTools::roundSalePrice((float) $fields['sale_price']);
+            $payload['sale_price'] = PriceTools::roundSalePrice((float) $fields['sale_price'], $atelierId);
             $payload['markup_percent'] = null;
             if ($hasOriginalColumn && array_key_exists('original_sale_price', $fields) && $fields['original_sale_price'] !== null) {
-                $payload['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price']);
+                $payload['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price'], $atelierId);
             }
         } elseif ($hasOriginalColumn && array_key_exists('original_sale_price', $fields) && $fields['original_sale_price'] !== null) {
-            $payload['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price']);
+            $payload['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price'], $atelierId);
         }
 
         if (array_key_exists('markup_percent', $fields) && $fields['markup_percent'] !== null && $fields['markup_percent'] !== '') {
@@ -837,26 +837,27 @@ class ProductController extends Controller
             return $error;
         }
         $fields['quantity'] = ProductQuantityTools::normalize($fields['quantity'], $fields['unit_type']);
+        $atelierId = $product->atelier_id !== null ? (int) $product->atelier_id : null;
 
         if (isset($fields['discount_percent'])) {
             if ($fields['discount_percent'] >= 0) {
                 $basePrice = $fields['sale_price'] ?? $product->original_sale_price;
                 $discountAmount = ($basePrice * $fields['discount_percent']) / 100;
                 $priceAfterDiscount = max(0, $basePrice - $discountAmount);
-                $fields['sale_price'] = PriceTools::roundSalePrice((float) $priceAfterDiscount);
-                $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $basePrice);
+                $fields['sale_price'] = PriceTools::roundSalePrice((float) $priceAfterDiscount, $atelierId);
+                $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $basePrice, $atelierId);
             }
             unset($fields['discount_percent']);
         } else {
-            $fields['sale_price'] = PriceTools::roundSalePrice((float) $fields['sale_price']);
+            $fields['sale_price'] = PriceTools::roundSalePrice((float) $fields['sale_price'], $atelierId);
             if (! isset($fields['original_sale_price'])) {
                 if ($product->original_sale_price !== null) {
-                    $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $product->original_sale_price);
+                    $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $product->original_sale_price, $atelierId);
                 } else {
                     $fields['original_sale_price'] = $fields['sale_price'];
                 }
             } else {
-                $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price']);
+                $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price'], $atelierId);
             }
         }
 
@@ -870,7 +871,7 @@ class ProductController extends Controller
      *
      * @return array<string, mixed>|string
      */
-    private function prepareProductFieldsForCreate(array $fields)
+    private function prepareProductFieldsForCreate(array $fields, ?int $atelierId = null)
     {
         $fields = $this->normalizeProductDescriptionField($fields);
         $fields = $this->normalizeProductDisplayOrderField($fields, true);
@@ -884,14 +885,14 @@ class ProductController extends Controller
             $basePrice = $fields['original_sale_price'] ?? $fields['sale_price'];
             $discountAmount = ($basePrice * $fields['discount_percent']) / 100;
             $priceAfterDiscount = max(0, $basePrice - $discountAmount);
-            $fields['sale_price'] = PriceTools::roundSalePrice((float) $priceAfterDiscount);
-            $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $basePrice);
+            $fields['sale_price'] = PriceTools::roundSalePrice((float) $priceAfterDiscount, $atelierId);
+            $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $basePrice, $atelierId);
         } else {
-            $fields['sale_price'] = PriceTools::roundSalePrice((float) $fields['sale_price']);
+            $fields['sale_price'] = PriceTools::roundSalePrice((float) $fields['sale_price'], $atelierId);
             if (! isset($fields['original_sale_price'])) {
                 $fields['original_sale_price'] = $fields['sale_price'];
             } else {
-                $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price']);
+                $fields['original_sale_price'] = PriceTools::roundSalePrice((float) $fields['original_sale_price'], $atelierId);
             }
         }
 
@@ -1149,7 +1150,7 @@ class ProductController extends Controller
 
             $discountAmount = ($baseSalePrice * $discountPercent) / 100;
             $priceAfterDiscount = max(0, $baseSalePrice - $discountAmount);
-            $newSalePrice = PriceTools::roundSalePrice((float) $priceAfterDiscount);
+            $newSalePrice = PriceTools::roundSalePrice((float) $priceAfterDiscount, $atelierId);
 
             $product->sale_price = $newSalePrice;
             $product->save();
@@ -1177,7 +1178,7 @@ class ProductController extends Controller
 
             $discountAmount = ($baseSalePrice * $discountPercent) / 100;
             $priceAfterDiscount = max(0, $baseSalePrice - $discountAmount);
-            $newSalePrice = PriceTools::roundSalePrice((float) $priceAfterDiscount);
+            $newSalePrice = PriceTools::roundSalePrice((float) $priceAfterDiscount, $atelierId);
 
             $good->sale_price = $newSalePrice;
             $good->markup_percent = null;

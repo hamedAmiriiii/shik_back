@@ -211,7 +211,7 @@ class ShopPosSaleService
         }
         $unitType = $product->unit_type ?? Product::UNIT_PIECE;
         $qty = ProductQuantityTools::normalize($row['quantity'], $unitType);
-        $salePrice = $this->resolveSalePrice($row, (float) $product->sale_price);
+        $salePrice = $this->resolveSalePrice($row, (float) $product->sale_price, $product->atelier_id);
 
         return [
             'kind' => self::KIND_PRODUCT,
@@ -236,7 +236,7 @@ class ShopPosSaleService
             throw new RuntimeException('کالای تولیدی یافت نشد');
         }
         $qty = ProductQuantityTools::normalize($row['quantity'], Product::UNIT_KG);
-        $salePrice = $this->resolveSalePrice($row, (float) $good->sale_price);
+        $salePrice = $this->resolveSalePrice($row, (float) $good->sale_price, $good->atelier_id);
 
         return [
             'kind' => self::KIND_PRODUCED_GOOD,
@@ -261,7 +261,7 @@ class ShopPosSaleService
             throw new RuntimeException('ماده اولیه یافت نشد');
         }
         $qty = ProductQuantityTools::normalize($row['quantity'], Product::UNIT_KG);
-        $salePrice = $this->resolveSalePrice($row, (float) $material->sale_price);
+        $salePrice = $this->resolveSalePrice($row, (float) $material->sale_price, $material->atelier_id);
         $plan = $this->fifo->plan($material, $qty);
 
         return [
@@ -280,18 +280,22 @@ class ShopPosSaleService
         ];
     }
 
-    private function resolveSalePrice(array $row, float $baseSalePrice): float
+    /**
+     * @param  int|string|null  $atelierId
+     */
+    private function resolveSalePrice(array $row, float $baseSalePrice, $atelierId = null): float
     {
+        $atelierId = $atelierId !== null ? (int) $atelierId : null;
         if (isset($row['sale_price']) && $row['sale_price'] !== null) {
-            return PriceTools::roundSalePrice((float) $row['sale_price']);
+            return PriceTools::roundSalePrice((float) $row['sale_price'], $atelierId);
         }
         if (isset($row['discount_percent']) && $row['discount_percent'] > 0) {
             $discountAmount = ($baseSalePrice * $row['discount_percent']) / 100;
 
-            return PriceTools::roundSalePrice((float) max(0, $baseSalePrice - $discountAmount));
+            return PriceTools::roundSalePrice((float) max(0, $baseSalePrice - $discountAmount), $atelierId);
         }
 
-        return PriceTools::roundSalePrice($baseSalePrice);
+        return PriceTools::roundSalePrice($baseSalePrice, $atelierId);
     }
 
     private function availableKg(array $line): float

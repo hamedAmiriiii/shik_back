@@ -78,7 +78,7 @@ class ProducedGood extends Model
     {
         $amount = round($amount, 2);
         if ($this->round_sale_price) {
-            return PriceTools::roundSalePrice($amount);
+            return PriceTools::roundSalePrice($amount, $this->atelier_id !== null ? (int) $this->atelier_id : null);
         }
 
         return $amount;

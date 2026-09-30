@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Services\ShopLoyaltyCreditTierService;
+use App\Tools\PriceTools;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
@@ -19,6 +20,11 @@ class Setting extends Model
     public static function setContextAtelierId(?int $atelierId): void
     {
         static::$contextAtelierId = $atelierId;
+    }
+
+    public static function contextAtelierId(): ?int
+    {
+        return static::$contextAtelierId;
     }
 
     /**
@@ -59,6 +65,7 @@ class Setting extends Model
             'customer_club_enabled' => \App\Services\ShopFeatureFlags::customerClubDefaultForAtelier($atelierId) ? '1' : '0',
             'receipt_print_settings' => '',
             'shop_browser_settings' => '',
+            PriceTools::ROUND_SALE_PRICE_TO_THOUSAND_KEY => '1',
         ];
 
         foreach ($defaults as $key => $value) {
@@ -107,6 +114,10 @@ class Setting extends Model
      */
     public static function set($key, $value)
     {
+        if ($key === PriceTools::ROUND_SALE_PRICE_TO_THOUSAND_KEY) {
+            PriceTools::forgetSaleRoundingCache();
+        }
+
         $atelierId = static::$contextAtelierId;
         $rowQuery = static::query()->where('key', $key);
         if ($atelierId !== null) {
