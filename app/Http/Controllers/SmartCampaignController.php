@@ -377,7 +377,7 @@ class SmartCampaignController extends Controller
         $rules = [
             'name' => ($requireAll ? 'required' : 'sometimes').'|string|max:120',
             'status' => 'nullable|string|in:draft,active,paused',
-            'cooldown_days' => 'nullable|integer|min:1|max:30',
+            'cooldown_days' => 'nullable|integer|min:1|max:3650',
             'max_recipients_per_run' => 'nullable|integer|min:1|max:10000',
             'daily_sms_budget' => 'nullable|integer|min:1|max:100000',
             'description' => 'nullable|string|max:2000',
