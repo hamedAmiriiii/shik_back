@@ -1402,7 +1402,7 @@ class PurchasedProductController extends Controller
      * POST /api/purchased-products/{purchase}/return
      */
     /**
-     * گزینه‌های مقصد مبلغ کارت در برگشت (کارتخوان امروزِ تطبیق‌نخورده).
+     * گزینه‌های مقصد مبلغ کارت در برگشت (کارتخوانِ روزِ تطبیق‌نخوردهٔ فاکتور).
      * GET /api/purchased-products/{purchase}/return-options
      */
     public function returnOptions(Request $request, Purchase $purchase)
@@ -1411,12 +1411,13 @@ class PurchasedProductController extends Controller
         if ($staffAtelierId === null) {
             return response(['error' => 'فقط پرسنل فروشگاه به این اطلاعات دسترسی دارند'], 403);
         }
-        if ((int) $purchase->atelier_id !== (int) $staffAtelierId) {
+        $purchaseAtelierId = \App\Services\PurchaseItemReturnService::purchaseAtelierId($purchase);
+        if ($purchaseAtelierId !== (int) $staffAtelierId) {
             return response(['error' => 'این فاکتور متعلق به فروشگاه شما نیست'], 403);
         }
 
         return response([
-            'pos_terminal' => \App\Services\PurchaseItemReturnService::posTerminalRefundAvailability($purchase),
+            'pos_terminal' => \App\Services\PurchaseItemReturnService::posTerminalRefundAvailability($purchase, $purchaseAtelierId),
         ], 200);
     }
 

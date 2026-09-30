@@ -17,6 +17,7 @@ use App\Tools\ProductQuantityTools;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Morilog\Jalali\Jalalian;
 
 class PurchaseItemReturnService
 {
@@ -27,8 +28,8 @@ class PurchaseItemReturnService
     public const CARD_REFUND_SHOP_ACCOUNT = 'shop_account';
 
     /**
-     * فقط فروش امروزِ تطبیق‌نخورده: مبلغ از کارتخوانِ همان روز (هنوز واریز نشده) برمی‌گردد
-     * و از جمع کارتخوان روز کم می‌شود.
+     * فاکتورِ روزِ تطبیق‌نخورده: مبلغ از کارتخوانِ همان روز (هنوز واریز نشده) برمی‌گردد
+     * و از جمع کارتخوان آن روز کم می‌شود.
      */
     public const CARD_REFUND_POS_TERMINAL = 'pos_terminal';
 
@@ -43,53 +44,68 @@ class PurchaseItemReturnService
     }
 
     /**
-     * امکان برگشت از کارتخوان روز: فاکتور امروز باشد و تطبیق امروز هنوز ثبت نشده باشد.
+     * امکان برگشت از کارتخوانِ روز فاکتور: تطبیق آن روز هنوز ثبت نشده باشد.
      *
-     * @return array{available: bool, reason: string|null, date: string, pending_card_amount: float}
+     * @return array{available: bool, reason: string|null, date: string|null, date_jalali: string|null, pending_card_amount: float}
      */
-    public static function posTerminalRefundAvailability(Purchase $purchase): array
+    public static function posTerminalRefundAvailability(Purchase $purchase, ?int $atelierId = null): array
     {
-        $today = Carbon::now('Asia/Tehran')->format('Y-m-d');
         $result = [
             'available' => false,
             'reason' => null,
-            'date' => $today,
+            'date' => null,
+            'date_jalali' => null,
             'pending_card_amount' => 0.0,
         ];
 
-        $atelierId = (int) $purchase->atelier_id;
+        $atelierId = $atelierId ?? self::purchaseAtelierId($purchase);
         $rawCreatedAt = $purchase->getRawOriginal('created_at');
-        if ($atelierId <= 0 || ! $rawCreatedAt) {
+        if (! $atelierId || ! $rawCreatedAt) {
             $result['reason'] = 'فروشگاه یا تاریخ این فاکتور مشخص نیست.';
 
             return $result;
         }
 
-        if (Carbon::parse($rawCreatedAt)->format('Y-m-d') !== $today) {
-            $result['reason'] = 'برگشت از کارتخوان فقط برای فاکتورهای امروز ممکن است.';
-
-            return $result;
-        }
+        $day = Carbon::parse($rawCreatedAt, 'Asia/Tehran')->startOfDay();
+        $dayKey = $day->format('Y-m-d');
+        $result['date'] = $dayKey;
+        $result['date_jalali'] = Jalalian::fromCarbon($day)->format('Y/m/d');
 
         if (Schema::hasTable('daily_shop_reconciliations')
             && DailyShopReconciliation::query()
                 ->where('atelier_id', $atelierId)
-                ->whereDate('date', $today)
+                ->whereDate('date', $dayKey)
                 ->exists()
         ) {
-            $result['reason'] = 'تطبیق امروز ثبت شده و مبلغ کارتخوان واریز حساب شده است.';
+            $result['reason'] = 'تطبیق روز '.$result['date_jalali'].' ثبت شده و مبلغ کارتخوانش واریز حساب شده است.';
 
             return $result;
         }
 
-        $metrics = ShopSalesReportService::salesAndProfitForDate(
-            $atelierId,
-            Carbon::parse($today, 'Asia/Tehran')->startOfDay()
-        );
+        $metrics = ShopSalesReportService::salesAndProfitForDate($atelierId, $day);
         $result['pending_card_amount'] = round(max(0, (float) $metrics['card_amount']), 2);
         $result['available'] = true;
 
         return $result;
+    }
+
+    public static function purchaseAtelierId(Purchase $purchase): ?int
+    {
+        if ((int) $purchase->atelier_id > 0) {
+            return (int) $purchase->atelier_id;
+        }
+
+        $purchase->loadMissing(['purchasedProducts.product', 'purchasedProducts.producedGood', 'purchasedProducts.rawMaterial']);
+        foreach ($purchase->purchasedProducts as $line) {
+            $id = (int) (optional($line->product)->atelier_id
+                ?? optional($line->producedGood)->atelier_id
+                ?? optional($line->rawMaterial)->atelier_id);
+            if ($id > 0) {
+                return $id;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -266,13 +282,13 @@ class PurchaseItemReturnService
 
             $cardFromPos = (float) ($settlement['pos'] ?? 0);
             if ($cardFromPos >= 0.01) {
-                $posAvailability = self::posTerminalRefundAvailability($purchase);
+                $posAvailability = self::posTerminalRefundAvailability($purchase, $atelierId);
                 if (! $posAvailability['available']) {
                     throw new \InvalidArgumentException((string) $posAvailability['reason']);
                 }
                 if ($posAvailability['pending_card_amount'] + 0.001 < $cardFromPos) {
                     throw new \InvalidArgumentException(
-                        'مبلغ کارتخوان امروز کافی نیست. مبلغ کارتخوان امروز: '
+                        'مبلغ کارتخوان روز '.$posAvailability['date_jalali'].' کافی نیست. مبلغ کارتخوان آن روز: '
                         .number_format($posAvailability['pending_card_amount'], 0).' تومان'
                     );
                 }
