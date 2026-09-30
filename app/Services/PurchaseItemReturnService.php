@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Cheque;
+use App\Models\DailyShopReconciliation;
 use App\Models\Purchase;
 use App\Models\PurchaseItemReturn;
 use App\Models\PurchasedProduct;
@@ -13,6 +14,7 @@ use App\Services\CustomerCreditExpenseService;
 use App\Tools\PhoneTools;
 use App\Tools\PriceTools;
 use App\Tools\ProductQuantityTools;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -23,6 +25,72 @@ class PurchaseItemReturnService
 
     /** مبلغ کارتخوان از حساب فروشگاه برداشت و به مشتری داده شود */
     public const CARD_REFUND_SHOP_ACCOUNT = 'shop_account';
+
+    /**
+     * فقط فروش امروزِ تطبیق‌نخورده: مبلغ از کارتخوانِ همان روز (هنوز واریز نشده) برمی‌گردد
+     * و از جمع کارتخوان روز کم می‌شود.
+     */
+    public const CARD_REFUND_POS_TERMINAL = 'pos_terminal';
+
+    /** @return array<int, string> */
+    public static function cardRefundDestinations(): array
+    {
+        return [
+            self::CARD_REFUND_CUSTOMER_CREDIT,
+            self::CARD_REFUND_SHOP_ACCOUNT,
+            self::CARD_REFUND_POS_TERMINAL,
+        ];
+    }
+
+    /**
+     * امکان برگشت از کارتخوان روز: فاکتور امروز باشد و تطبیق امروز هنوز ثبت نشده باشد.
+     *
+     * @return array{available: bool, reason: string|null, date: string, pending_card_amount: float}
+     */
+    public static function posTerminalRefundAvailability(Purchase $purchase): array
+    {
+        $today = Carbon::now('Asia/Tehran')->format('Y-m-d');
+        $result = [
+            'available' => false,
+            'reason' => null,
+            'date' => $today,
+            'pending_card_amount' => 0.0,
+        ];
+
+        $atelierId = (int) $purchase->atelier_id;
+        $rawCreatedAt = $purchase->getRawOriginal('created_at');
+        if ($atelierId <= 0 || ! $rawCreatedAt) {
+            $result['reason'] = 'فروشگاه یا تاریخ این فاکتور مشخص نیست.';
+
+            return $result;
+        }
+
+        if (Carbon::parse($rawCreatedAt)->format('Y-m-d') !== $today) {
+            $result['reason'] = 'برگشت از کارتخوان فقط برای فاکتورهای امروز ممکن است.';
+
+            return $result;
+        }
+
+        if (Schema::hasTable('daily_shop_reconciliations')
+            && DailyShopReconciliation::query()
+                ->where('atelier_id', $atelierId)
+                ->whereDate('date', $today)
+                ->exists()
+        ) {
+            $result['reason'] = 'تطبیق امروز ثبت شده و مبلغ کارتخوان واریز حساب شده است.';
+
+            return $result;
+        }
+
+        $metrics = ShopSalesReportService::salesAndProfitForDate(
+            $atelierId,
+            Carbon::parse($today, 'Asia/Tehran')->startOfDay()
+        );
+        $result['pending_card_amount'] = round(max(0, (float) $metrics['card_amount']), 2);
+        $result['available'] = true;
+
+        return $result;
+    }
 
     /**
      * برگشت کامل همه اقلام باقی‌مانده فاکتور.
@@ -196,6 +264,20 @@ class PurchaseItemReturnService
                 );
             }
 
+            $cardFromPos = (float) ($settlement['pos'] ?? 0);
+            if ($cardFromPos >= 0.01) {
+                $posAvailability = self::posTerminalRefundAvailability($purchase);
+                if (! $posAvailability['available']) {
+                    throw new \InvalidArgumentException((string) $posAvailability['reason']);
+                }
+                if ($posAvailability['pending_card_amount'] + 0.001 < $cardFromPos) {
+                    throw new \InvalidArgumentException(
+                        'مبلغ کارتخوان امروز کافی نیست. مبلغ کارتخوان امروز: '
+                        .number_format($posAvailability['pending_card_amount'], 0).' تومان'
+                    );
+                }
+            }
+
             $cardFromAccount = (float) ($settlement['card_account'] ?? 0);
             if ($cardFromAccount >= 0.01 && $options['shop_account_id']) {
                 $account = \App\Models\ShopAccount::query()->find($options['shop_account_id']);
@@ -366,6 +448,7 @@ class PurchaseItemReturnService
      *   card: float,
      *   card_credit: float,
      *   card_account: float,
+     *   pos: float,
      *   wallet: float,
      *   ar: float,
      *   cheque: float,
@@ -389,9 +472,12 @@ class PurchaseItemReturnService
 
         $cardCredit = 0.0;
         $cardAccount = 0.0;
+        $pos = 0.0;
         if ($card >= 0.01) {
             if ($options['card_refund_destination'] === self::CARD_REFUND_SHOP_ACCOUNT) {
                 $cardAccount = $card;
+            } elseif ($options['card_refund_destination'] === self::CARD_REFUND_POS_TERMINAL) {
+                $pos = $card;
             } else {
                 $cardCredit = $card;
             }
@@ -415,6 +501,7 @@ class PurchaseItemReturnService
             'card' => $card,
             'card_credit' => $cardCredit,
             'card_account' => $cardAccount,
+            'pos' => $pos,
             'wallet' => PriceTools::roundToman($cash + $card),
             'ar' => $ar,
             'cheque' => $cheque,
@@ -430,7 +517,7 @@ class PurchaseItemReturnService
     public static function normalizeRefundOptions(array $options): array
     {
         $destination = (string) ($options['card_refund_destination'] ?? self::CARD_REFUND_CUSTOMER_CREDIT);
-        if (! in_array($destination, [self::CARD_REFUND_CUSTOMER_CREDIT, self::CARD_REFUND_SHOP_ACCOUNT], true)) {
+        if (! in_array($destination, self::cardRefundDestinations(), true)) {
             $destination = self::CARD_REFUND_CUSTOMER_CREDIT;
         }
 

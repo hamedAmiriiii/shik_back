@@ -1330,7 +1330,7 @@ class PurchasedProductController extends Controller
             'quantity' => 'sometimes|numeric|min:0.001',
             'notes' => 'nullable|string|max:2000',
             'phone' => 'nullable|string|max:20',
-            'card_refund_destination' => 'nullable|string|in:customer_credit,shop_account',
+            'card_refund_destination' => 'nullable|string|in:'.implode(',', \App\Services\PurchaseItemReturnService::cardRefundDestinations()),
             'shop_account_id' => 'nullable|integer|min:1',
         ]);
 
@@ -1401,12 +1401,31 @@ class PurchasedProductController extends Controller
      * برگشت کامل یک خرید (همه اقلام باقی‌مانده).
      * POST /api/purchased-products/{purchase}/return
      */
+    /**
+     * گزینه‌های مقصد مبلغ کارت در برگشت (کارتخوان امروزِ تطبیق‌نخورده).
+     * GET /api/purchased-products/{purchase}/return-options
+     */
+    public function returnOptions(Request $request, Purchase $purchase)
+    {
+        $staffAtelierId = $this->staffShopAtelierId($request);
+        if ($staffAtelierId === null) {
+            return response(['error' => 'فقط پرسنل فروشگاه به این اطلاعات دسترسی دارند'], 403);
+        }
+        if ((int) $purchase->atelier_id !== (int) $staffAtelierId) {
+            return response(['error' => 'این فاکتور متعلق به فروشگاه شما نیست'], 403);
+        }
+
+        return response([
+            'pos_terminal' => \App\Services\PurchaseItemReturnService::posTerminalRefundAvailability($purchase),
+        ], 200);
+    }
+
     public function returnPurchase(Request $request, Purchase $purchase)
     {
         $request->validate([
             'notes' => 'nullable|string|max:2000',
             'phone' => 'nullable|string|max:20',
-            'card_refund_destination' => 'nullable|string|in:customer_credit,shop_account',
+            'card_refund_destination' => 'nullable|string|in:'.implode(',', \App\Services\PurchaseItemReturnService::cardRefundDestinations()),
             'shop_account_id' => 'nullable|integer|min:1',
         ]);
 

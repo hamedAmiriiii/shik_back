@@ -53,7 +53,7 @@ class ReturnedProductController extends Controller
             'notes' => 'nullable|string|max:2000',
             'phone' => 'nullable|string|max:20',
             'quantity' => 'nullable|numeric|min:0.001',
-            'card_refund_destination' => 'nullable|string|in:customer_credit,shop_account',
+            'card_refund_destination' => 'nullable|string|in:'.implode(',', PurchaseItemReturnService::cardRefundDestinations()),
             'shop_account_id' => 'nullable|integer|min:1',
         ]);
 

@@ -164,6 +164,7 @@ Route::prefix('purchased-products')->name('purchased-products.')->group(function
     Route::delete('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'destroy']);
     Route::delete('/{purchase}/items/{purchasedProduct}', [\App\Http\Controllers\PurchasedProductController::class, 'returnItem']);
     Route::post('/{purchase}/return', [\App\Http\Controllers\PurchasedProductController::class, 'returnPurchase']);
+    Route::get('/{purchase}/return-options', [\App\Http\Controllers\PurchasedProductController::class, 'returnOptions']);
 });
 
 Route::prefix('customers')->name('customers.')->group(function () {
