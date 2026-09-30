@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AccountingVoucher;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Morilog\Jalali\Jalalian;
 use RuntimeException;
 
@@ -16,6 +17,92 @@ class AccountingPeriodCloseService
     public const MODE_YEAR = 'year';
 
     public const MODE_MID = 'mid';
+
+    /**
+     * فقط مسیر حسابرس بالا می‌برد؛ در این حالت قفل دورهٔ بسته برای ثبت و برگشت نادیده گرفته می‌شود.
+     */
+    protected static int $closedPeriodOverride = 0;
+
+    /**
+     * @template T
+     *
+     * @param  callable(): T  $callback
+     * @return T
+     */
+    public static function withClosedPeriodOverride(callable $callback)
+    {
+        self::$closedPeriodOverride++;
+        try {
+            return $callback();
+        } finally {
+            self::$closedPeriodOverride--;
+        }
+    }
+
+    /**
+     * تاریخ بستنی که این روز داخل دوره‌اش است (میلادی) یا null اگر روز در دورهٔ باز باشد.
+     */
+    public static function closeDateCovering(int $atelierId, $date): ?string
+    {
+        if ($atelierId <= 0 || ! AccountingVoucher::tablesReady()) {
+            return null;
+        }
+
+        $dateString = AccountingLedger::eventDate($date);
+        $close = AccountingVoucher::query()
+            ->forAtelier($atelierId)
+            ->posted()
+            ->where('source_type', AccountingVoucher::SOURCE_YEAR_CLOSE)
+            ->whereDate('date', '>=', $dateString)
+            ->min('date');
+
+        return $close ? Carbon::parse($close)->toDateString() : null;
+    }
+
+    /**
+     * دوره‌های مالی از روی سندهای بستن؛ جدیدترین اول، دورهٔ باز در ابتدا.
+     *
+     * @return array<int, array{from: ?string, to: ?string, closed: bool, close_voucher_id: ?int, label: string}>
+     */
+    public static function periods(int $atelierId): array
+    {
+        if ($atelierId <= 0 || ! AccountingVoucher::tablesReady()) {
+            return [];
+        }
+
+        $closes = AccountingVoucher::query()
+            ->forAtelier($atelierId)
+            ->posted()
+            ->where('source_type', AccountingVoucher::SOURCE_YEAR_CLOSE)
+            ->orderBy('date')
+            ->orderBy('id')
+            ->get(['id', 'date', 'description']);
+
+        $toJalali = fn ($date) => Jalalian::fromCarbon(Carbon::parse($date))->format('Y-m-d');
+        $periods = [];
+        $previous = null;
+        foreach ($closes as $close) {
+            $to = Carbon::parse($close->date)->toDateString();
+            $periods[] = [
+                'from' => $previous ? $toJalali(Carbon::parse($previous)->addDay()) : null,
+                'to' => $toJalali($to),
+                'closed' => true,
+                'close_voucher_id' => (int) $close->id,
+                'label' => (string) ($close->description ?: 'دوره تا '.$toJalali($to)),
+            ];
+            $previous = $to;
+        }
+
+        $periods[] = [
+            'from' => $previous ? $toJalali(Carbon::parse($previous)->addDay()) : null,
+            'to' => null,
+            'closed' => false,
+            'close_voucher_id' => null,
+            'label' => 'دورهٔ باز (جاری)',
+        ];
+
+        return array_reverse($periods);
+    }
 
     /**
      * آخرین روز بسته‌شده (میلادی) یا null.
@@ -76,6 +163,9 @@ class AccountingPeriodCloseService
 
     public static function assertDateUnlocked(int $atelierId, $date): void
     {
+        if (self::$closedPeriodOverride > 0) {
+            return;
+        }
         $dateString = AccountingLedger::eventDate($date);
         $closed = self::closedThrough($atelierId);
         if ($closed && $dateString <= $closed) {
@@ -95,6 +185,10 @@ class AccountingPeriodCloseService
                 throw new RuntimeException('فقط آخرین سند بستن دوره را می‌توان برگشت زد.');
             }
 
+            return;
+        }
+
+        if (self::$closedPeriodOverride > 0) {
             return;
         }
 
@@ -375,7 +469,21 @@ class AccountingPeriodCloseService
             throw new RuntimeException('سند بستن دوره‌ای برای برگشت نیست.');
         }
 
-        return AccountingVoucherService::reverse($latest, 'بازگشایی بستن دوره');
+        return DB::transaction(function () use ($atelierId, $latest) {
+            $storno = AccountingVoucherService::reverse($latest, 'بازگشایی بستن دوره');
+
+            $adjustments = AccountingVoucher::query()
+                ->forAtelier($atelierId)
+                ->posted()
+                ->where('source_type', AccountingVoucher::SOURCE_YEAR_CLOSE_ADJUST)
+                ->whereDate('date', Carbon::parse($latest->date)->toDateString())
+                ->get();
+            foreach ($adjustments as $adjustment) {
+                AccountingVoucherService::reverse($adjustment, 'بازگشایی بستن دوره — تکمیل بستن '.$adjustment->number);
+            }
+
+            return $storno;
+        }, 5);
     }
 
     /**

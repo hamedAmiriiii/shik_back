@@ -50,6 +50,10 @@ class AccountingVoucher extends Model
 
     public const SOURCE_YEAR_CLOSE = 'year_close';
 
+    public const SOURCE_YEAR_CLOSE_ADJUST = 'year_close_adjust';
+
+    public const SOURCE_PRIOR_YEAR_ADJUST = 'prior_year_adjust';
+
     public const SOURCE_BALANCE_ADJUST = 'balance_adjust';
 
     public const SOURCE_PARTNER_SETTLEMENT = 'partner_settlement';

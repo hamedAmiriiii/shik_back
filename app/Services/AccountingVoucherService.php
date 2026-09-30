@@ -80,11 +80,14 @@ class AccountingVoucherService
         }, 5);
     }
 
-    public static function reverse(AccountingVoucher $voucher, ?string $description = null): AccountingVoucher
+    /**
+     * @param  mixed  $date  تاریخ سند برگشت؛ پیش‌فرض امروز
+     */
+    public static function reverse(AccountingVoucher $voucher, ?string $description = null, $date = null): AccountingVoucher
     {
         self::assertReady();
 
-        return DB::transaction(function () use ($voucher, $description) {
+        return DB::transaction(function () use ($voucher, $description, $date) {
             self::lockAtelier((int) $voucher->atelier_id);
 
             $locked = AccountingVoucher::query()
@@ -122,7 +125,9 @@ class AccountingVoucherService
             $storno = new AccountingVoucher();
             $storno->atelier_id = (int) $locked->atelier_id;
             $storno->number = self::nextNumber((int) $locked->atelier_id);
-            $storno->date = Carbon::now('Asia/Tehran')->toDateString();
+            $storno->date = $date !== null
+                ? self::normalizeDate($date)
+                : Carbon::now('Asia/Tehran')->toDateString();
             $storno->description = $description ?: ('برگشت سند '.$locked->number);
             $storno->source_type = $locked->source_type;
             $storno->source_id = (int) $locked->source_id;

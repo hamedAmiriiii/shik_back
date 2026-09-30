@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Console\Commands\AccountingFlowSelfTest;
 use App\Models\AccountingVoucher;
 use App\Services\AccountingOpeningService;
+use App\Services\AccountingPeriodCloseService;
+use App\Services\AccountingReportService;
 use App\Services\AccountingVoucherService;
 use App\Services\ChartOfAccountsSeeder;
 use Illuminate\Http\Request;
@@ -37,10 +39,19 @@ class AccountingVoucherController extends Controller
         if ($request->filled('status')) {
             $query->where('status', $request->input('status'));
         }
+        $from = AccountingReportService::parseDate($request->input('from'));
+        $to = AccountingReportService::parseDate($request->input('to'));
+        if ($from) {
+            $query->whereDate('date', '>=', $from);
+        }
+        if ($to) {
+            $query->whereDate('date', '<=', $to);
+        }
 
+        $closed = AccountingPeriodCloseService::closedThrough($atelierId);
         $perPage = max(1, min(100, (int) $request->input('per_page', 20)));
         $page = $query->paginate($perPage);
-        $page->getCollection()->transform(fn (AccountingVoucher $v) => $v->toApiArray());
+        $page->getCollection()->transform(fn (AccountingVoucher $v) => $this->voucherWithLock($v, $closed));
 
         return response($page, 200);
     }
@@ -198,7 +209,22 @@ class AccountingVoucherController extends Controller
 
         $accountingVoucher->load(['lines.account']);
 
-        return response(['data' => $accountingVoucher->toApiArray()], 200);
+        return response([
+            'data' => $this->voucherWithLock($accountingVoucher, AccountingPeriodCloseService::closedThrough($atelierId)),
+        ], 200);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function voucherWithLock(AccountingVoucher $voucher, ?string $closedThrough): array
+    {
+        $row = $voucher->toApiArray();
+        $row['locked'] = $closedThrough !== null
+            && $voucher->date
+            && $voucher->date->toDateString() <= $closedThrough;
+
+        return $row;
     }
 
     /**

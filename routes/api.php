@@ -345,6 +345,14 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::post('accounting/period-close', [\App\Http\Controllers\AccountingPeriodCloseController::class, 'store']);
     Route::post('accounting/year-close', [\App\Http\Controllers\AccountingPeriodCloseController::class, 'store']);
 
+    // حسابرس: کار در دوره‌های بسته + لاگ تغییرات
+    Route::get('accounting/periods', [\App\Http\Controllers\AccountingAuditorController::class, 'periods']);
+    Route::get('accounting/audit-log', [\App\Http\Controllers\AccountingAuditorController::class, 'auditLog']);
+    Route::post('accounting/auditor/vouchers', [\App\Http\Controllers\AccountingAuditorController::class, 'store']);
+    Route::post('accounting/auditor/vouchers/{accountingVoucher}/correct', [\App\Http\Controllers\AccountingAuditorController::class, 'correct']);
+    Route::post('accounting/auditor/vouchers/{accountingVoucher}/reverse', [\App\Http\Controllers\AccountingAuditorController::class, 'reverse']);
+    Route::post('accounting/auditor/prior-year-adjust', [\App\Http\Controllers\AccountingAuditorController::class, 'priorYearAdjust']);
+
     Route::get('accounting/trial-balance', [\App\Http\Controllers\AccountingReportController::class, 'trialBalance']);
     Route::get('accounting/ledger', [\App\Http\Controllers\AccountingReportController::class, 'ledger']);
     Route::get('accounting/profit-loss', [\App\Http\Controllers\AccountingReportController::class, 'profitLoss']);
