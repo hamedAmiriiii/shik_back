@@ -431,6 +431,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
             ->where('action', '[0-9]+');
 
         Route::get('campaigns', [\App\Http\Controllers\SmartCampaignController::class, 'index']);
+        Route::get('campaign-products', [\App\Http\Controllers\SmartCampaignController::class, 'products']);
+        Route::post('campaign-products/audience', [\App\Http\Controllers\SmartCampaignController::class, 'productAudience']);
         Route::post('campaigns', [\App\Http\Controllers\SmartCampaignController::class, 'store']);
         Route::get('campaigns/{campaign}', [\App\Http\Controllers\SmartCampaignController::class, 'show'])
             ->where('campaign', '[0-9]+');

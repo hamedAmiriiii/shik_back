@@ -8,6 +8,7 @@ use App\Models\ShopCampaignLog;
 use App\Models\ShopCampaignRule;
 use App\Models\ShopCampaignRun;
 use App\Services\SmartCustomer\CampaignRunner;
+use App\Services\SmartCustomer\ProductCampaignService;
 use App\Services\ShopFeatureFlags;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -327,8 +328,16 @@ class SmartCampaignController extends Controller
             ])
             ->values();
 
+        $productIds = ProductCampaignService::productIdsFromActions(
+            ShopCampaignAction::query()->where('campaign_id', $row->id)->get()
+        );
+        $productConversion = $productIds !== [] && ProductCampaignService::ready()
+            ? ProductCampaignService::conversion($atelierId, (int) $row->id, $productIds)
+            : null;
+
         return response([
             'campaign_id' => $row->id,
+            'product_conversion' => $productConversion,
             'recipients' => $recipients,
             'returned' => $returned->count(),
             'conversion_pct' => $recipients > 0 ? round($returned->count() * 100 / $recipients, 1) : 0,
@@ -343,6 +352,50 @@ class SmartCampaignController extends Controller
             'last_run_at' => $runs->last_run_at ?? null,
             'top_customers' => $topCustomers,
         ], 200);
+    }
+
+    public function products(Request $request)
+    {
+        $atelierId = $this->assertShopFeature(
+            $request,
+            ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
+
+        $filter = (string) $request->query('filter', 'discounted');
+        if (! in_array($filter, ['discounted', 'slow', 'all'], true)) {
+            $filter = 'discounted';
+        }
+
+        return response([
+            'products' => ProductCampaignService::products(
+                $atelierId,
+                $filter,
+                trim((string) $request->query('search', ''))
+            ),
+            'sales_window_days' => ProductCampaignService::SALES_WINDOW_DAYS,
+        ], 200);
+    }
+
+    public function productAudience(Request $request)
+    {
+        $atelierId = $this->assertShopFeature(
+            $request,
+            ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
+
+        $validated = $request->validate([
+            'product_ids' => 'required|array|min:1|max:50',
+            'product_ids.*' => 'integer|min:1',
+            'mode' => 'required|string|in:bought,not_bought,repurchase_due',
+            'days' => 'nullable|integer|min:1|max:3650',
+            'exclude_product_ids' => 'nullable|array|max:50',
+            'exclude_product_ids.*' => 'integer|min:1',
+            'segment' => 'nullable|string|max:32',
+        ]);
+
+        return response(ProductCampaignService::audience($atelierId, $validated), 200);
     }
 
     public function logs(Request $request, int $campaign)
