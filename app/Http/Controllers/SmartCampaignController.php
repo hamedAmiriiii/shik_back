@@ -363,7 +363,7 @@ class SmartCampaignController extends Controller
         );
 
         $filter = (string) $request->query('filter', 'discounted');
-        if (! in_array($filter, ['discounted', 'slow', 'all'], true)) {
+        if (! in_array($filter, ['discounted', 'top', 'slow', 'all'], true)) {
             $filter = 'discounted';
         }
 

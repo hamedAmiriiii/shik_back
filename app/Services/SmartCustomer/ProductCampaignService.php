@@ -26,7 +26,7 @@ class ProductCampaignService
     }
 
     /**
-     * @param  'discounted'|'slow'|'all'  $filter
+     * @param  'discounted'|'top'|'slow'|'all'  $filter
      * @return array<int, array<string, mixed>>
      */
     public static function products(int $atelierId, string $filter, string $search = ''): array
@@ -80,6 +80,10 @@ class ProductCampaignService
             $q->whereNotNull('pr.original_sale_price')
                 ->whereColumn('pr.original_sale_price', '>', 'pr.sale_price')
                 ->orderByRaw('(pr.original_sale_price - pr.sale_price) / pr.original_sale_price DESC');
+        } elseif ($filter === 'top') {
+            $q->whereRaw('COALESCE(s.sold_qty, 0) > 0')
+                ->orderByDesc('sold_qty')
+                ->orderByDesc('buyers');
         } elseif ($filter === 'slow') {
             $q->where('pr.quantity', '>', 0)
                 ->orderBy('sold_qty')
