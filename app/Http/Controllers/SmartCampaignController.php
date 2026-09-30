@@ -230,6 +230,121 @@ class SmartCampaignController extends Controller
         return response(['runs' => $runs], 200);
     }
 
+    /**
+     * بررسی نتیجه کمپین: از گیرندگان چند نفر بعد از اولین ارسال خرید کرده‌اند و چقدر.
+     */
+    public function report(Request $request, int $campaign)
+    {
+        $atelierId = $this->assertShopFeature(
+            $request,
+            ShopFeatureFlags::CUSTOMER_CLUB,
+            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+        );
+
+        $row = ShopCampaign::query()
+            ->where('atelier_id', $atelierId)
+            ->findOrFail($campaign);
+
+        $sentPerPhone = DB::table('shop_campaign_logs')
+            ->where('campaign_id', $row->id)
+            ->where('atelier_id', $atelierId)
+            ->where('status', 'sent')
+            ->groupBy('phone')
+            ->select(['phone', DB::raw('MIN(created_at) as first_sent_at')]);
+
+        $perPhone = DB::query()
+            ->fromSub($sentPerPhone, 'l')
+            ->leftJoin('purchases as p', function ($join) use ($atelierId) {
+                $join->on('p.phone', '=', 'l.phone')
+                    ->where('p.atelier_id', '=', $atelierId)
+                    ->where('p.total_amount', '>', 0)
+                    ->on('p.created_at', '>=', 'l.first_sent_at');
+            })
+            ->groupBy('l.phone', 'l.first_sent_at')
+            ->select([
+                'l.phone',
+                'l.first_sent_at',
+                DB::raw('COUNT(p.id) as orders'),
+                DB::raw('COALESCE(SUM(p.total_amount), 0) as revenue'),
+                DB::raw('MIN(p.created_at) as first_purchase_at'),
+            ])
+            ->get();
+
+        $recipients = $perPhone->count();
+        $returned = $perPhone->filter(fn ($r) => (int) $r->orders > 0);
+        $revenue = (float) $returned->sum(fn ($r) => (float) $r->revenue);
+        $orders = (int) $returned->sum(fn ($r) => (int) $r->orders);
+
+        $daysToReturn = $returned
+            ->map(function ($r) {
+                $sent = \Carbon\Carbon::parse($r->first_sent_at);
+                $bought = \Carbon\Carbon::parse($r->first_purchase_at);
+
+                return max(0, $sent->diffInHours($bought) / 24);
+            })
+            ->values();
+
+        $creditGiven = 0.0;
+        $creditUsed = null;
+        if (Schema::hasTable('user_credit_grants') && Schema::hasColumn('user_credit_grants', 'campaign_id')) {
+            $grants = DB::table('user_credit_grants')
+                ->where('atelier_id', $atelierId)
+                ->where('campaign_id', $row->id)
+                ->select([
+                    DB::raw('COALESCE(SUM(amount), 0) as given'),
+                    Schema::hasColumn('user_credit_grants', 'remaining')
+                        ? DB::raw('COALESCE(SUM(amount - COALESCE(remaining, 0)), 0) as used')
+                        : DB::raw('NULL as used'),
+                ])
+                ->first();
+            $creditGiven = (float) ($grants->given ?? 0);
+            $creditUsed = $grants && $grants->used !== null ? (float) $grants->used : null;
+        }
+        if ($creditGiven <= 0) {
+            $creditGiven = (float) ShopCampaignLog::query()
+                ->where('campaign_id', $row->id)
+                ->where('atelier_id', $atelierId)
+                ->where('status', 'sent')
+                ->get(['actions_result'])
+                ->sum(fn (ShopCampaignLog $l) => (float) ($l->actions_result['credit']['added'] ?? 0));
+        }
+
+        $runs = ShopCampaignRun::query()
+            ->where('campaign_id', $row->id)
+            ->where('atelier_id', $atelierId)
+            ->selectRaw('COUNT(*) as runs, MIN(created_at) as first_run_at, MAX(created_at) as last_run_at')
+            ->first();
+
+        $topCustomers = $returned
+            ->sortByDesc(fn ($r) => (float) $r->revenue)
+            ->take(20)
+            ->map(fn ($r) => [
+                'phone' => (string) $r->phone,
+                'orders' => (int) $r->orders,
+                'revenue' => round((float) $r->revenue, 0),
+                'first_sent_at' => (string) $r->first_sent_at,
+                'first_purchase_at' => (string) $r->first_purchase_at,
+            ])
+            ->values();
+
+        return response([
+            'campaign_id' => $row->id,
+            'recipients' => $recipients,
+            'returned' => $returned->count(),
+            'conversion_pct' => $recipients > 0 ? round($returned->count() * 100 / $recipients, 1) : 0,
+            'orders' => $orders,
+            'revenue' => round($revenue, 0),
+            'avg_order_value' => $orders > 0 ? round($revenue / $orders, 0) : 0,
+            'avg_days_to_return' => $daysToReturn->count() > 0 ? round($daysToReturn->avg(), 1) : null,
+            'credit_given' => round($creditGiven, 0),
+            'credit_used' => $creditUsed !== null ? round($creditUsed, 0) : null,
+            'runs' => (int) ($runs->runs ?? 0),
+            'first_run_at' => $runs->first_run_at ?? null,
+            'last_run_at' => $runs->last_run_at ?? null,
+            'top_customers' => $topCustomers,
+        ], 200);
+    }
+
     public function logs(Request $request, int $campaign)
     {
         $atelierId = $this->assertShopFeature(

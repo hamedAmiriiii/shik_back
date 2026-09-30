@@ -75,6 +75,8 @@ class CampaignRuleEvaluator
     protected static function resolveField(string $field, ShopCustomerMetric $metric, ?ShopCustomerSegment $segment)
     {
         switch ($field) {
+            case 'phone':
+                return (string) $metric->phone;
             case 'recency_days':
                 return (int) $metric->recency_days;
             case 'frequency':

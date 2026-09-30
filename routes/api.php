@@ -446,6 +446,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
             ->where('campaign', '[0-9]+');
         Route::get('campaigns/{campaign}/logs', [\App\Http\Controllers\SmartCampaignController::class, 'logs'])
             ->where('campaign', '[0-9]+');
+        Route::get('campaigns/{campaign}/report', [\App\Http\Controllers\SmartCampaignController::class, 'report'])
+            ->where('campaign', '[0-9]+');
     });
 
     Route::post('product-stock-notify', [\App\Http\Controllers\ProductStockNotifyController::class, 'store']);
