@@ -454,6 +454,72 @@ class PurchaseDebtController extends Controller
         ], 200);
     }
 
+    /**
+     * حذف بدهی دستیِ اشتباه — فقط وقتی هنوز هیچ پرداختی رویش ثبت نشده؛ سند حسابداری‌اش برگشت می‌خورد.
+     */
+    public function destroy(Request $request, Purchase $purchase)
+    {
+        $this->requireStaffShopUser($request);
+        $this->assertModelBelongsToStaffAtelier($request, $purchase);
+
+        if (! $purchase->isDebt() || ! $this->isManualDebtPurchase($purchase)) {
+            return response()->json(['message' => 'فقط بدهی‌های دستی از این صفحه قابل حذف هستند.'], 422);
+        }
+
+        try {
+            DB::transaction(function () use ($purchase) {
+                $locked = Purchase::query()->where('id', $purchase->id)->lockForUpdate()->first();
+                if (! $locked) {
+                    abort(response()->json(['message' => 'این بدهی قبلاً حذف شده است.'], 404));
+                }
+                if (Schema::hasTable('purchase_debt_payments')) {
+                    $locked->load('debtPayments');
+                }
+                if ($locked->isDebtSettled() || $locked->recordedDebtPaymentsAmount() > 0.02) {
+                    abort(response()->json([
+                        'message' => 'روی این بدهی پرداخت ثبت شده و قابل حذف نیست.',
+                    ], 422));
+                }
+
+                AccountingSalePoster::reversePurchase($locked);
+                PurchasedProduct::query()->where('purchase_id', $locked->id)->delete();
+                $locked->delete();
+            });
+        } catch (\Illuminate\Http\Exceptions\HttpResponseException $e) {
+            return $e->getResponse();
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response(['message' => 'بدهی دستی حذف شد.'], 200);
+    }
+
+    /**
+     * بدهی ثبت‌شده با store(): یک ردیف بدون کالا، تعداد ۱ و بدون بهای تمام‌شده.
+     */
+    protected function isManualDebtPurchase(Purchase $purchase): bool
+    {
+        if ($purchase->cart_id || $purchase->oil_visit_id || $purchase->shop_table_id || $purchase->cheque_id) {
+            return false;
+        }
+        if ((float) $purchase->discount_amount > 0.01 || (float) $purchase->credit_used > 0.01) {
+            return false;
+        }
+
+        $purchase->loadMissing('purchasedProducts');
+        if ($purchase->purchasedProducts->count() !== 1) {
+            return false;
+        }
+
+        $line = $purchase->purchasedProducts->first();
+
+        return ! $line->product_id
+            && ! $line->produced_good_id
+            && ! $line->raw_material_id
+            && abs((float) $line->quantity - 1) < 0.001
+            && abs((float) $line->purchase_price) < 0.01;
+    }
+
     protected function formatDebtPurchase(Purchase $purchase, ?string $customerName = null): array
     {
         $purchase->loadMissing('purchasedProducts.product');
@@ -463,9 +529,12 @@ class PurchaseDebtController extends Controller
 
         $paidAmount = $purchase->recordedDebtPaymentsAmount();
         $remaining = $purchase->outstandingDebtAmount();
+        $isManual = $this->isManualDebtPurchase($purchase);
 
         return [
             'id' => $purchase->id,
+            'is_manual' => $isManual,
+            'can_delete' => $isManual && ! $purchase->is_debt_settled && $paidAmount <= 0.02,
             'phone' => $purchase->phone,
             'name' => $customerName,
             'customer_name' => $customerName,

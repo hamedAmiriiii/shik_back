@@ -520,6 +520,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/by-phone', [\App\Http\Controllers\PurchaseDebtController::class, 'byPhone']);
         Route::get('/{purchase}', [\App\Http\Controllers\PurchaseDebtController::class, 'show']);
         Route::post('/{purchase}/settle', [\App\Http\Controllers\PurchaseDebtController::class, 'settle']);
+        Route::delete('/{purchase}', [\App\Http\Controllers\PurchaseDebtController::class, 'destroy']);
     });
 
     // Financial Report routes - requires authentication

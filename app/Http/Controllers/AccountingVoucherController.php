@@ -48,12 +48,77 @@ class AccountingVoucherController extends Controller
             $query->whereDate('date', '<=', $to);
         }
 
+        $accountId = (int) $request->input('account_id', 0);
+        if ($accountId > 0) {
+            $accountIds = $this->accountWithDescendantIds($atelierId, $accountId);
+            $query->whereHas('lines', fn ($q) => $q->whereIn('account_id', $accountIds));
+        }
+
+        $amount = $this->normalizeSearchNumber((string) $request->input('amount', ''));
+        if ($amount !== '' && (float) $amount > 0) {
+            $value = round((float) $amount, 2);
+            $query->whereHas('lines', fn ($q) => $q->where(function ($w) use ($value) {
+                $w->where('debit', $value)->orWhere('credit', $value);
+            }));
+        }
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $numeric = $this->normalizeSearchNumber($search);
+            $query->where(function ($w) use ($search, $numeric) {
+                $w->where('description', 'like', '%'.$search.'%')
+                    ->orWhereHas('lines', fn ($q) => $q->where('description', 'like', '%'.$search.'%'));
+                if ($numeric !== '' && ctype_digit($numeric)) {
+                    $w->orWhere('number', (int) $numeric)->orWhere('source_id', (int) $numeric);
+                }
+            });
+        }
+
         $closed = AccountingPeriodCloseService::closedThrough($atelierId);
         $perPage = max(1, min(100, (int) $request->input('per_page', 20)));
         $page = $query->paginate($perPage);
         $page->getCollection()->transform(fn (AccountingVoucher $v) => $this->voucherWithLock($v, $closed));
 
         return response($page, 200);
+    }
+
+    /**
+     * @return list<int>
+     */
+    protected function accountWithDescendantIds(int $atelierId, int $accountId): array
+    {
+        $childrenByParent = [];
+        foreach (\App\Models\AccountingAccount::query()->forAtelier($atelierId)->get(['id', 'parent_id']) as $row) {
+            $childrenByParent[(int) $row->parent_id][] = (int) $row->id;
+        }
+
+        $ids = [];
+        $stack = [$accountId];
+        while ($stack !== []) {
+            $id = array_pop($stack);
+            if (isset($ids[$id])) {
+                continue;
+            }
+            $ids[$id] = true;
+            foreach ($childrenByParent[$id] ?? [] as $childId) {
+                $stack[] = $childId;
+            }
+        }
+
+        return array_keys($ids);
+    }
+
+    protected function normalizeSearchNumber(string $value): string
+    {
+        $value = strtr($value, [
+            '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+            '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+            '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+            '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+            ',' => '', '٬' => '', '،' => '', ' ' => '', '#' => '',
+        ]);
+
+        return trim($value);
     }
 
     /**
