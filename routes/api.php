@@ -299,6 +299,12 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         ->middleware('throttle:5,1');
     Route::post('shop-backup/restore', [\App\Http\Controllers\ShopBackupController::class, 'restore'])
         ->middleware('throttle:2,1');
+    Route::get('shop-backup/google-sheet', [\App\Http\Controllers\ShopGoogleSheetController::class, 'show']);
+    Route::put('shop-backup/google-sheet', [\App\Http\Controllers\ShopGoogleSheetController::class, 'update'])
+        ->middleware('throttle:10,1');
+    Route::delete('shop-backup/google-sheet', [\App\Http\Controllers\ShopGoogleSheetController::class, 'destroy']);
+    Route::post('shop-backup/google-sheet/export', [\App\Http\Controllers\ShopGoogleSheetController::class, 'export'])
+        ->middleware('throttle:3,1');
 
     Route::get('referral', [\App\Http\Controllers\ReferralController::class, 'show']);
 

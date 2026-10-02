@@ -268,7 +268,7 @@ class ShopBackupService
     /**
      * @return array<string, array<int, array<string, mixed>>>
      */
-    private function collectTables(int $atelierId): array
+    public function collectTables(int $atelierId): array
     {
         $out = [];
         foreach (ShopBackupTables::definitions() as $def) {

@@ -38,4 +38,14 @@ return [
         'log_retention_days' => (int) env('MOADIAN_LOG_RETENTION_DAYS', 90),
     ],
 
+    'google_sheets' => [
+        // مسیر فایل JSON کلید Service Account (نسبت به ریشه پروژه یا مسیر مطلق)
+        'credentials_path' => env('GOOGLE_SHEETS_CREDENTIALS_PATH', 'storage/app/google/service-account.json'),
+        // اگر سرور مستقیم به گوگل دسترسی ندارد، آدرس واسط (relay) را اینجا بگذارید
+        'token_url' => env('GOOGLE_SHEETS_TOKEN_URL', 'https://oauth2.googleapis.com/token'),
+        'api_base' => env('GOOGLE_SHEETS_API_BASE', 'https://sheets.googleapis.com/v4'),
+        'proxy' => env('GOOGLE_SHEETS_PROXY'),
+        'timeout' => (int) env('GOOGLE_SHEETS_TIMEOUT', 60),
+    ],
+
 ];
