@@ -8,4 +8,8 @@ return [
     'frontend_url' => rtrim((string) env('REPAIR_FRONTEND_URL', ''), '/'),
 
     'brand_name' => env('REPAIR_BRAND_NAME', 'تعمیرکار'),
+
+    // نقشهٔ نشان: کلید web برای نمایش نقشه در مرورگر، کلید service برای تبدیل مختصات به آدرس (فقط سمت سرور)
+    'neshan_map_key' => (string) env('NESHAN_MAP_KEY', ''),
+    'neshan_service_key' => (string) env('NESHAN_SERVICE_KEY', ''),
 ];

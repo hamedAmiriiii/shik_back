@@ -9,6 +9,7 @@ use App\Tools\PhoneTools;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 
 class RepairAuthController extends Controller
@@ -36,7 +37,44 @@ class RepairAuthController extends Controller
             'categories' => RepairSetting::categories($values),
             'online_payment_enabled' => $values['online_payment_enabled'] === '1',
             'card_payment_enabled' => $values['card_payment_enabled'] === '1',
+            'location_mode' => RepairSetting::locationMode($values),
+            'neshan_map_key' => (string) config('repair.neshan_map_key'),
         ]);
+    }
+
+    /**
+     * تبدیل مختصات به آدرس با سرویس نشان؛ کلید سرویس سمت سرور می‌ماند.
+     */
+    public function reverseGeocode(Request $request)
+    {
+        $data = $request->validate([
+            'lat' => 'required|numeric|between:24,40',
+            'lng' => 'required|numeric|between:44,64',
+        ]);
+        $key = (string) config('repair.neshan_service_key');
+        if ($key === '') {
+            return response(['address' => null]);
+        }
+
+        $lat = round((float) $data['lat'], 5);
+        $lng = round((float) $data['lng'], 5);
+        $address = Cache::remember('repair_reverse:'.$lat.','.$lng, now()->addDays(7), function () use ($key, $lat, $lng) {
+            try {
+                $res = Http::withHeaders(['Api-Key' => $key])
+                    ->timeout(8)
+                    ->get('https://api.neshan.org/v5/reverse', ['lat' => $lat, 'lng' => $lng]);
+            } catch (\Throwable $e) {
+                return null;
+            }
+            if (! $res->successful()) {
+                return null;
+            }
+            $address = $res->json('formatted_address');
+
+            return is_string($address) && $address !== '' ? $address : null;
+        });
+
+        return response(['address' => $address]);
     }
 
     public function sendCode(Request $request)

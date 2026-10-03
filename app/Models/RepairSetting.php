@@ -15,6 +15,8 @@ class RepairSetting extends Model
         'online_payment_enabled' => '1',
         'card_payment_enabled' => '1',
         'default_labor_share_percent' => '70',
+        // off: بدون نقشه | optional: اختیاری | required: انتخاب لوکیشن الزامی
+        'location_mode' => 'optional',
         'categories' => "لوازم خانگی\nتأسیسات و لوله‌کشی\nبرق ساختمان\nکولر و پکیج\nسایر",
     ];
 
@@ -38,6 +40,13 @@ class RepairSetting extends Model
         }
 
         return $values;
+    }
+
+    public static function locationMode(?array $values = null): string
+    {
+        $mode = $values['location_mode'] ?? self::value('location_mode');
+
+        return in_array($mode, ['off', 'optional', 'required'], true) ? $mode : 'optional';
     }
 
     public static function value(string $key): string

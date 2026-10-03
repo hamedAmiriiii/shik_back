@@ -28,6 +28,8 @@ class RepairRequestService
             'category' => $data['category'] ?? null,
             'description' => $data['description'],
             'address' => $data['address'],
+            'latitude' => $data['latitude'] ?? null,
+            'longitude' => $data['longitude'] ?? null,
             'contact_name' => $data['contact_name'] ?? $customer->name,
             'contact_phone' => $data['contact_phone'] ?? $customer->phone,
             'preferred_time' => $data['preferred_time'] ?? null,

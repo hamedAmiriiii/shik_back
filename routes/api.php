@@ -107,6 +107,8 @@ Route::prefix('repair')->name('repair.')->group(function () {
         Route::get('me', [\App\Http\Controllers\Repair\RepairAuthController::class, 'me']);
         Route::patch('me', [\App\Http\Controllers\Repair\RepairAuthController::class, 'updateProfile']);
         Route::post('logout', [\App\Http\Controllers\Repair\RepairAuthController::class, 'logout']);
+        Route::get('geo/reverse', [\App\Http\Controllers\Repair\RepairAuthController::class, 'reverseGeocode'])
+            ->middleware('throttle:40,1');
     });
 
     Route::middleware(['auth:sanctum', 'repair.role:customer'])->group(function () {

@@ -37,14 +37,26 @@ class RepairCustomerController extends Controller
     public function store(Request $request)
     {
         $customer = $this->customer($request);
+        $locationMode = RepairSetting::locationMode();
+        $locationRule = $locationMode === 'required' ? 'required' : 'nullable';
         $data = $request->validate([
             'category' => 'nullable|string|max:255',
             'description' => 'required|string|max:3000',
             'address' => 'required|string|max:1000',
+            'latitude' => $locationRule.'|numeric|between:24,40|required_with:longitude',
+            'longitude' => $locationRule.'|numeric|between:44,64|required_with:latitude',
             'contact_name' => 'nullable|string|max:150',
             'contact_phone' => 'nullable|string|max:20',
             'preferred_time' => 'nullable|string|max:255',
+        ], [
+            'latitude.required' => 'موقعیت را روی نقشه انتخاب کنید.',
+            'longitude.required' => 'موقعیت را روی نقشه انتخاب کنید.',
+            'latitude.between' => 'موقعیت انتخاب‌شده خارج از ایران است.',
+            'longitude.between' => 'موقعیت انتخاب‌شده خارج از ایران است.',
         ]);
+        if ($locationMode === 'off') {
+            unset($data['latitude'], $data['longitude']);
+        }
 
         if (! empty($data['contact_phone'])) {
             $phone = PhoneTools::normalizeIranPhone($data['contact_phone']);

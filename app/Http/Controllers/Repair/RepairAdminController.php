@@ -303,6 +303,7 @@ class RepairAdminController extends Controller
             'online_payment_enabled' => 'nullable|boolean',
             'card_payment_enabled' => 'nullable|boolean',
             'default_labor_share_percent' => 'nullable|numeric|min:0|max:100',
+            'location_mode' => 'nullable|string|in:off,optional,required',
             'categories' => 'nullable|string|max:3000',
         ]);
         foreach ($data as $key => $value) {
