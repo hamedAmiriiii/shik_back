@@ -233,8 +233,18 @@ class ShopGoogleOAuth
     private function redirectUri(): string
     {
         $configured = trim((string) config('services.google_sheets.oauth_redirect_uri'));
+        if ($configured !== '') {
+            return $configured;
+        }
 
-        return $configured !== '' ? $configured : url('/api/google-sheet/oauth/callback');
+        // پشت پراکسی/CDN درخواست http دیده می‌شود ولی آدرس ثبت‌شده در گوگل https است
+        $url = url('/api/google-sheet/oauth/callback');
+        $host = (string) parse_url($url, PHP_URL_HOST);
+        if (! in_array($host, ['localhost', '127.0.0.1'], true)) {
+            $url = preg_replace('#^http://#i', 'https://', $url);
+        }
+
+        return $url;
     }
 
     private function tokenCacheKey(int $atelierId): string
