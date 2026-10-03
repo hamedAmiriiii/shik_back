@@ -4,10 +4,12 @@ namespace App\Services;
 
 use App\Models\Atelier;
 use App\Models\GatewayPayment;
+use App\Models\RepairRequest;
 use App\Models\SmsPackage;
 use App\Models\SmsPackageOrder;
 use App\Models\ShopPlan;
 use App\Models\User;
+use App\Services\Repair\RepairRequestService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
@@ -466,6 +468,8 @@ class GatewayPaymentService
                 $this->fulfillSms($locked);
             } elseif ($locked->type === GatewayPayment::TYPE_SHOP_PLAN) {
                 $this->fulfillShopPlan($locked);
+            } elseif ($locked->type === GatewayPayment::TYPE_REPAIR_INVOICE) {
+                app(RepairRequestService::class)->fulfillOnlinePayment($locked, $refId);
             } else {
                 throw new RuntimeException('نوع خرید پشتیبانی نمی‌شود.');
             }
@@ -621,6 +625,19 @@ class GatewayPaymentService
                         : null,
                     'unlimited_products' => $plan->grantsUnlimitedProducts(),
                 ],
+            ];
+        }
+
+        if ($type === GatewayPayment::TYPE_REPAIR_INVOICE) {
+            $repair = RepairRequest::query()->find($itemId);
+            if (! $repair || ! $repair->isPayable()) {
+                throw new RuntimeException('این درخواست منتظر پرداخت نیست.');
+            }
+
+            return [
+                (int) $repair->total_amount * 10,
+                'پرداخت هزینهٔ تعمیر #'.$repair->id,
+                ['repair_request_id' => (int) $repair->id, 'total_toman' => (int) $repair->total_amount],
             ];
         }
 

@@ -45,6 +45,7 @@ class Kernel extends HttpKernel
 
         'api' => [
             \App\Http\Middleware\ResolveSanctumUserFromRequest::class,
+            \App\Http\Middleware\IsolateRepairTokens::class,
             // \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
             'throttle:api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
@@ -73,5 +74,6 @@ class Kernel extends HttpKernel
         'shop.from.route' => \App\Http\Middleware\BindShopFromRoute::class,
         'shop.staff.permission' => \App\Http\Middleware\EnforceShopStaffPermission::class,
         'oil.project' => \App\Http\Middleware\EnsureOilProject::class,
+        'repair.role' => \App\Http\Middleware\EnsureRepairRole::class,
     ];
 }

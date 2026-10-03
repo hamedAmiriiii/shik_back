@@ -95,6 +95,63 @@ Route::prefix('oil')->name('oil.')->group(function () {
     });
 });
 
+Route::prefix('repair')->name('repair.')->group(function () {
+    Route::get('config', [\App\Http\Controllers\Repair\RepairAuthController::class, 'config'])
+        ->middleware('throttle:60,1');
+    Route::post('auth/send-code', [\App\Http\Controllers\Repair\RepairAuthController::class, 'sendCode'])
+        ->middleware('throttle:5,1');
+    Route::post('auth/verify', [\App\Http\Controllers\Repair\RepairAuthController::class, 'verify'])
+        ->middleware('throttle:15,1');
+
+    Route::middleware(['auth:sanctum', 'repair.role'])->group(function () {
+        Route::get('me', [\App\Http\Controllers\Repair\RepairAuthController::class, 'me']);
+        Route::patch('me', [\App\Http\Controllers\Repair\RepairAuthController::class, 'updateProfile']);
+        Route::post('logout', [\App\Http\Controllers\Repair\RepairAuthController::class, 'logout']);
+    });
+
+    Route::middleware(['auth:sanctum', 'repair.role:customer'])->group(function () {
+        Route::get('requests', [\App\Http\Controllers\Repair\RepairCustomerController::class, 'index']);
+        Route::post('requests', [\App\Http\Controllers\Repair\RepairCustomerController::class, 'store'])
+            ->middleware('throttle:10,1');
+        Route::get('requests/{repairRequest}', [\App\Http\Controllers\Repair\RepairCustomerController::class, 'show']);
+        Route::post('requests/{repairRequest}/cancel', [\App\Http\Controllers\Repair\RepairCustomerController::class, 'cancel']);
+        Route::post('requests/{repairRequest}/pay', [\App\Http\Controllers\Repair\RepairCustomerController::class, 'payOnline'])
+            ->middleware('throttle:10,1');
+        Route::post('requests/{repairRequest}/receipt', [\App\Http\Controllers\Repair\RepairCustomerController::class, 'uploadReceipt'])
+            ->middleware('throttle:10,1');
+    });
+
+    Route::prefix('tech')->middleware(['auth:sanctum', 'repair.role:technician'])->group(function () {
+        Route::get('requests', [\App\Http\Controllers\Repair\RepairTechnicianController::class, 'index']);
+        Route::get('requests/{repairRequest}', [\App\Http\Controllers\Repair\RepairTechnicianController::class, 'show']);
+        Route::post('requests/{repairRequest}/start', [\App\Http\Controllers\Repair\RepairTechnicianController::class, 'start']);
+        Route::put('requests/{repairRequest}/cost', [\App\Http\Controllers\Repair\RepairTechnicianController::class, 'setCost']);
+        Route::get('wallet', [\App\Http\Controllers\Repair\RepairTechnicianController::class, 'wallet']);
+    });
+
+    Route::prefix('admin')->middleware(['auth:sanctum', 'repair.role:admin'])->group(function () {
+        Route::get('dashboard', [\App\Http\Controllers\Repair\RepairAdminController::class, 'dashboard']);
+        Route::get('requests', [\App\Http\Controllers\Repair\RepairAdminController::class, 'requests']);
+        Route::get('requests/{repairRequest}', [\App\Http\Controllers\Repair\RepairAdminController::class, 'showRequest']);
+        Route::post('requests/{repairRequest}/assign', [\App\Http\Controllers\Repair\RepairAdminController::class, 'assign']);
+        Route::put('requests/{repairRequest}/cost', [\App\Http\Controllers\Repair\RepairAdminController::class, 'setCost']);
+        Route::post('requests/{repairRequest}/receipt/approve', [\App\Http\Controllers\Repair\RepairAdminController::class, 'approveReceipt']);
+        Route::post('requests/{repairRequest}/receipt/reject', [\App\Http\Controllers\Repair\RepairAdminController::class, 'rejectReceipt']);
+        Route::post('requests/{repairRequest}/mark-paid', [\App\Http\Controllers\Repair\RepairAdminController::class, 'markPaid']);
+        Route::post('requests/{repairRequest}/cancel', [\App\Http\Controllers\Repair\RepairAdminController::class, 'cancel']);
+        Route::patch('requests/{repairRequest}/note', [\App\Http\Controllers\Repair\RepairAdminController::class, 'updateNote']);
+        Route::get('technicians', [\App\Http\Controllers\Repair\RepairAdminController::class, 'technicians']);
+        Route::post('technicians', [\App\Http\Controllers\Repair\RepairAdminController::class, 'storeTechnician']);
+        Route::patch('technicians/{technician}', [\App\Http\Controllers\Repair\RepairAdminController::class, 'updateTechnician']);
+        Route::get('payouts', [\App\Http\Controllers\Repair\RepairAdminController::class, 'payouts']);
+        Route::post('payouts', [\App\Http\Controllers\Repair\RepairAdminController::class, 'storePayout']);
+        Route::delete('payouts/{payout}', [\App\Http\Controllers\Repair\RepairAdminController::class, 'destroyPayout']);
+        Route::get('balances', [\App\Http\Controllers\Repair\RepairAdminController::class, 'balances']);
+        Route::get('settings', [\App\Http\Controllers\Repair\RepairAdminController::class, 'settings']);
+        Route::put('settings', [\App\Http\Controllers\Repair\RepairAdminController::class, 'updateSettings']);
+    });
+});
+
 Route::name('geo.')->prefix('geo')->group(function (){
     Route::get('cities' , [\App\Http\Controllers\CityController::class,'index']);
     Route::get('states' , [\App\Http\Controllers\StateController::class,'index']);

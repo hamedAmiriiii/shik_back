@@ -11,6 +11,8 @@ class GatewayPayment extends Model
 
     public const TYPE_SHOP_PLAN = 'shop_plan';
 
+    public const TYPE_REPAIR_INVOICE = 'repair_invoice';
+
     public const STATUS_PENDING = 'pending';
 
     public const STATUS_PAID = 'paid';
