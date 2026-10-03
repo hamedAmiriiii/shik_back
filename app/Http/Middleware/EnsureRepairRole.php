@@ -21,6 +21,9 @@ class EnsureRepairRole
         if (! $user->is_active) {
             return response()->json(['message' => 'حساب شما غیرفعال است.'], 403);
         }
+        if ($user->isTechnician() && ! $user->isApproved()) {
+            return response()->json(['message' => 'حساب شما در انتظار تأیید مدیر است.'], 403);
+        }
         if ($roles !== [] && ! in_array($user->role, $roles, true)) {
             return response()->json(['message' => 'به این بخش دسترسی ندارید.'], 403);
         }

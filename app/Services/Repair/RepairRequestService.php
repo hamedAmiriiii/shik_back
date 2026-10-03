@@ -25,6 +25,7 @@ class RepairRequestService
     {
         $request = RepairRequest::create([
             'customer_id' => $customer->id,
+            'service_id' => $data['service_id'] ?? null,
             'category' => $data['category'] ?? null,
             'description' => $data['description'],
             'address' => $data['address'],
@@ -54,7 +55,7 @@ class RepairRequestService
 
     public function assign(RepairRequest $request, RepairUser $technician, ?string $adminNote = null): RepairRequest
     {
-        if (! $technician->isTechnician() || ! $technician->is_active) {
+        if (! $technician->isTechnician() || ! $technician->is_active || ! $technician->isApproved()) {
             throw new RuntimeException('تعمیرکار انتخاب‌شده فعال نیست.');
         }
         if (! in_array($request->status, [

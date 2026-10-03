@@ -5,11 +5,14 @@ namespace App\Http\Controllers\Repair;
 use App\Http\Controllers\Controller;
 use App\Models\RepairPayout;
 use App\Models\RepairRequest;
+use App\Models\RepairService;
 use App\Models\RepairSetting;
 use App\Models\RepairUser;
+use App\Services\Repair\RepairNotifier;
 use App\Services\Repair\RepairRequestService;
 use App\Tools\PhoneTools;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use RuntimeException;
 
@@ -44,6 +47,10 @@ class RepairAdminController extends Controller
                 'technician_share' => (int) (clone $completedThisMonth)->sum('technician_share'),
             ],
             'technicians_balance' => array_sum(array_map(fn ($r) => max(0, $r['balance']), $balances)),
+            'pending_technicians' => RepairUser::query()
+                ->where('role', RepairUser::ROLE_TECHNICIAN)
+                ->where('approval_status', RepairUser::APPROVAL_PENDING)
+                ->count(),
         ]);
     }
 
@@ -173,9 +180,11 @@ class RepairAdminController extends Controller
         $balances = collect($this->service->balancesReport())->keyBy(fn ($r) => $r['technician']['id']);
         $rows = RepairUser::query()
             ->where('role', RepairUser::ROLE_TECHNICIAN)
+            ->with('services')
             ->withCount(['technicianRequests as open_requests' => function ($q) {
                 $q->whereNotIn('status', [RepairRequest::STATUS_COMPLETED, RepairRequest::STATUS_CANCELED]);
             }])
+            ->orderByRaw("CASE WHEN approval_status = 'pending' THEN 0 ELSE 1 END")
             ->orderByDesc('is_active')
             ->orderBy('name')
             ->get()
@@ -206,7 +215,12 @@ class RepairAdminController extends Controller
             return response()->json(['message' => 'این شماره درخواست مشتری ثبت کرده است؛ شمارهٔ دیگری وارد کنید.'], 422);
         }
 
-        $attributes = array_merge($data, ['role' => RepairUser::ROLE_TECHNICIAN, 'is_active' => $data['is_active'] ?? true]);
+        $serviceIds = $this->pullServiceIds($data);
+        $attributes = array_merge($data, [
+            'role' => RepairUser::ROLE_TECHNICIAN,
+            'approval_status' => RepairUser::APPROVAL_APPROVED,
+            'is_active' => $data['is_active'] ?? true,
+        ]);
         if ($existing) {
             $existing->tokens()->delete();
             $existing->update($attributes);
@@ -214,8 +228,11 @@ class RepairAdminController extends Controller
         } else {
             $technician = RepairUser::create($attributes);
         }
+        if ($serviceIds !== null) {
+            $technician->services()->sync($serviceIds);
+        }
 
-        return response(['message' => 'تعمیرکار ثبت شد.', 'technician' => $technician->toTechnicianArray()], 201);
+        return response(['message' => 'تعمیرکار ثبت شد.', 'technician' => $technician->load('services')->toTechnicianArray()], 201);
     }
 
     public function updateTechnician(Request $request, RepairUser $technician)
@@ -224,12 +241,138 @@ class RepairAdminController extends Controller
             return response()->json(['message' => 'تعمیرکار یافت نشد.'], 404);
         }
         $data = $this->validateTechnician($request, $technician);
+        $serviceIds = $this->pullServiceIds($data);
         $technician->update($data);
+        if ($serviceIds !== null) {
+            $technician->services()->sync($serviceIds);
+        }
         if (array_key_exists('is_active', $data) && ! $data['is_active']) {
             $technician->tokens()->delete();
         }
 
-        return response(['message' => 'ذخیره شد.', 'technician' => $technician->fresh()->toTechnicianArray()]);
+        return response(['message' => 'ذخیره شد.', 'technician' => $technician->fresh('services')->toTechnicianArray()]);
+    }
+
+    public function approveTechnician(Request $request, RepairUser $technician, RepairNotifier $notifier)
+    {
+        if (! $technician->isTechnician()) {
+            return response()->json(['message' => 'تعمیرکار یافت نشد.'], 404);
+        }
+        $data = $request->validate([
+            'labor_share_percent' => 'nullable|numeric|min:0|max:100',
+            'service_ids' => 'nullable|array',
+            'service_ids.*' => 'integer',
+        ]);
+
+        $technician->update(array_filter([
+            'approval_status' => RepairUser::APPROVAL_APPROVED,
+            'approval_note' => null,
+            'is_active' => true,
+            'labor_share_percent' => isset($data['labor_share_percent']) ? (float) $data['labor_share_percent'] : null,
+        ], fn ($v) => $v !== null) + ['approval_note' => null]);
+        $serviceIds = $this->pullServiceIds($data);
+        if ($serviceIds !== null) {
+            $technician->services()->sync($serviceIds);
+        }
+        $notifier->technicianApproved($technician);
+
+        return response(['message' => 'تعمیرکار تأیید شد و پیامک ورود برایش رفت.', 'technician' => $technician->fresh('services')->toTechnicianArray()]);
+    }
+
+    public function rejectTechnician(Request $request, RepairUser $technician, RepairNotifier $notifier)
+    {
+        if (! $technician->isTechnician()) {
+            return response()->json(['message' => 'تعمیرکار یافت نشد.'], 404);
+        }
+        if ($technician->technicianRequests()->whereNotIn('status', [RepairRequest::STATUS_COMPLETED, RepairRequest::STATUS_CANCELED])->exists()) {
+            return response()->json(['message' => 'این تعمیرکار کار باز دارد؛ ابتدا کارها را به دیگری ارجاع دهید.'], 422);
+        }
+        $data = $request->validate(['reason' => 'nullable|string|max:1000']);
+        $technician->update([
+            'approval_status' => RepairUser::APPROVAL_REJECTED,
+            'approval_note' => $data['reason'] ?? null,
+        ]);
+        $technician->tokens()->delete();
+        $notifier->technicianRejected($technician);
+
+        return response(['message' => 'ثبت‌نام رد شد.', 'technician' => $technician->fresh('services')->toTechnicianArray()]);
+    }
+
+    public function services()
+    {
+        $counts = DB::table('repair_technician_services')
+            ->join('repair_users', 'repair_users.id', '=', 'repair_technician_services.technician_id')
+            ->where('repair_users.approval_status', RepairUser::APPROVAL_APPROVED)
+            ->where('repair_users.is_active', true)
+            ->groupBy('service_id')
+            ->pluck(DB::raw('COUNT(*)'), 'service_id');
+
+        return response([
+            'services' => RepairService::query()->ordered()->get()->map(function (RepairService $s) use ($counts) {
+                $row = $s->toApiArray();
+                $row['technicians_count'] = (int) ($counts[$s->id] ?? 0);
+                $row['requests_count'] = RepairRequest::query()->where('service_id', $s->id)->count();
+
+                return $row;
+            })->all(),
+        ]);
+    }
+
+    public function storeService(Request $request)
+    {
+        $data = $request->validate([
+            'name' => 'required|string|max:255',
+            'is_active' => 'sometimes|boolean',
+            'sort_order' => 'nullable|integer|min:0|max:100000',
+        ]);
+        $service = RepairService::create([
+            'name' => trim($data['name']),
+            'is_active' => $data['is_active'] ?? true,
+            'sort_order' => $data['sort_order'] ?? ((int) RepairService::query()->max('sort_order') + 1),
+        ]);
+
+        return response(['message' => 'نوع خدمت اضافه شد.', 'service' => $service->toApiArray()], 201);
+    }
+
+    public function updateService(Request $request, RepairService $service)
+    {
+        $data = $request->validate([
+            'name' => 'sometimes|required|string|max:255',
+            'is_active' => 'sometimes|boolean',
+            'sort_order' => 'nullable|integer|min:0|max:100000',
+        ]);
+        if (isset($data['name'])) {
+            $data['name'] = trim($data['name']);
+        }
+        $service->update(array_filter($data, fn ($v) => $v !== null));
+
+        return response(['message' => 'ذخیره شد.', 'service' => $service->fresh()->toApiArray()]);
+    }
+
+    public function destroyService(RepairService $service)
+    {
+        if (RepairRequest::query()->where('service_id', $service->id)->exists()) {
+            return response()->json(['message' => 'برای این خدمت درخواست ثبت شده است؛ به‌جای حذف، غیرفعالش کنید.'], 422);
+        }
+        DB::table('repair_technician_services')->where('service_id', $service->id)->delete();
+        $service->delete();
+
+        return response(['message' => 'نوع خدمت حذف شد.']);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return list<int>|null
+     */
+    private function pullServiceIds(array &$data): ?array
+    {
+        if (! array_key_exists('service_ids', $data)) {
+            return null;
+        }
+        $ids = is_array($data['service_ids']) ? $data['service_ids'] : [];
+        unset($data['service_ids']);
+
+        return RepairService::query()->whereIn('id', $ids)->pluck('id')->map(fn ($id) => (int) $id)->all();
     }
 
     public function payouts(Request $request)
@@ -304,7 +447,7 @@ class RepairAdminController extends Controller
             'card_payment_enabled' => 'nullable|boolean',
             'default_labor_share_percent' => 'nullable|numeric|min:0|max:100',
             'location_mode' => 'nullable|string|in:off,optional,required',
-            'categories' => 'nullable|string|max:3000',
+            'map_provider' => 'nullable|string|in:auto,neshan,osm',
         ]);
         foreach ($data as $key => $value) {
             if (is_bool($value)) {
@@ -327,8 +470,11 @@ class RepairAdminController extends Controller
             'specialty' => 'nullable|string|max:255',
             'labor_share_percent' => ($technician ? 'sometimes|' : '').'required|numeric|min:0|max:100',
             'card_number' => 'nullable|string|max:32',
+            'address' => 'nullable|string|max:1000',
             'notes' => 'nullable|string|max:2000',
             'is_active' => 'sometimes|boolean',
+            'service_ids' => 'sometimes|array',
+            'service_ids.*' => 'integer',
         ]);
 
         if (array_key_exists('phone', $data)) {

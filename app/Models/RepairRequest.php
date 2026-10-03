@@ -49,6 +49,7 @@ class RepairRequest extends Model
     protected $fillable = [
         'customer_id',
         'technician_id',
+        'service_id',
         'category',
         'description',
         'address',
@@ -137,6 +138,7 @@ class RepairRequest extends Model
 
         $row = [
             'id' => (int) $this->id,
+            'service_id' => $this->service_id ? (int) $this->service_id : null,
             'category' => $this->category,
             'description' => $this->description,
             'address' => $this->address,

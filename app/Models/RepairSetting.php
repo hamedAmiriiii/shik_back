@@ -17,6 +17,8 @@ class RepairSetting extends Model
         'default_labor_share_percent' => '70',
         // off: بدون نقشه | optional: اختیاری | required: انتخاب لوکیشن الزامی
         'location_mode' => 'optional',
+        // auto: نشان اگر کلید داشت وگرنه OpenStreetMap | neshan | osm
+        'map_provider' => 'auto',
         'categories' => "لوازم خانگی\nتأسیسات و لوله‌کشی\nبرق ساختمان\nکولر و پکیج\nسایر",
     ];
 
@@ -47,6 +49,17 @@ class RepairSetting extends Model
         $mode = $values['location_mode'] ?? self::value('location_mode');
 
         return in_array($mode, ['off', 'optional', 'required'], true) ? $mode : 'optional';
+    }
+
+    /** سرویس نقشهٔ نهایی: neshan یا osm (نشان بدون کلید ممکن نیست). */
+    public static function mapProvider(?array $values = null): string
+    {
+        $choice = $values['map_provider'] ?? self::value('map_provider');
+        if ($choice === 'osm' || (string) config('repair.neshan_map_key') === '') {
+            return 'osm';
+        }
+
+        return 'neshan';
     }
 
     public static function value(string $key): string

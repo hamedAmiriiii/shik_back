@@ -119,6 +119,49 @@ class RepairNotifier
         }
     }
 
+    public function technicianRegistered(RepairUser $technician): void
+    {
+        $text = $this->brand().': تعمیرکار جدید ثبت‌نام کرد: '.$technician->name.' ('.$technician->phone.')'
+            ."\nبرای تأیید: ".$this->link('/repair/admin/technicians');
+        foreach ($this->adminPhones() as $phone) {
+            $this->send($phone, $text);
+        }
+    }
+
+    public function technicianApproved(RepairUser $technician): void
+    {
+        $this->send(
+            $technician->phone,
+            $this->brand().': ثبت‌نام شما به‌عنوان تعمیرکار تأیید شد.'
+            ."\nورود: ".$this->link('/repair/tech/login')
+        );
+    }
+
+    public function technicianRejected(RepairUser $technician): void
+    {
+        $this->send(
+            $technician->phone,
+            $this->brand().': ثبت‌نام شما به‌عنوان تعمیرکار تأیید نشد.'
+            .($technician->approval_note ? ' '.$technician->approval_note : '')
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function adminPhones(): array
+    {
+        return RepairUser::query()
+            ->where('role', RepairUser::ROLE_ADMIN)
+            ->where('is_active', true)
+            ->pluck('phone')
+            ->merge(config('repair.admin_phones', []))
+            ->map(fn ($p) => (string) $p)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
     public function send(?string $phone, string $text): void
     {
         if (! is_string($phone) || $phone === '') {

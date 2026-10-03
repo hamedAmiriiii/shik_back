@@ -100,6 +100,10 @@ Route::prefix('repair')->name('repair.')->group(function () {
         ->middleware('throttle:60,1');
     Route::post('auth/send-code', [\App\Http\Controllers\Repair\RepairAuthController::class, 'sendCode'])
         ->middleware('throttle:5,1');
+    Route::post('tech-auth/verify', [\App\Http\Controllers\Repair\RepairAuthController::class, 'techVerify'])
+        ->middleware('throttle:15,1');
+    Route::post('tech-auth/register', [\App\Http\Controllers\Repair\RepairAuthController::class, 'techRegister'])
+        ->middleware('throttle:10,1');
     Route::post('auth/verify', [\App\Http\Controllers\Repair\RepairAuthController::class, 'verify'])
         ->middleware('throttle:15,1');
 
@@ -145,6 +149,12 @@ Route::prefix('repair')->name('repair.')->group(function () {
         Route::get('technicians', [\App\Http\Controllers\Repair\RepairAdminController::class, 'technicians']);
         Route::post('technicians', [\App\Http\Controllers\Repair\RepairAdminController::class, 'storeTechnician']);
         Route::patch('technicians/{technician}', [\App\Http\Controllers\Repair\RepairAdminController::class, 'updateTechnician']);
+        Route::post('technicians/{technician}/approve', [\App\Http\Controllers\Repair\RepairAdminController::class, 'approveTechnician']);
+        Route::post('technicians/{technician}/reject', [\App\Http\Controllers\Repair\RepairAdminController::class, 'rejectTechnician']);
+        Route::get('services', [\App\Http\Controllers\Repair\RepairAdminController::class, 'services']);
+        Route::post('services', [\App\Http\Controllers\Repair\RepairAdminController::class, 'storeService']);
+        Route::patch('services/{service}', [\App\Http\Controllers\Repair\RepairAdminController::class, 'updateService']);
+        Route::delete('services/{service}', [\App\Http\Controllers\Repair\RepairAdminController::class, 'destroyService']);
         Route::get('payouts', [\App\Http\Controllers\Repair\RepairAdminController::class, 'payouts']);
         Route::post('payouts', [\App\Http\Controllers\Repair\RepairAdminController::class, 'storePayout']);
         Route::delete('payouts/{payout}', [\App\Http\Controllers\Repair\RepairAdminController::class, 'destroyPayout']);

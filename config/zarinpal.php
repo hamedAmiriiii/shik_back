@@ -2,7 +2,7 @@
 
 return [
     // اگر کلید در .env خالی باشد، env() مقدار پیش‌فرض را برنمی‌گرداند.
-    'merchant_id' => env('ZARINPAL_MERCHANT_ID') ?: '28c5b546-aa10-482c-b916-463ff0d798dc',
+    'merchant_id' => env('ZARINPAL_MERCHANT_ID') ?: '',
     'sandbox' => (bool) env('ZARINPAL_SANDBOX', false),
     // دامنهٔ ثبت‌شده در پنل زرین‌پال: webinoo-plus.ir
     'callback_url' => env('ZARINPAL_CALLBACK_URL') ?: 'https://webinoo-plus.ir/zarinpal-callback.html',

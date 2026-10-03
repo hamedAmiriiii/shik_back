@@ -5,12 +5,14 @@ namespace App\Http\Controllers\Repair;
 use App\Http\Controllers\Controller;
 use App\Models\GatewayPayment;
 use App\Models\RepairRequest;
+use App\Models\RepairService;
 use App\Models\RepairSetting;
 use App\Models\RepairUser;
 use App\Services\GatewayPaymentService;
 use App\Services\Repair\RepairRequestService;
 use App\Tools\PhoneTools;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
 class RepairCustomerController extends Controller
@@ -40,7 +42,7 @@ class RepairCustomerController extends Controller
         $locationMode = RepairSetting::locationMode();
         $locationRule = $locationMode === 'required' ? 'required' : 'nullable';
         $data = $request->validate([
-            'category' => 'nullable|string|max:255',
+            'service_id' => 'nullable|integer',
             'description' => 'required|string|max:3000',
             'address' => 'required|string|max:1000',
             'latitude' => $locationRule.'|numeric|between:24,40|required_with:longitude',
@@ -58,6 +60,21 @@ class RepairCustomerController extends Controller
             unset($data['latitude'], $data['longitude']);
         }
 
+        $data['service_id'] = null;
+        $data['category'] = null;
+        if (! Schema::hasTable('repair_services')) {
+            $category = trim((string) $request->input('category', ''));
+            $data['category'] = in_array($category, RepairSetting::categories(), true) ? $category : null;
+        } elseif ($request->filled('service_id')) {
+            $service = RepairService::query()->where('is_active', true)->find((int) $request->input('service_id'));
+            if (! $service) {
+                return response()->json(['message' => 'نوع خدمت انتخاب‌شده معتبر نیست.'], 422);
+            }
+            $data['service_id'] = (int) $service->id;
+            $data['category'] = $service->name;
+        } elseif (RepairService::query()->where('is_active', true)->exists()) {
+            return response()->json(['message' => 'نوع خدمت را انتخاب کنید.'], 422);
+        }
         if (! empty($data['contact_phone'])) {
             $phone = PhoneTools::normalizeIranPhone($data['contact_phone']);
             if (! PhoneTools::isValidIranMobile($phone)) {
