@@ -1,7 +1,7 @@
 <?php
 
 return [
-    'terminal_id' => env('SEP_TERMINAL_ID') ?: ,
+    'terminal_id' => env('SEP_TERMINAL_ID') ?: '',
     // باید دقیقاً همان آدرس ثبت‌شده در پنل SEP باشد
     'callback_url' => env('SEP_CALLBACK_URL') ?: 'https://webinoo-plus.ir/pay',
     'token_url' => env('SEP_TOKEN_URL') ?: 'https://sep.shaparak.ir/onlinepg/onlinepg',
