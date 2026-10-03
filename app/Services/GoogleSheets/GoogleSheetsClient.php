@@ -25,6 +25,45 @@ class GoogleSheetsClient
     /** @var Client|null */
     private $http;
 
+    /** @var ShopGoogleOAuth|null */
+    private $oauth;
+
+    /** @var int|null */
+    private $oauthAtelierId;
+
+    /**
+     * همین کلاینت، ولی با توکن حساب گوگلِ خود فروشگاه به‌جای Service Account.
+     */
+    public function forShopAccount(ShopGoogleOAuth $oauth, int $atelierId): self
+    {
+        $client = clone $this;
+        $client->oauth = $oauth;
+        $client->oauthAtelierId = $atelierId;
+
+        return $client;
+    }
+
+    public function usesShopAccount(): bool
+    {
+        return $this->oauthAtelierId !== null;
+    }
+
+    /**
+     * @return string شناسهٔ شیت ساخته‌شده
+     */
+    public function createSpreadsheet(string $title): string
+    {
+        $result = $this->request('POST', '/spreadsheets', [
+            'json' => ['properties' => ['title' => $title]],
+        ]);
+        $id = (string) ($result['spreadsheetId'] ?? '');
+        if ($id === '') {
+            throw new GoogleSheetsException('ساخت گوگل شیت ممکن نشد.');
+        }
+
+        return $id;
+    }
+
     public function isConfigured(): bool
     {
         try {
@@ -112,7 +151,7 @@ class GoogleSheetsClient
 
         while (true) {
             $attempt++;
-            $options['headers'] = ['Authorization' => 'Bearer '.$this->accessToken()];
+            $options['headers'] = ['Authorization' => 'Bearer '.$this->currentAccessToken()];
 
             try {
                 $response = $this->http()->request($method, $url, $options);
@@ -124,7 +163,11 @@ class GoogleSheetsClient
             } catch (RequestException $e) {
                 $status = $e->hasResponse() ? $e->getResponse()->getStatusCode() : 0;
                 if ($status === 401 && $attempt === 1) {
-                    Cache::forget($this->tokenCacheKey());
+                    if ($this->oauth !== null) {
+                        $this->oauth->forgetAccessToken((int) $this->oauthAtelierId);
+                    } else {
+                        Cache::forget($this->tokenCacheKey());
+                    }
                     continue;
                 }
                 if (($status === 429 || $status >= 500) && $attempt < self::MAX_RETRIES) {
@@ -143,8 +186,9 @@ class GoogleSheetsClient
         $apiMessage = is_array($decoded) ? (string) ($decoded['error']['message'] ?? '') : '';
 
         if ($status === 403) {
-            $email = $this->serviceAccountEmail();
-            $message = 'دسترسی به شیت داده نشده است. شیت را با ایمیل '.$email.' به صورت Editor به اشتراک بگذارید.';
+            $message = $this->oauth !== null
+                ? 'حساب گوگل فروشگاه به این شیت دسترسی ندارد. قطع اتصال کنید و دوباره با گوگل وارد شوید.'
+                : 'دسترسی به شیت داده نشده است. شیت را با ایمیل '.$this->serviceAccountEmail().' به صورت Editor به اشتراک بگذارید.';
             if (stripos($apiMessage, 'has not been used') !== false || stripos($apiMessage, 'disabled') !== false) {
                 $message = 'Google Sheets API در پروژه گوگل فعال نیست.';
             } elseif (stripos($apiMessage, 'location') !== false || stripos($apiMessage, 'region') !== false) {
@@ -165,6 +209,15 @@ class GoogleSheetsClient
             $status,
             $e
         );
+    }
+
+    private function currentAccessToken(): string
+    {
+        if ($this->oauth !== null) {
+            return $this->oauth->accessToken((int) $this->oauthAtelierId);
+        }
+
+        return $this->accessToken();
     }
 
     private function accessToken(): string

@@ -48,10 +48,14 @@ class ShopGoogleSheetExportService
     /** @var ShopBackupService */
     private $backups;
 
-    public function __construct(GoogleSheetsClient $client, ShopBackupService $backups)
+    /** @var ShopGoogleOAuth */
+    private $oauth;
+
+    public function __construct(GoogleSheetsClient $client, ShopBackupService $backups, ShopGoogleOAuth $oauth)
     {
         $this->client = $client;
         $this->backups = $backups;
+        $this->oauth = $oauth;
     }
 
     /**
@@ -60,9 +64,15 @@ class ShopGoogleSheetExportService
     public function status(int $atelierId): array
     {
         $spreadsheetId = $this->setting($atelierId, self::KEY_SPREADSHEET_ID);
+        $oauthEnabled = $this->oauth->isEnabled();
+        $serviceAccount = $this->client->isConfigured();
 
         return [
-            'configured' => $this->client->isConfigured(),
+            'configured' => $oauthEnabled || $serviceAccount,
+            'oauth_enabled' => $oauthEnabled,
+            'google_connected' => $oauthEnabled && $this->oauth->isConnected($atelierId),
+            'google_email' => $this->oauth->connectedEmail($atelierId),
+            'service_account_enabled' => $serviceAccount,
             'service_account_email' => $this->client->serviceAccountEmail(),
             'spreadsheet_id' => $spreadsheetId,
             'spreadsheet_url' => $spreadsheetId ? $this->spreadsheetUrl($spreadsheetId) : null,
@@ -93,6 +103,9 @@ class ShopGoogleSheetExportService
 
     public function disconnect(int $atelierId): void
     {
+        if ($this->oauth->isConnected($atelierId)) {
+            $this->oauth->disconnect($atelierId);
+        }
         $this->putSetting($atelierId, self::KEY_SPREADSHEET_ID, '');
         $this->putSetting($atelierId, self::KEY_LAST_EXPORT_ERROR, '');
     }
@@ -102,9 +115,11 @@ class ShopGoogleSheetExportService
      */
     public function export(int $atelierId): array
     {
+        $usesShopAccount = $this->oauth->isEnabled() && $this->oauth->isConnected($atelierId);
+        $client = $usesShopAccount ? $this->client->forShopAccount($this->oauth, $atelierId) : $this->client;
         $spreadsheetId = $this->setting($atelierId, self::KEY_SPREADSHEET_ID);
-        if (! $spreadsheetId) {
-            throw new GoogleSheetsException('ابتدا لینک گوگل شیت را ثبت کنید.');
+        if (! $spreadsheetId && ! $usesShopAccount) {
+            throw new GoogleSheetsException('ابتدا با حساب گوگل فروشگاه وارد شوید.');
         }
 
         $lock = null;
@@ -119,11 +134,14 @@ class ShopGoogleSheetExportService
         try {
             $sheets = $this->buildSheets($atelierId);
             $this->assertWithinCellLimit($sheets);
-            $this->prepareTabs($spreadsheetId, $sheets);
-            $this->client->batchClearValues($spreadsheetId, array_map(function ($title) {
+            if ($usesShopAccount) {
+                $spreadsheetId = $this->ensureShopSpreadsheet($client, $atelierId, $spreadsheetId);
+            }
+            $this->prepareTabs($client, $spreadsheetId, $sheets);
+            $client->batchClearValues($spreadsheetId, array_map(function ($title) {
                 return $this->quoteTitle($title);
             }, array_keys($sheets)));
-            $this->writeValues($spreadsheetId, $sheets);
+            $this->writeValues($client, $spreadsheetId, $sheets);
         } catch (GoogleSheetsException $e) {
             $this->putSetting($atelierId, self::KEY_LAST_EXPORT_ERROR, $e->getMessage());
             throw $e;
@@ -149,6 +167,31 @@ class ShopGoogleSheetExportService
             'rows' => $rows,
             'last_export_at' => $this->setting($atelierId, self::KEY_LAST_EXPORT_AT),
         ];
+    }
+
+    /**
+     * شیت فروشگاه در درایو خودش؛ اگر نبود یا کاربر پاکش کرده بود، تازه ساخته می‌شود.
+     */
+    private function ensureShopSpreadsheet(GoogleSheetsClient $client, int $atelierId, ?string $spreadsheetId): string
+    {
+        if ($spreadsheetId) {
+            try {
+                $client->getSpreadsheet($spreadsheetId);
+
+                return $spreadsheetId;
+            } catch (GoogleSheetsException $e) {
+                if ($e->getCode() !== 404 && $e->getCode() !== 403) {
+                    throw $e;
+                }
+            }
+        }
+
+        $atelier = Atelier::find($atelierId);
+        $title = 'وبینو — '.trim((string) ($atelier->name ?? ('فروشگاه '.$atelierId)));
+        $spreadsheetId = $client->createSpreadsheet($title);
+        $this->putSetting($atelierId, self::KEY_SPREADSHEET_ID, $spreadsheetId);
+
+        return $spreadsheetId;
     }
 
     public static function parseSpreadsheetId(string $input): ?string
@@ -256,9 +299,9 @@ class ShopGoogleSheetExportService
      *
      * @param  array<string, array<int, array<int, mixed>>>  $sheets
      */
-    private function prepareTabs(string $spreadsheetId, array $sheets): void
+    private function prepareTabs(GoogleSheetsClient $client, string $spreadsheetId, array $sheets): void
     {
-        $meta = $this->client->getSpreadsheet($spreadsheetId);
+        $meta = $client->getSpreadsheet($spreadsheetId);
         $existing = [];
         foreach ($meta['sheets'] ?? [] as $sheet) {
             $props = $sheet['properties'] ?? [];
@@ -278,7 +321,7 @@ class ShopGoogleSheetExportService
             }
         }
         if ($add !== []) {
-            $result = $this->client->batchUpdate($spreadsheetId, $add);
+            $result = $client->batchUpdate($spreadsheetId, $add);
             foreach ($result['replies'] ?? [] as $reply) {
                 $props = $reply['addSheet']['properties'] ?? null;
                 if (is_array($props) && isset($props['title'], $props['sheetId'])) {
@@ -323,7 +366,7 @@ class ShopGoogleSheetExportService
             return $a['delta'] <=> $b['delta'];
         });
 
-        $this->client->batchUpdate($spreadsheetId, array_map(function ($item) {
+        $client->batchUpdate($spreadsheetId, array_map(function ($item) {
             return $item['request'];
         }, $resize));
     }
@@ -331,7 +374,7 @@ class ShopGoogleSheetExportService
     /**
      * @param  array<string, array<int, array<int, mixed>>>  $sheets
      */
-    private function writeValues(string $spreadsheetId, array $sheets): void
+    private function writeValues(GoogleSheetsClient $client, string $spreadsheetId, array $sheets): void
     {
         $batch = [];
         $batchBytes = 0;
@@ -344,7 +387,7 @@ class ShopGoogleSheetExportService
             foreach (array_chunk($values, self::ROWS_PER_RANGE) as $chunk) {
                 $bytes = strlen((string) json_encode($chunk, JSON_UNESCAPED_UNICODE));
                 if ($batch !== [] && $batchBytes + $bytes > self::MAX_BATCH_BYTES) {
-                    $this->client->batchUpdateValues($spreadsheetId, $batch);
+                    $client->batchUpdateValues($spreadsheetId, $batch);
                     $batch = [];
                     $batchBytes = 0;
                 }
@@ -358,7 +401,7 @@ class ShopGoogleSheetExportService
         }
 
         if ($batch !== []) {
-            $this->client->batchUpdateValues($spreadsheetId, $batch);
+            $client->batchUpdateValues($spreadsheetId, $batch);
         }
     }
 

@@ -43,6 +43,8 @@ Route::post('payments/sep/callback', [\App\Http\Controllers\GatewayPaymentContro
     ->middleware('throttle:60,1');
 Route::get('payments/sep/go', [\App\Http\Controllers\GatewayPaymentController::class, 'sepGo'])
     ->middleware('throttle:60,1');
+Route::get('google-sheet/oauth/callback', [\App\Http\Controllers\ShopGoogleSheetController::class, 'oauthCallback'])
+    ->middleware('throttle:30,1');
 Route::get('product-plans', [\App\Http\Controllers\ProductPlanController::class, 'index'])
     ->middleware('throttle:60,1');
 Route::post('product-plans/purchase', [\App\Http\Controllers\ProductPlanController::class, 'purchase'])
@@ -303,6 +305,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::put('shop-backup/google-sheet', [\App\Http\Controllers\ShopGoogleSheetController::class, 'update'])
         ->middleware('throttle:10,1');
     Route::delete('shop-backup/google-sheet', [\App\Http\Controllers\ShopGoogleSheetController::class, 'destroy']);
+    Route::post('shop-backup/google-sheet/oauth-url', [\App\Http\Controllers\ShopGoogleSheetController::class, 'oauthUrl'])
+        ->middleware('throttle:10,1');
     Route::post('shop-backup/google-sheet/export', [\App\Http\Controllers\ShopGoogleSheetController::class, 'export'])
         ->middleware('throttle:3,1');
 

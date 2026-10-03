@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Setting;
+use App\Services\GoogleSheets\ShopGoogleOAuth;
 use App\Services\ShopLoyaltyCreditTierService;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
@@ -31,7 +32,7 @@ class SettingController extends Controller
         } else {
             $q->whereNull('atelier_id');
         }
-        $settings = $q->get()->pluck('value', 'key');
+        $settings = $q->whereNotIn('key', ShopGoogleOAuth::PRIVATE_SETTING_KEYS)->get()->pluck('value', 'key');
 
         return response($settings, 200);
     }
@@ -43,6 +44,9 @@ class SettingController extends Controller
     {
         if ($key === 'loyalty-credit-tiers') {
             return $this->getLoyaltyCreditTiers($request);
+        }
+        if (in_array($key, ShopGoogleOAuth::PRIVATE_SETTING_KEYS, true)) {
+            return response()->json(['message' => 'این تنظیم قابل خواندن نیست.'], 403);
         }
 
         $this->bindShopSettingAtelierFromRequest($request);
@@ -63,6 +67,9 @@ class SettingController extends Controller
             return response()->json([
                 'message' => 'این تنظیم فقط توسط ادمین سامانه قابل تغییر است.',
             ], 403);
+        }
+        if (in_array($key, ShopGoogleOAuth::PRIVATE_SETTING_KEYS, true)) {
+            return response()->json(['message' => 'این تنظیم از این مسیر قابل تغییر نیست.'], 403);
         }
 
         $this->bindShopSettingAtelierFromRequest($request);

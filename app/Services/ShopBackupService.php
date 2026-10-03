@@ -282,7 +282,12 @@ class ShopBackupService
                 if (! Schema::hasColumn($name, 'atelier_id')) {
                     continue;
                 }
-                $rows = DB::table($name)->where('atelier_id', $atelierId)->orderBy('id')->get();
+                $query = DB::table($name)->where('atelier_id', $atelierId);
+                $exclude = $def['exclude_keys'] ?? [];
+                if ($exclude !== [] && Schema::hasColumn($name, 'key')) {
+                    $query->whereNotIn('key', $exclude);
+                }
+                $rows = $query->orderBy('id')->get();
             } else {
                 $parentIds = $this->idsFromCollected($def['parent'], $out);
                 if ($parentIds === [] || ! Schema::hasColumn($name, $def['parent_key'])) {

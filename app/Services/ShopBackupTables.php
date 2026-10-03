@@ -17,6 +17,14 @@ class ShopBackupTables
      */
     public const PRESERVED_SETTING_KEYS = [
         'shop_sms_quota',
+        'google_oauth_refresh_token',
+        'google_oauth_email',
+        'google_sheet_spreadsheet_id',
+    ];
+
+    /** هرگز وارد فایل پشتیبان یا گوگل شیت نمی‌شوند */
+    public const EXCLUDED_SETTING_KEYS = [
+        'google_oauth_refresh_token',
     ];
 
     /**
@@ -50,6 +58,7 @@ class ShopBackupTables
                 'scope' => 'atelier',
                 'fks' => [],
                 'preserve_keys' => self::PRESERVED_SETTING_KEYS,
+                'exclude_keys' => self::EXCLUDED_SETTING_KEYS,
             ],
             [
                 'name' => 'formal_invoice_seller_profiles',

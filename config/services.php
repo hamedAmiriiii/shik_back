@@ -46,6 +46,12 @@ return [
         'api_base' => env('GOOGLE_SHEETS_API_BASE', 'https://sheets.googleapis.com/v4'),
         'proxy' => env('GOOGLE_SHEETS_PROXY'),
         'timeout' => (int) env('GOOGLE_SHEETS_TIMEOUT', 60),
+        // ورود با حساب گوگلِ هر فروشگاه (OAuth Client از نوع Web application)
+        'oauth_client_id' => env('GOOGLE_SHEETS_OAUTH_CLIENT_ID'),
+        'oauth_client_secret' => env('GOOGLE_SHEETS_OAUTH_CLIENT_SECRET'),
+        // پیش‌فرض: {APP_URL}/api/google-sheet/oauth/callback — همین آدرس باید در Google Cloud ثبت شود
+        'oauth_redirect_uri' => env('GOOGLE_SHEETS_OAUTH_REDIRECT_URI'),
+        'oauth_auth_url' => env('GOOGLE_SHEETS_OAUTH_AUTH_URL', 'https://accounts.google.com/o/oauth2/v2/auth'),
     ],
 
 ];
