@@ -307,6 +307,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::delete('shop-backup/google-sheet', [\App\Http\Controllers\ShopGoogleSheetController::class, 'destroy']);
     Route::post('shop-backup/google-sheet/oauth-url', [\App\Http\Controllers\ShopGoogleSheetController::class, 'oauthUrl'])
         ->middleware('throttle:10,1');
+    Route::put('shop-backup/google-sheet/tables', [\App\Http\Controllers\ShopGoogleSheetController::class, 'updateTables']);
     Route::post('shop-backup/google-sheet/export', [\App\Http\Controllers\ShopGoogleSheetController::class, 'export'])
         ->middleware('throttle:3,1');
 

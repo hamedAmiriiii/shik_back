@@ -57,6 +57,29 @@ class ShopGoogleSheetController extends Controller
     }
 
     /**
+     * جداولی که به گوگل شیت فرستاده می‌شوند.
+     * PUT /api/shop-backup/google-sheet/tables  {tables: ["purchases", ...]}
+     */
+    public function updateTables(Request $request, ShopGoogleSheetExportService $sheets)
+    {
+        $this->requireStaffShopUser($request);
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+
+        $request->validate([
+            'tables' => 'required|array|min:1',
+            'tables.*' => 'string|max:100',
+        ]);
+
+        try {
+            $sheets->setSelectedTables($atelierId, (array) $request->input('tables'));
+        } catch (GoogleSheetsException $e) {
+            return response(['message' => $e->getMessage()], 422);
+        }
+
+        return response(array_merge(['message' => 'جداول ارسالی ذخیره شد.'], $sheets->status($atelierId)), 200);
+    }
+
+    /**
      * آدرس صفحهٔ ورود گوگل برای اتصال حساب خود فروشگاه.
      * POST /api/shop-backup/google-sheet/oauth-url  {return_url}
      */

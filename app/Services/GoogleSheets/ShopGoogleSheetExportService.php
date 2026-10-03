@@ -23,6 +23,8 @@ class ShopGoogleSheetExportService
 
     public const KEY_LAST_EXPORT_ERROR = 'google_sheet_last_export_error';
 
+    public const KEY_TABLES = 'google_sheet_tables';
+
     private const SUMMARY_TAB = 'خلاصه';
 
     /** سقف گوگل ۱۰ میلیون سلول در کل فایل است؛ کمی حاشیه برای تب‌های دیگر کاربر. */
@@ -78,7 +80,36 @@ class ShopGoogleSheetExportService
             'spreadsheet_url' => $spreadsheetId ? $this->spreadsheetUrl($spreadsheetId) : null,
             'last_export_at' => $this->setting($atelierId, self::KEY_LAST_EXPORT_AT),
             'last_export_error' => $this->setting($atelierId, self::KEY_LAST_EXPORT_ERROR),
+            'tables' => GoogleSheetTableCatalog::catalog(),
+            'selected_tables' => $this->selectedTables($atelierId),
         ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function selectedTables(int $atelierId): array
+    {
+        $available = GoogleSheetTableCatalog::names();
+        $stored = json_decode((string) $this->setting($atelierId, self::KEY_TABLES), true);
+        $selected = is_array($stored) ? $stored : GoogleSheetTableCatalog::DEFAULT_TABLES;
+
+        return array_values(array_intersect($available, array_map('strval', $selected)));
+    }
+
+    /**
+     * @param  array<int, mixed>  $tables
+     * @return list<string>
+     */
+    public function setSelectedTables(int $atelierId, array $tables): array
+    {
+        $selected = array_values(array_intersect(GoogleSheetTableCatalog::names(), array_map('strval', $tables)));
+        if ($selected === []) {
+            throw new GoogleSheetsException('حداقل یک جدول را انتخاب کنید.');
+        }
+        $this->putSetting($atelierId, self::KEY_TABLES, (string) json_encode($selected));
+
+        return $selected;
     }
 
     /**
@@ -217,11 +248,13 @@ class ShopGoogleSheetExportService
 
         $sheets = [self::SUMMARY_TAB => []];
         $counts = [];
+        $selected = array_flip($this->selectedTables($atelierId));
         foreach (ShopBackupTables::definitions() as $def) {
             $name = $def['name'];
-            if (! Schema::hasTable($name)) {
+            if (! isset($selected[$name]) || ! Schema::hasTable($name)) {
                 continue;
             }
+            $title = GoogleSheetTableCatalog::label($name);
             $columns = array_values(array_diff(Schema::getColumnListing($name), self::HIDDEN_COLUMNS));
             $values = [$columns];
             foreach ($tables[$name] ?? [] as $row) {
@@ -231,8 +264,8 @@ class ShopGoogleSheetExportService
                 }
                 $values[] = $line;
             }
-            $sheets[$name] = $values;
-            $counts[$name] = count($values) - 1;
+            $sheets[$title] = $values;
+            $counts[$title] = count($values) - 1;
         }
 
         $summary = [
@@ -335,6 +368,22 @@ class ShopGoogleSheetExportService
         }
 
         $resize = [];
+
+        // تب جداولی که دیگر انتخاب نشده‌اند (با نام قدیمی انگلیسی یا عنوان فارسی) حذف شود
+        $known = [];
+        foreach (GoogleSheetTableCatalog::names() as $name) {
+            $known[$name] = true;
+            $known[GoogleSheetTableCatalog::label($name)] = true;
+        }
+        foreach ($existing as $title => $info) {
+            if (isset($known[$title]) && ! isset($sheets[$title])) {
+                $resize[] = [
+                    'delta' => -$info['cells'],
+                    'request' => ['deleteSheet' => ['sheetId' => $info['id']]],
+                ];
+            }
+        }
+
         foreach ($sheets as $title => $values) {
             if (! isset($existing[$title])) {
                 throw new GoogleSheetsException('ساخت تب «'.$title.'» در گوگل شیت ممکن نشد.');
