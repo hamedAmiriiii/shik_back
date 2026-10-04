@@ -3,7 +3,7 @@
 namespace App\Services\Repair;
 
 use App\Models\RepairSetting;
-use App\Tools\SmsTools;
+use App\Models\RepairSmsLog;
 use Illuminate\Support\Facades\Cache;
 
 class RepairOtp
@@ -37,7 +37,7 @@ class RepairOtp
         Cache::put($cooldownKey, time(), now()->addMinutes(self::OTP_TTL_MINUTES + 1));
 
         $brand = RepairSetting::value('brand_name') ?: (string) config('repair.brand_name');
-        SmsTools::sendSms($phone, $brand.' - کد ورود: '.$code);
+        app(RepairSms::class)->send($phone, $brand.' - کد ورود: '.$code, RepairSmsLog::TYPE_OTP, true);
 
         return 0;
     }

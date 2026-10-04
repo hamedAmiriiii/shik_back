@@ -163,6 +163,24 @@ Route::prefix('repair')->name('repair.')->group(function () {
         Route::get('balances', [\App\Http\Controllers\Repair\RepairAdminController::class, 'balances']);
         Route::get('settings', [\App\Http\Controllers\Repair\RepairAdminController::class, 'settings']);
         Route::put('settings', [\App\Http\Controllers\Repair\RepairAdminController::class, 'updateSettings']);
+        Route::get('sms/summary', [\App\Http\Controllers\Repair\RepairSmsController::class, 'summary']);
+        Route::get('sms/logs', [\App\Http\Controllers\Repair\RepairSmsController::class, 'logs']);
+        Route::post('sms/logs/refresh-pending', [\App\Http\Controllers\Repair\RepairSmsController::class, 'refreshPending'])
+            ->middleware('throttle:6,1');
+        Route::post('sms/logs/{smsLog}/refresh-status', [\App\Http\Controllers\Repair\RepairSmsController::class, 'refreshStatus'])
+            ->middleware('throttle:30,1');
+        Route::get('sms/orders', [\App\Http\Controllers\Repair\RepairSmsController::class, 'orders']);
+        Route::post('sms/purchase', [\App\Http\Controllers\Repair\RepairSmsController::class, 'purchase'])
+            ->middleware('throttle:10,1');
+        Route::get('sms', [\App\Http\Controllers\Repair\RepairSmsController::class, 'summary']);
+        Route::get('sms/logs', [\App\Http\Controllers\Repair\RepairSmsController::class, 'logs']);
+        Route::post('sms/logs/refresh-pending', [\App\Http\Controllers\Repair\RepairSmsController::class, 'refreshPending'])
+            ->middleware('throttle:6,1');
+        Route::post('sms/logs/{smsLog}/refresh-status', [\App\Http\Controllers\Repair\RepairSmsController::class, 'refreshStatus'])
+            ->middleware('throttle:30,1');
+        Route::get('sms/orders', [\App\Http\Controllers\Repair\RepairSmsController::class, 'orders']);
+        Route::post('sms/purchase', [\App\Http\Controllers\Repair\RepairSmsController::class, 'purchase'])
+            ->middleware('throttle:10,1');
     });
 });
 

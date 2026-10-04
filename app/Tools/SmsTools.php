@@ -212,6 +212,16 @@ class SmsTools
             return [];
         }
 
+        return self::parseProviderResponse($json, $httpOk);
+    }
+
+    /**
+     * فیلدهای وضعیت (batch_id, reference_id, delivery_status, ...) از پاسخ ارسال یا استعلام شینا
+     *
+     * @return array<string, mixed>
+     */
+    public static function parseProviderResponse(array $json, bool $httpOk = true): array
+    {
         $fields = [
             'status_checked_at' => now(),
         ];

@@ -10,6 +10,7 @@ use App\Models\RepairSetting;
 use App\Models\RepairUser;
 use App\Services\Repair\RepairNotifier;
 use App\Services\Repair\RepairRequestService;
+use App\Services\Repair\RepairSms;
 use App\Tools\PhoneTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -51,6 +52,7 @@ class RepairAdminController extends Controller
                 ->where('role', RepairUser::ROLE_TECHNICIAN)
                 ->where('approval_status', RepairUser::APPROVAL_PENDING)
                 ->count(),
+            'sms_balance' => RepairSms::enabled() ? app(RepairSms::class)->balance() : null,
         ]);
     }
 

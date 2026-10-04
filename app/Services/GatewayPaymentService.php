@@ -10,6 +10,7 @@ use App\Models\SmsPackageOrder;
 use App\Models\ShopPlan;
 use App\Models\User;
 use App\Services\Repair\RepairRequestService;
+use App\Services\Repair\RepairSms;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
@@ -470,6 +471,8 @@ class GatewayPaymentService
                 $this->fulfillShopPlan($locked);
             } elseif ($locked->type === GatewayPayment::TYPE_REPAIR_INVOICE) {
                 app(RepairRequestService::class)->fulfillOnlinePayment($locked, $refId);
+            } elseif ($locked->type === GatewayPayment::TYPE_REPAIR_SMS) {
+                $this->fulfillRepairSms($locked);
             } else {
                 throw new RuntimeException('نوع خرید پشتیبانی نمی‌شود.');
             }
@@ -641,6 +644,19 @@ class GatewayPaymentService
             ];
         }
 
+        if ($type === GatewayPayment::TYPE_REPAIR_SMS) {
+            $package = SmsPackage::query()->active()->find($itemId);
+            if (! $package) {
+                throw new RuntimeException('بسته پیامکی یافت نشد.');
+            }
+
+            return [
+                (int) $package->price_rial,
+                'شارژ پنل پیامک تعمیرات - '.$package->name,
+                ['sms_count' => $package->sms_count, 'name' => $package->name],
+            ];
+        }
+
         throw new RuntimeException('نوع خرید نامعتبر است. sms_package یا shop_plan بفرستید.');
     }
 
@@ -667,6 +683,16 @@ class GatewayPaymentService
             'reviewed_at' => now(),
             'admin_note' => 'پرداخت آنلاین ('.$payment->gateway.')'.($payment->authority ? ' / '.$payment->authority : ''),
         ]);
+    }
+
+    protected function fulfillRepairSms(GatewayPayment $payment): void
+    {
+        $count = (int) ($payment->meta['sms_count'] ?? 0);
+        if ($count <= 0) {
+            throw new RuntimeException('تعداد پیامک بسته نامعتبر است.');
+        }
+
+        app(RepairSms::class)->charge($count);
     }
 
     protected function fulfillShopPlan(GatewayPayment $payment): void
