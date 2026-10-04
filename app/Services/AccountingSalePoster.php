@@ -135,8 +135,13 @@ class AccountingSalePoster
         }
 
         $lines = [];
-        AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL), $cash, 0, 'وصول نقد نسیه');
-        AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_POS), $card, 0, 'وصول کارت نسیه');
+        $shopAccountId = (int) ($purchase->settlement_shop_account_id ?? 0);
+        if ($shopAccountId > 0) {
+            AccountingLedger::push($lines, AccountingLedger::shopCashAccountId($atelierId, $shopAccountId), $amount, 0, 'وصول نسیه');
+        } else {
+            AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL), $cash, 0, 'وصول نقد نسیه');
+            AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_POS), $card, 0, 'وصول کارت نسیه');
+        }
         AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AR), 0, $amount, 'بستن طلب مشتری');
 
         return AccountingVoucherService::post(
@@ -166,8 +171,13 @@ class AccountingSalePoster
         }
 
         $lines = [];
-        AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL), $cash, 0, 'وصول نقد نسیه');
-        AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_POS), $card, 0, 'وصول کارت نسیه');
+        $shopAccountId = (int) ($payment->shop_account_id ?? 0);
+        if ($shopAccountId > 0) {
+            AccountingLedger::push($lines, AccountingLedger::shopCashAccountId($atelierId, $shopAccountId), $amount, 0, 'وصول نسیه');
+        } else {
+            AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL), $cash, 0, 'وصول نقد نسیه');
+            AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_POS), $card, 0, 'وصول کارت نسیه');
+        }
         AccountingLedger::push($lines, AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AR), 0, $amount, 'کاهش طلب مشتری');
 
         return AccountingVoucherService::post(

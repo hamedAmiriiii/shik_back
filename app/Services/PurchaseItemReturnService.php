@@ -556,6 +556,61 @@ class PurchaseItemReturnService
     }
 
     /**
+     * نقد و کارتی که در برگشت باید مثل فروش عادی پرسیده شود.
+     * وصول به صندوق = نقد. وصول به حساب بانکی یا تنخواه = کارت (سؤال مقصد برگشت).
+     * برگشت‌های قبلی از همین مبلغ کم می‌شوند تا دوباره برگردانده نشود.
+     *
+     * @return array{0: float, 1: float}
+     */
+    public static function refundableCashCard(Purchase $purchase): array
+    {
+        $cash = (float) $purchase->cash_amount;
+        $card = (float) $purchase->card_amount;
+
+        $usedPayments = false;
+        if (Schema::hasTable('purchase_debt_payments')) {
+            $withAccount = Schema::hasColumn('purchase_debt_payments', 'shop_account_id');
+            $purchase->loadMissing($withAccount ? 'debtPayments.shopAccount' : 'debtPayments');
+            if ($purchase->debtPayments->isNotEmpty()) {
+                $usedPayments = true;
+                foreach ($purchase->debtPayments as $payment) {
+                    $account = $withAccount && $payment->relationLoaded('shopAccount')
+                        ? $payment->shopAccount
+                        : null;
+                    if ($account && ! $account->isTill()) {
+                        $card += (float) $payment->cash_amount + (float) $payment->card_amount;
+                    } else {
+                        $cash += (float) $payment->cash_amount;
+                        $card += (float) $payment->card_amount;
+                    }
+                }
+            }
+        }
+
+        if (! $usedPayments) {
+            $cash += (float) $purchase->debt_settled_cash_amount;
+            $card += (float) $purchase->debt_settled_card_amount;
+            if ($cash + $card < 0.01 && $purchase->isDebtSettled()) {
+                $cash = (float) $purchase->cash_amount;
+                $card = (float) $purchase->card_amount;
+            }
+        }
+
+        if (Schema::hasTable('purchase_item_returns')
+            && Schema::hasColumn('purchase_item_returns', 'cash_refunded')
+        ) {
+            $returned = PurchaseItemReturn::query()
+                ->where('purchase_id', $purchase->id)
+                ->selectRaw('COALESCE(SUM(cash_refunded), 0) as cash, COALESCE(SUM(card_refunded), 0) as card')
+                ->first();
+            $cash -= (float) ($returned->cash ?? 0);
+            $card -= (float) ($returned->card ?? 0);
+        }
+
+        return [max(0, round($cash, 2)), max(0, round($card, 2))];
+    }
+
+    /**
      * پایهٔ نقد/کارت پرداخت‌شده روی فاکتور (قبل از نسبت برگشت).
      *
      * @return array{0: float, 1: float}
@@ -570,14 +625,7 @@ class PurchaseItemReturnService
         }
 
         if ($purchase->isDebt()) {
-            $cash = (float) $purchase->cash_amount + (float) $purchase->debt_settled_cash_amount;
-            $card = (float) $purchase->card_amount + (float) $purchase->debt_settled_card_amount;
-            if ($cash + $card < 0.01 && $purchase->isDebtSettled()) {
-                $cash = (float) $purchase->cash_amount;
-                $card = (float) $purchase->card_amount;
-            }
-
-            return [max(0, $cash), max(0, $card)];
+            return self::refundableCashCard($purchase);
         }
 
         $cash = (float) $purchase->cash_amount;

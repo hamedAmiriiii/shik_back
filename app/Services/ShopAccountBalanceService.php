@@ -8,6 +8,7 @@ use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\ManualTrade;
 use App\Models\Cheque;
+use App\Models\PurchaseDebtPayment;
 use App\Models\PurchaseItemReturn;
 use App\Models\ShopAccount;
 use App\Models\ShopAccountBalanceAdjustment;
@@ -51,6 +52,7 @@ class ShopAccountBalanceService
                 'manual_purchases' => 0.0,
                 'manual_sales' => 0.0,
                 'cheque_clears' => 0.0,
+                'debt_collections' => 0.0,
                 'sale_return_refunds' => 0.0,
                 'partner_settlements' => 0.0,
                 'adjustments' => 0.0,
@@ -106,6 +108,12 @@ class ShopAccountBalanceService
             }
         }
 
+        foreach (self::debtCollectionTotals($atelierId, $accountIds) as $id => $total) {
+            if (isset($result[$id])) {
+                $result[$id]['debt_collections'] = $total;
+            }
+        }
+
         foreach (self::saleReturnRefundTotals($atelierId, $accountIds) as $id => $total) {
             if (isset($result[$id])) {
                 $result[$id]['sale_return_refunds'] = $total;
@@ -126,11 +134,12 @@ class ShopAccountBalanceService
 
         foreach ($result as $id => $row) {
             $chequeClears = (float) ($row['cheque_clears'] ?? 0);
+            $debtCollections = (float) ($row['debt_collections'] ?? 0);
             $saleReturns = (float) ($row['sale_return_refunds'] ?? 0);
             $partnerSettlements = (float) ($row['partner_settlements'] ?? 0);
             $adjustments = (float) ($row['adjustments'] ?? 0);
             $result[$id]['balance'] = round(
-                $row['deposits'] + $row['transfers_in'] + $row['manual_sales'] + $chequeClears + $adjustments
+                $row['deposits'] + $row['transfers_in'] + $row['manual_sales'] + $chequeClears + $debtCollections + $adjustments
                     - $row['transfers_out'] - $row['expenses'] - $row['invoices'] - $row['manual_purchases']
                     - $saleReturns - $partnerSettlements,
                 2
@@ -524,6 +533,43 @@ class ShopAccountBalanceService
             ->where('atelier_id', $atelierId)
             ->whereIn('shop_account_id', $accountIds)
             ->selectRaw('shop_account_id, SUM(amount) as total')
+            ->groupBy('shop_account_id')
+            ->pluck('total', 'shop_account_id')
+            ->mapWithKeys(fn ($v, $k) => [(int) $k => (float) $v])
+            ->all();
+    }
+
+    /**
+     * وصول نسیه به حساب بانکی/تنخواه. صندوق از دفتر ۱۱۱۰۱ می‌آید و اینجا جمع نمی‌شود.
+     *
+     * @param  array<int>  $accountIds
+     * @return array<int, float>
+     */
+    protected static function debtCollectionTotals(int $atelierId, array $accountIds): array
+    {
+        if (! Schema::hasTable('purchase_debt_payments')
+            || ! Schema::hasColumn('purchase_debt_payments', 'shop_account_id')
+        ) {
+            return [];
+        }
+
+        $nonTillIds = ShopAccount::query()
+            ->forAtelier($atelierId)
+            ->whereIn('id', $accountIds)
+            ->get()
+            ->filter(fn (ShopAccount $account) => ! $account->isTill())
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        if ($nonTillIds === []) {
+            return [];
+        }
+
+        return PurchaseDebtPayment::query()
+            ->whereIn('shop_account_id', $nonTillIds)
+            ->whereHas('purchase', fn ($q) => $q->where('atelier_id', $atelierId))
+            ->selectRaw('shop_account_id, SUM(COALESCE(card_amount, 0) + COALESCE(cash_amount, 0)) as total')
             ->groupBy('shop_account_id')
             ->pluck('total', 'shop_account_id')
             ->mapWithKeys(fn ($v, $k) => [(int) $k => (float) $v])

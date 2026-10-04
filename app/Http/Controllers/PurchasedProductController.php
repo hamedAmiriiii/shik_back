@@ -12,6 +12,7 @@ use App\Models\CustomerPhone;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
+use App\Services\PurchaseItemReturnService;
 use App\Services\PurchaseReplaceService;
 use App\Services\ShopPosSaleService;
 use App\Tools\PriceTools;
@@ -184,6 +185,9 @@ class PurchasedProductController extends Controller
             $purchaseData['payable_amount'] = $purchase->payableAmount();
             $purchaseData['is_debt_settled'] = (bool) $purchase->is_debt_settled;
             $purchaseData['payment_type_label'] = 'قرضی';
+            [$refundCash, $refundCard] = PurchaseItemReturnService::refundableCashCard($purchase);
+            $purchaseData['refundable_cash_amount'] = $refundCash;
+            $purchaseData['refundable_card_amount'] = $refundCard;
         }
         if ($purchase && $purchase->isCheque()) {
             $purchaseData['payable_amount'] = $purchase->payableAmount();
@@ -719,6 +723,9 @@ class PurchasedProductController extends Controller
         if ($purchase->isDebt()) {
             $purchase->setAttribute('payable_amount', $purchase->payableAmount());
             $purchase->setAttribute('payment_type_label', 'قرضی');
+            [$refundCash, $refundCard] = PurchaseItemReturnService::refundableCashCard($purchase);
+            $purchase->setAttribute('refundable_cash_amount', $refundCash);
+            $purchase->setAttribute('refundable_card_amount', $refundCard);
         }
         if ($purchase->isCheque()) {
             $purchase->load('cheque');
@@ -770,6 +777,9 @@ class PurchasedProductController extends Controller
         if ($purchase->isDebt()) {
             $purchase->setAttribute('payable_amount', $purchase->payableAmount());
             $purchase->setAttribute('payment_type_label', 'قرضی');
+            [$refundCash, $refundCard] = PurchaseItemReturnService::refundableCashCard($purchase);
+            $purchase->setAttribute('refundable_cash_amount', $refundCash);
+            $purchase->setAttribute('refundable_card_amount', $refundCard);
         }
         if ($purchase->isCheque()) {
             $purchase->load('cheque');

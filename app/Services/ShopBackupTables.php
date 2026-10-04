@@ -476,6 +476,7 @@ class ShopBackupTables
                 'parent_key' => 'purchase_id',
                 'fks' => [
                     'purchase_id' => 'purchases',
+                    'shop_account_id' => 'shop_accounts',
                 ],
             ],
             [

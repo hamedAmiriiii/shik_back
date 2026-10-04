@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Purchase;
 use App\Models\PurchaseDebtPayment;
+use App\Models\ShopAccount;
 use App\Models\PurchasedProduct;
 use App\Models\Product;
 use App\Models\UserShiksho;
@@ -338,7 +339,26 @@ class PurchaseDebtController extends Controller
             'amount' => 'nullable|numeric|min:0',
             'payment_settlement' => 'nullable|string|in:card,cash',
             'note' => 'nullable|string|max:500',
+            'shop_account_id' => 'nullable|integer|min:1',
         ]);
+
+        $shopAccount = null;
+        if (Schema::hasColumn('purchase_debt_payments', 'shop_account_id')
+            || ! Schema::hasTable('purchase_debt_payments')
+        ) {
+            $shopAccountId = (int) ($fields['shop_account_id'] ?? 0);
+            if ($shopAccountId <= 0) {
+                return response()->json(['message' => 'حساب مقصد وصول را انتخاب کنید.'], 422);
+            }
+            $shopAccount = ShopAccount::query()
+                ->forAtelier((int) $purchase->atelier_id)
+                ->active()
+                ->where('id', $shopAccountId)
+                ->first();
+            if (! $shopAccount) {
+                return response()->json(['message' => 'حساب انتخاب‌شده متعلق به این فروشگاه نیست.'], 422);
+            }
+        }
 
         $card = PriceTools::roundToman((float) ($fields['card_amount'] ?? 0));
         $cash = PriceTools::roundToman((float) ($fields['cash_amount'] ?? 0));
@@ -381,7 +401,7 @@ class PurchaseDebtController extends Controller
         $fullySettled = false;
         $remainingAfter = $payable;
 
-        DB::transaction(function () use ($purchase, $card, $cash, $payNow, $fields, $canPartial, &$fullySettled, &$remainingAfter) {
+        DB::transaction(function () use ($purchase, $card, $cash, $payNow, $fields, $canPartial, $shopAccount, &$fullySettled, &$remainingAfter) {
             $locked = Purchase::query()->where('id', $purchase->id)->lockForUpdate()->first();
             if (! $locked || $locked->isDebtSettled()) {
                 abort(response()->json(['message' => 'این فاکتور قبلاً تسویه شده است.'], 422));
@@ -405,13 +425,17 @@ class PurchaseDebtController extends Controller
             $fullySettled = $remainingAfter <= 0.02;
 
             if ($canPartial) {
-                $payment = PurchaseDebtPayment::create([
+                $paymentFields = [
                     'purchase_id' => $locked->id,
                     'card_amount' => $card,
                     'cash_amount' => $cash,
                     'note' => $fields['note'] ?? null,
                     'paid_at' => now(),
-                ]);
+                ];
+                if ($shopAccount && Schema::hasColumn('purchase_debt_payments', 'shop_account_id')) {
+                    $paymentFields['shop_account_id'] = $shopAccount->id;
+                }
+                $payment = PurchaseDebtPayment::create($paymentFields);
 
                 $locked->update([
                     'is_debt_settled' => $fullySettled,
@@ -429,7 +453,11 @@ class PurchaseDebtController extends Controller
                     'debt_settled_cash_amount' => $cash,
                     'debt_settlement_note' => $fields['note'] ?? null,
                 ]);
-                AccountingSalePoster::postDebtSettle($locked->fresh());
+                $fresh = $locked->fresh();
+                if ($shopAccount) {
+                    $fresh->settlement_shop_account_id = $shopAccount->id;
+                }
+                AccountingSalePoster::postDebtSettle($fresh);
                 $fullySettled = true;
                 $remainingAfter = 0.0;
             }
@@ -585,9 +613,15 @@ class PurchaseDebtController extends Controller
             return [];
         }
 
-        $purchase->loadMissing('debtPayments');
+        if (Schema::hasColumn('purchase_debt_payments', 'shop_account_id')) {
+            $purchase->loadMissing('debtPayments.shopAccount');
+        } else {
+            $purchase->loadMissing('debtPayments');
+        }
 
         return $purchase->debtPayments->map(function (PurchaseDebtPayment $payment) {
+            $account = $payment->relationLoaded('shopAccount') ? $payment->shopAccount : null;
+
             return [
                 'id' => $payment->id,
                 'card_amount' => (float) $payment->card_amount,
@@ -595,6 +629,8 @@ class PurchaseDebtController extends Controller
                 'amount' => (float) $payment->amount,
                 'note' => $payment->note,
                 'paid_at' => $payment->paid_at_jalali,
+                'shop_account_id' => $account ? (int) $account->id : null,
+                'shop_account_name' => $account ? (string) $account->name : null,
             ];
         })->values()->all();
     }

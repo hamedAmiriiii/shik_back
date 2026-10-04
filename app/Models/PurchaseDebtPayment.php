@@ -9,6 +9,7 @@ class PurchaseDebtPayment extends Model
 {
     protected $fillable = [
         'purchase_id',
+        'shop_account_id',
         'card_amount',
         'cash_amount',
         'note',
@@ -29,6 +30,11 @@ class PurchaseDebtPayment extends Model
     public function purchase()
     {
         return $this->belongsTo(Purchase::class);
+    }
+
+    public function shopAccount()
+    {
+        return $this->belongsTo(ShopAccount::class);
     }
 
     public function getAmountAttribute(): float
