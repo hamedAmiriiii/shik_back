@@ -148,7 +148,20 @@ class ShopDashboardService
             ->when(Schema::hasTable('purchase_debt_payments'), function ($q) {
                 $q->whereDoesntHave('debtPayments');
             })
-            ->get(['debt_settled_at', 'debt_settled_card_amount', 'debt_settled_cash_amount']);
+            ->get(['id', 'debt_settled_at', 'debt_settled_card_amount', 'debt_settled_cash_amount']);
+
+        $debtPayments = collect();
+        if (Schema::hasTable('purchase_debt_payments')) {
+            $debtPayments = PurchaseDebtPayment::query()
+                ->whereNotNull('paid_at')
+                ->whereBetween('paid_at', [$rangeStart, $rangeEnd])
+                ->whereHas('purchase', fn ($q) => $q->forAtelier($atelierId)->where('payment_type', 'debt'))
+                ->get(['id', 'purchase_id', 'card_amount', 'cash_amount', 'paid_at']);
+        }
+
+        $nets = ShopSalesReportService::netDebtCollectionAmounts(
+            $paidDebts->pluck('id')->merge($debtPayments->pluck('purchase_id'))->all()
+        );
 
         foreach ($paidDebts as $debtPurchase) {
             $key = Carbon::parse($debtPurchase->getRawOriginal('debt_settled_at'))
@@ -158,28 +171,20 @@ class ShopDashboardService
                 continue;
             }
             $buckets[$key]['debts_collected'] = ($buckets[$key]['debts_collected'] ?? 0)
-                + (float) $debtPurchase->debt_settled_card_amount
-                + (float) $debtPurchase->debt_settled_cash_amount;
+                + ($nets['legacy'][(int) $debtPurchase->id]
+                    ?? round((float) $debtPurchase->debt_settled_card_amount + (float) $debtPurchase->debt_settled_cash_amount, 2));
         }
 
-        if (Schema::hasTable('purchase_debt_payments')) {
-            $debtPayments = PurchaseDebtPayment::query()
-                ->whereNotNull('paid_at')
-                ->whereBetween('paid_at', [$rangeStart, $rangeEnd])
-                ->whereHas('purchase', fn ($q) => $q->forAtelier($atelierId)->where('payment_type', 'debt'))
-                ->get(['card_amount', 'cash_amount', 'paid_at']);
-
-            foreach ($debtPayments as $debtPayment) {
-                $key = Carbon::parse($debtPayment->getRawOriginal('paid_at'))
-                    ->setTimezone('Asia/Tehran')
-                    ->format('Y-m-d');
-                if (! isset($buckets[$key])) {
-                    continue;
-                }
-                $buckets[$key]['debts_collected'] = ($buckets[$key]['debts_collected'] ?? 0)
-                    + (float) $debtPayment->card_amount
-                    + (float) $debtPayment->cash_amount;
+        foreach ($debtPayments as $debtPayment) {
+            $key = Carbon::parse($debtPayment->getRawOriginal('paid_at'))
+                ->setTimezone('Asia/Tehran')
+                ->format('Y-m-d');
+            if (! isset($buckets[$key])) {
+                continue;
             }
+            $buckets[$key]['debts_collected'] = ($buckets[$key]['debts_collected'] ?? 0)
+                + ($nets['payments'][(int) $debtPayment->id]
+                    ?? round((float) $debtPayment->card_amount + (float) $debtPayment->cash_amount, 2));
         }
 
         $clearedChequePurchases = Purchase::query()

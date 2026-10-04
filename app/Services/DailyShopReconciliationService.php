@@ -189,7 +189,8 @@ class DailyShopReconciliationService
         $recon = $reconciliations->get($dateKey);
         if ($recon) {
             // اگر محاسبهٔ زنده فروش ۰ بود ولی اسنپ‌شات روز مقدار دارد، از اسنپ‌شات استفاده کن
-            if ((float) $row['total_sales'] <= 0 && (float) $recon->total_sales > 0) {
+            $usedSnapshot = (float) $row['total_sales'] <= 0 && (float) $recon->total_sales > 0;
+            if ($usedSnapshot) {
                 $row['total_sales'] = (float) $recon->total_sales;
                 $row['card_amount'] = (float) $recon->card_amount;
                 $row['cash_amount'] = (float) $recon->cash_amount;
@@ -224,7 +225,22 @@ class DailyShopReconciliationService
             $row['deposit_account_2'] = self::amountForLegacySlot($savedDeposits, ShopAccount::LEGACY_ACCOUNT_2, (float) $recon->deposit_account_2);
             $row['deposit_cash'] = (float) $recon->deposit_cash;
             $row['deposited_total'] = (float) $recon->deposited_total;
-            $row['daily_discrepancy'] = (float) $recon->daily_discrepancy;
+            $row['expected_deposit'] = round(max(0, (float) $row['total_collected'] - $tillPaidOut), 2);
+            if ($usedSnapshot) {
+                $row['daily_discrepancy'] = (float) $recon->daily_discrepancy;
+            } else {
+                $row['daily_discrepancy'] = round(
+                    (float) $recon->deposited_total - (float) $row['expected_deposit'],
+                    2
+                );
+                if (abs((float) $recon->daily_discrepancy - (float) $row['daily_discrepancy']) >= 0.5
+                    || abs((float) $recon->total_collected - (float) $row['total_collected']) >= 0.5
+                ) {
+                    $recon->daily_discrepancy = $row['daily_discrepancy'];
+                    $recon->total_collected = $row['total_collected'];
+                    $recon->save();
+                }
+            }
             $row['is_closed'] = true;
             $row['notes'] = $recon->notes;
             $row['user_name'] = $recon->user_name;
@@ -237,7 +253,7 @@ class DailyShopReconciliationService
                     ->mapWithKeys(fn ($d) => [$d['shop_account_id'] => $d['deposit_record_id']])
                     ->all(),
             ];
-            $cumulative += (float) $recon->daily_discrepancy;
+            $cumulative += (float) $row['daily_discrepancy'];
             $row['cumulative_discrepancy'] = round($cumulative, 2);
             $row['updated_at'] = $recon->updated_at
                 ? Jalalian::fromCarbon(

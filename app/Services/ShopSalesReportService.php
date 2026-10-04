@@ -7,6 +7,7 @@ use App\Models\Installment;
 use App\Models\ManualTrade;
 use App\Models\Purchase;
 use App\Models\PurchaseDebtPayment;
+use App\Models\PurchaseItemReturn;
 use App\Models\ReturnedProduct;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Schema;
@@ -291,17 +292,14 @@ class ShopSalesReportService
             return 0.0;
         }
 
-        $fromPayments = 0.0;
+        $payments = collect();
         if (Schema::hasTable('purchase_debt_payments')) {
-            $fromPayments = (float) PurchaseDebtPayment::query()
+            $payments = PurchaseDebtPayment::query()
                 ->whereBetween('paid_at', [$start, $end])
                 ->whereHas('purchase', function ($q) use ($atelierId) {
                     $q->forAtelier($atelierId)->where('payment_type', 'debt');
                 })
-                ->get()
-                ->sum(function (PurchaseDebtPayment $payment) {
-                    return (float) $payment->card_amount + (float) $payment->cash_amount;
-                });
+                ->get();
         }
 
         $legacyQuery = Purchase::query()
@@ -315,13 +313,108 @@ class ShopSalesReportService
             $legacyQuery->whereDoesntHave('debtPayments');
         }
 
-        $legacy = (float) $legacyQuery
-            ->get()
-            ->sum(function (Purchase $purchase) {
-                return (float) $purchase->debt_settled_card_amount + (float) $purchase->debt_settled_cash_amount;
-            });
+        $legacy = $legacyQuery->get();
 
-        return round($fromPayments + $legacy, 2);
+        $purchaseIds = $payments->pluck('purchase_id')
+            ->merge($legacy->pluck('id'))
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+        $nets = self::netDebtCollectionAmounts($purchaseIds);
+
+        $fromPayments = 0.0;
+        foreach ($payments as $payment) {
+            $fromPayments += $nets['payments'][(int) $payment->id]
+                ?? round((float) $payment->card_amount + (float) $payment->cash_amount, 2);
+        }
+
+        $legacyTotal = 0.0;
+        foreach ($legacy as $purchase) {
+            $legacyTotal += $nets['legacy'][(int) $purchase->id]
+                ?? round((float) $purchase->debt_settled_card_amount + (float) $purchase->debt_settled_cash_amount, 2);
+        }
+
+        return round($fromPayments + $legacyTotal, 2);
+    }
+
+    /**
+     * نقد و کارتی که از فاکتور نسیه به مشتری برگشت شده.
+     *
+     * @param  array<int>  $purchaseIds
+     * @return array<int, float>
+     */
+    public static function debtRefundedCashCardByPurchase(array $purchaseIds): array
+    {
+        $purchaseIds = array_values(array_unique(array_filter(array_map('intval', $purchaseIds))));
+        if ($purchaseIds === []
+            || ! Schema::hasTable('purchase_item_returns')
+            || ! Schema::hasColumn('purchase_item_returns', 'cash_refunded')
+        ) {
+            return [];
+        }
+
+        return PurchaseItemReturn::query()
+            ->whereIn('purchase_id', $purchaseIds)
+            ->selectRaw('purchase_id, SUM(COALESCE(cash_refunded, 0) + COALESCE(card_refunded, 0)) as refunded')
+            ->groupBy('purchase_id')
+            ->pluck('refunded', 'purchase_id')
+            ->mapWithKeys(fn ($amount, $purchaseId) => [(int) $purchaseId => (float) $amount])
+            ->all();
+    }
+
+    /**
+     * ماندهٔ هر پرداخت نسیه بعد از برگشت. برگشت از قدیمی‌ترین پرداخت کم می‌شود
+     * تا وصولِ برگشت‌خورده در جمع وصول و اختلاف روز نماند.
+     *
+     * @param  array<int>  $purchaseIds
+     * @return array{payments: array<int, float>, legacy: array<int, float>}
+     */
+    public static function netDebtCollectionAmounts(array $purchaseIds): array
+    {
+        $purchaseIds = array_values(array_unique(array_filter(array_map('intval', $purchaseIds))));
+        $paymentNets = [];
+        $legacyNets = [];
+        if ($purchaseIds === []) {
+            return ['payments' => $paymentNets, 'legacy' => $legacyNets];
+        }
+
+        $refundPool = self::debtRefundedCashCardByPurchase($purchaseIds);
+        $purchasesWithPayments = [];
+
+        if (Schema::hasTable('purchase_debt_payments')) {
+            $allPayments = PurchaseDebtPayment::query()
+                ->whereIn('purchase_id', $purchaseIds)
+                ->orderBy('paid_at')
+                ->orderBy('id')
+                ->get();
+
+            foreach ($allPayments as $payment) {
+                $purchaseId = (int) $payment->purchase_id;
+                $purchasesWithPayments[$purchaseId] = true;
+                $amount = round((float) $payment->card_amount + (float) $payment->cash_amount, 2);
+                $cut = min($amount, max(0, (float) ($refundPool[$purchaseId] ?? 0)));
+                $refundPool[$purchaseId] = round(((float) ($refundPool[$purchaseId] ?? 0)) - $cut, 2);
+                $paymentNets[(int) $payment->id] = round($amount - $cut, 2);
+            }
+        }
+
+        $legacyPurchases = Purchase::query()
+            ->whereIn('id', $purchaseIds)
+            ->where('payment_type', 'debt')
+            ->get(['id', 'debt_settled_card_amount', 'debt_settled_cash_amount']);
+
+        foreach ($legacyPurchases as $purchase) {
+            $purchaseId = (int) $purchase->id;
+            if (isset($purchasesWithPayments[$purchaseId])) {
+                continue;
+            }
+            $amount = round((float) $purchase->debt_settled_card_amount + (float) $purchase->debt_settled_cash_amount, 2);
+            $cut = min($amount, max(0, (float) ($refundPool[$purchaseId] ?? 0)));
+            $legacyNets[$purchaseId] = round($amount - $cut, 2);
+        }
+
+        return ['payments' => $paymentNets, 'legacy' => $legacyNets];
     }
 
     /**
