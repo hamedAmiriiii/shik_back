@@ -29,9 +29,12 @@ class ConsultationRequest extends Model
 
     public const SOURCE_ACCOUNTING = 'accounting';
 
+    public const SOURCE_SMART_CLUB = 'smart_club';
+
     public const SOURCES = [
         self::SOURCE_DIGITAL_MENU => 'منوی دیجیتال',
         self::SOURCE_ACCOUNTING => 'حسابداری و فروش',
+        self::SOURCE_SMART_CLUB => 'باشگاه مشتریان هوشمند',
     ];
 
     protected $fillable = [
