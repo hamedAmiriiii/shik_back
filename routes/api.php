@@ -125,6 +125,8 @@ Route::prefix('repair')->name('repair.')->group(function () {
             ->middleware('throttle:10,1');
         Route::post('requests/{repairRequest}/receipt', [\App\Http\Controllers\Repair\RepairCustomerController::class, 'uploadReceipt'])
             ->middleware('throttle:10,1');
+        Route::post('requests/{repairRequest}/rate', [\App\Http\Controllers\Repair\RepairCustomerController::class, 'rate'])
+            ->middleware('throttle:10,1');
     });
 
     Route::prefix('tech')->middleware(['auth:sanctum', 'repair.role:technician'])->group(function () {

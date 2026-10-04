@@ -80,6 +80,9 @@ class RepairRequest extends Model
         'completed_at',
         'canceled_at',
         'cancel_reason',
+        'rating',
+        'review',
+        'rated_at',
     ];
 
     protected $casts = [
@@ -96,6 +99,8 @@ class RepairRequest extends Model
         'paid_at' => 'datetime',
         'completed_at' => 'datetime',
         'canceled_at' => 'datetime',
+        'rating' => 'integer',
+        'rated_at' => 'datetime',
     ];
 
     public function customer(): BelongsTo
@@ -116,6 +121,11 @@ class RepairRequest extends Model
     public function isPayable(): bool
     {
         return $this->status === self::STATUS_INVOICED && (int) $this->total_amount > 0;
+    }
+
+    public function canBeRated(): bool
+    {
+        return $this->status === self::STATUS_COMPLETED && $this->technician_id && $this->rating === null;
     }
 
     public function receiptUrl(): ?string
@@ -165,7 +175,13 @@ class RepairRequest extends Model
                 'name' => $technician->name,
                 'phone' => $technician->phone,
                 'specialty' => $technician->specialty,
+                'rating_avg' => $technician->rating_avg !== null ? (float) $technician->rating_avg : null,
+                'rating_count' => (int) $technician->rating_count,
             ] : null,
+            'rating' => $this->rating !== null ? (int) $this->rating : null,
+            'review' => $this->review,
+            'rated_at' => $this->rated_at,
+            'can_rate' => $this->canBeRated(),
             'assigned_at' => $this->assigned_at,
             'started_at' => $this->started_at,
             'invoiced_at' => $this->invoiced_at,

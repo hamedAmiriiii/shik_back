@@ -123,6 +123,39 @@ class RepairCustomerController extends Controller
         return response(['message' => 'درخواست لغو شد.', 'request' => $repair->toApiArray('customer')]);
     }
 
+    public function rate(Request $request, RepairRequest $repairRequest)
+    {
+        $this->assertOwner($request, $repairRequest);
+        if (! Schema::hasColumn('repair_requests', 'rating')) {
+            return response()->json(['message' => 'ثبت امتیاز هنوز فعال نشده است.'], 503);
+        }
+        if (! $repairRequest->canBeRated()) {
+            return response()->json([
+                'message' => $repairRequest->rating !== null
+                    ? 'برای این درخواست قبلاً امتیاز ثبت کرده‌اید.'
+                    : 'امتیاز فقط پس از پایان کار قابل ثبت است.',
+            ], 422);
+        }
+        $data = $request->validate([
+            'rating' => 'required|integer|min:1|max:5',
+            'review' => 'nullable|string|max:1000',
+        ], [
+            'rating.required' => 'امتیاز را انتخاب کنید.',
+        ]);
+
+        $repairRequest->forceFill([
+            'rating' => (int) $data['rating'],
+            'review' => isset($data['review']) ? trim($data['review']) : null,
+            'rated_at' => now(),
+        ])->save();
+        $repairRequest->technician?->refreshRating();
+
+        return response([
+            'message' => 'سپاس! امتیاز شما ثبت شد.',
+            'request' => $repairRequest->fresh(['technician'])->toApiArray('customer'),
+        ]);
+    }
+
     public function payOnline(Request $request, RepairRequest $repairRequest, GatewayPaymentService $payments)
     {
         $customer = $this->customer($request);

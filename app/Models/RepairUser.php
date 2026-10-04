@@ -33,6 +33,8 @@ class RepairUser extends Authenticatable
         'phone',
         'specialty',
         'labor_share_percent',
+        'rating_avg',
+        'rating_count',
         'card_number',
         'address',
         'notes',
@@ -42,6 +44,8 @@ class RepairUser extends Authenticatable
 
     protected $casts = [
         'labor_share_percent' => 'float',
+        'rating_avg' => 'float',
+        'rating_count' => 'integer',
         'is_active' => 'boolean',
         'last_login_at' => 'datetime',
     ];
@@ -81,6 +85,19 @@ class RepairUser extends Authenticatable
         return $this->hasMany(RepairPayout::class, 'technician_id');
     }
 
+    public function refreshRating(): void
+    {
+        $stats = $this->technicianRequests()
+            ->whereNotNull('rating')
+            ->selectRaw('AVG(rating) as avg_rating, COUNT(*) as total')
+            ->first();
+        $count = (int) ($stats->total ?? 0);
+        $this->forceFill([
+            'rating_avg' => $count > 0 ? round((float) $stats->avg_rating, 2) : null,
+            'rating_count' => $count,
+        ])->save();
+    }
+
     public function services(): BelongsToMany
     {
         return $this->belongsToMany(RepairService::class, 'repair_technician_services', 'technician_id', 'service_id');
@@ -115,6 +132,8 @@ class RepairUser extends Authenticatable
             'phone' => $this->phone,
             'specialty' => $this->specialty,
             'labor_share_percent' => (float) $this->labor_share_percent,
+            'rating_avg' => $this->rating_avg !== null ? round((float) $this->rating_avg, 2) : null,
+            'rating_count' => (int) $this->rating_count,
             'card_number' => $this->card_number,
             'address' => $this->address,
             'notes' => $this->notes,

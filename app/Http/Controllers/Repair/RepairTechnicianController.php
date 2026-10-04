@@ -99,6 +99,8 @@ class RepairTechnicianController extends Controller
         return response([
             'summary' => $this->service->technicianBalance($technician),
             'share_percent' => (float) $technician->labor_share_percent,
+            'rating_avg' => $technician->rating_avg !== null ? (float) $technician->rating_avg : null,
+            'rating_count' => (int) $technician->rating_count,
             'payouts' => $payouts,
         ]);
     }
