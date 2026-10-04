@@ -110,6 +110,8 @@ Route::prefix('repair')->name('repair.')->group(function () {
     Route::middleware(['auth:sanctum', 'repair.role'])->group(function () {
         Route::get('me', [\App\Http\Controllers\Repair\RepairAuthController::class, 'me']);
         Route::patch('me', [\App\Http\Controllers\Repair\RepairAuthController::class, 'updateProfile']);
+        Route::post('me/photo', [\App\Http\Controllers\Repair\RepairAuthController::class, 'updatePhoto'])
+            ->middleware('throttle:10,1');
         Route::post('logout', [\App\Http\Controllers\Repair\RepairAuthController::class, 'logout']);
         Route::get('geo/reverse', [\App\Http\Controllers\Repair\RepairAuthController::class, 'reverseGeocode'])
             ->middleware('throttle:40,1');
@@ -151,6 +153,7 @@ Route::prefix('repair')->name('repair.')->group(function () {
         Route::get('technicians', [\App\Http\Controllers\Repair\RepairAdminController::class, 'technicians']);
         Route::post('technicians', [\App\Http\Controllers\Repair\RepairAdminController::class, 'storeTechnician']);
         Route::patch('technicians/{technician}', [\App\Http\Controllers\Repair\RepairAdminController::class, 'updateTechnician']);
+        Route::post('technicians/{technician}/photo', [\App\Http\Controllers\Repair\RepairAdminController::class, 'updateTechnicianPhoto']);
         Route::post('technicians/{technician}/approve', [\App\Http\Controllers\Repair\RepairAdminController::class, 'approveTechnician']);
         Route::post('technicians/{technician}/reject', [\App\Http\Controllers\Repair\RepairAdminController::class, 'rejectTechnician']);
         Route::get('services', [\App\Http\Controllers\Repair\RepairAdminController::class, 'services']);

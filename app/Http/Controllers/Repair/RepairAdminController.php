@@ -255,6 +255,25 @@ class RepairAdminController extends Controller
         return response(['message' => 'ذخیره شد.', 'technician' => $technician->fresh('services')->toTechnicianArray()]);
     }
 
+    public function updateTechnicianPhoto(Request $request, RepairUser $technician)
+    {
+        if (! $technician->isTechnician()) {
+            return response()->json(['message' => 'تعمیرکار یافت نشد.'], 404);
+        }
+        if (! RepairUser::hasIdentityColumns()) {
+            return response()->json(['message' => 'ثبت عکس هنوز روی سرور فعال نشده است.'], 422);
+        }
+        $data = $request->validate(['photo' => 'required|string']);
+
+        try {
+            $technician->storeSelfie($data['photo']);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response(['message' => 'عکس ذخیره شد.', 'technician' => $technician->fresh('services')->toTechnicianArray()]);
+    }
+
     public function approveTechnician(Request $request, RepairUser $technician, RepairNotifier $notifier)
     {
         if (! $technician->isTechnician()) {
@@ -472,12 +491,14 @@ class RepairAdminController extends Controller
             'specialty' => 'nullable|string|max:255',
             'labor_share_percent' => ($technician ? 'sometimes|' : '').'required|numeric|min:0|max:100',
             'card_number' => 'nullable|string|max:32',
+            'sheba' => 'nullable|string|max:40',
             'address' => 'nullable|string|max:1000',
             'notes' => 'nullable|string|max:2000',
             'is_active' => 'sometimes|boolean',
             'service_ids' => 'sometimes|array',
             'service_ids.*' => 'integer',
         ]);
+        $data = RepairUser::normalizeBankFields($data);
 
         if (array_key_exists('phone', $data)) {
             $phone = PhoneTools::normalizeIranPhone($data['phone']);

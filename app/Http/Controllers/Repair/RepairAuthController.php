@@ -11,9 +11,11 @@ use App\Services\Repair\RepairOtp;
 use App\Tools\PhoneTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 class RepairAuthController extends Controller
 {
@@ -257,12 +259,16 @@ class RepairAuthController extends Controller
             'service_ids' => 'required|array|min:1',
             'service_ids.*' => 'integer',
             'card_number' => 'nullable|string|max:32',
+            'sheba' => 'nullable|string|max:40',
+            'photo' => (RepairUser::hasIdentityColumns() ? 'required' : 'nullable').'|string',
             'address' => 'nullable|string|max:1000',
             'notes' => 'nullable|string|max:2000',
         ], [
             'service_ids.required' => 'حداقل یک نوع خدمت را انتخاب کنید.',
             'service_ids.min' => 'حداقل یک نوع خدمت را انتخاب کنید.',
+            'photo.required' => 'عکس سلفی خود را بگیرید.',
         ]);
+        $data = RepairUser::normalizeBankFields($data);
 
         $phone = Cache::get(self::TECH_REGISTRATION_PREFIX.$data['registration_token']);
         if (! is_string($phone) || $phone === '') {
@@ -299,12 +305,27 @@ class RepairAuthController extends Controller
             'labor_share_percent' => (float) RepairSetting::value('default_labor_share_percent'),
             'is_active' => true,
         ];
-        if ($user) {
-            $user->tokens()->delete();
-            $user->update($attributes);
-        } else {
-            $user = RepairUser::create($attributes);
+        if (array_key_exists('sheba', $data)) {
+            $attributes['sheba'] = $data['sheba'];
         }
+
+        $user = DB::transaction(function () use ($user, $attributes, $data) {
+            if ($user) {
+                $user->tokens()->delete();
+                $user->update($attributes);
+            } else {
+                $user = RepairUser::create($attributes);
+            }
+            if (! empty($data['photo']) && RepairUser::hasIdentityColumns()) {
+                try {
+                    $user->storeSelfie($data['photo']);
+                } catch (RuntimeException $e) {
+                    abort(response()->json(['message' => $e->getMessage()], 422));
+                }
+            }
+
+            return $user;
+        });
         $user->services()->sync($serviceIds);
         Cache::forget(self::TECH_REGISTRATION_PREFIX.$data['registration_token']);
 
@@ -335,10 +356,32 @@ class RepairAuthController extends Controller
         if ($user->role === RepairUser::ROLE_TECHNICIAN) {
             $rules['specialty'] = 'nullable|string|max:255';
             $rules['card_number'] = 'nullable|string|max:40';
+            $rules['sheba'] = 'nullable|string|max:40';
         }
-        $user->update($request->validate($rules));
+        $user->update(RepairUser::normalizeBankFields($request->validate($rules)));
 
         return response(['user' => $user->fresh()->toSessionArray()]);
+    }
+
+    public function updatePhoto(Request $request)
+    {
+        /** @var RepairUser $user */
+        $user = $request->user();
+        if (! $user->isTechnician()) {
+            return response()->json(['message' => 'فقط تعمیرکاران عکس پروفایل ثبت می‌کنند.'], 403);
+        }
+        if (! RepairUser::hasIdentityColumns()) {
+            return response()->json(['message' => 'ثبت عکس هنوز روی سرور فعال نشده است.'], 422);
+        }
+        $data = $request->validate(['photo' => 'required|string']);
+
+        try {
+            $user->storeSelfie($data['photo']);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response(['message' => 'عکس ذخیره شد.', 'user' => $user->fresh()->toSessionArray()]);
     }
 
     public function logout(Request $request)

@@ -177,6 +177,7 @@ class RepairRequest extends Model
                 'specialty' => $technician->specialty,
                 'rating_avg' => $technician->rating_avg !== null ? (float) $technician->rating_avg : null,
                 'rating_count' => (int) $technician->rating_count,
+                'photo_url' => $technician->photoUrl(),
             ] : null,
             'rating' => $this->rating !== null ? (int) $this->rating : null,
             'review' => $this->review,
