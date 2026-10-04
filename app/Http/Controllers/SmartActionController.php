@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ShopSmartAction;
 use App\Models\UserShiksho;
 use App\Services\SmartCustomer\CampaignRunner;
+use App\Services\SmartCustomer\SmartActionGenerator;
 use App\Services\ShopFeatureFlags;
 use App\Tools\SmsTools;
 use Illuminate\Http\Request;
@@ -108,12 +109,15 @@ class SmartActionController extends Controller
 
         if ($credit >= 0.01) {
             $result['credit'] = CampaignRunner::addCredit($atelierId, $action->phone, $credit);
-            if ($template !== '') {
-                $template = str_replace('{credit}', (string) ($result['credit']['added'] ?? $credit), $template);
-            }
         }
 
         if ($sendSms && $template !== '') {
+            $template = SmartActionGenerator::renderTemplate(
+                $template,
+                $atelierId,
+                (string) $action->phone,
+                isset($result['credit']['added']) ? (float) $result['credit']['added'] : null
+            );
             try {
                 SmsTools::sendShopSms($action->phone, $template, null, $credit > 0 ? $credit : null, 'campaign', $atelierId);
                 $result['sms'] = true;

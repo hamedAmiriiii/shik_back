@@ -46,8 +46,8 @@ class UserShiksho extends Model
     }
 
     /**
-     * افزودن یا به‌روزرسانی اعتبار کاربر
-     * اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود
+     * افزودن اعتبار خرید به موجودی فعلی کاربر (اعتبار قبلی حفظ می‌شود و جمع می‌شود)
+     * و تمدید مهلت انقضای کل اعتبار از امروز.
      *
      * @param  int|null  $atelierId  اگر null باشد، فقط ردیف‌های legacy با atelier_id خالی.
      */
@@ -73,8 +73,16 @@ class UserShiksho extends Model
             $user->save();
         }
 
-        // اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود (رند به هزار)
-        $user->credit = PriceTools::roundToThousand((float) $creditAmount);
+        $earned = PriceTools::roundToThousand((float) $creditAmount);
+        if ($earned <= 0) {
+            return $user;
+        }
+
+        if ($user->atelier_id !== null) {
+            \App\Services\UserCreditGrantService::expireLapsedForUser($user);
+        }
+
+        $user->credit = round(max(0, (float) $user->credit) + $earned, 2);
         $user->credit_last_updated_at = now();
         $user->last_warning_sent_at = null; // ریست کردن هشدار برای اعتبار جدید
         $user->save();

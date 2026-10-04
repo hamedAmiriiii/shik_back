@@ -405,6 +405,12 @@ class SmartCustomerController extends Controller
 
         if (! empty($payload['sms'])) {
             $message = trim((string) ($payload['template'] ?? 'پیام باشگاه مشتریان'));
+            $message = \App\Services\SmartCustomer\SmartActionGenerator::renderTemplate(
+                $message,
+                $atelierId,
+                (string) $row->phone,
+                isset($results['credit']['added']) ? (float) $results['credit']['added'] : null
+            );
             \App\Tools\SmsTools::sendShopSms(
                 $row->phone,
                 $message,

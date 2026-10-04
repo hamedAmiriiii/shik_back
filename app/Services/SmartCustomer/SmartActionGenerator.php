@@ -5,6 +5,8 @@ namespace App\Services\SmartCustomer;
 use App\Models\ShopCustomerMetric;
 use App\Models\ShopCustomerSegment;
 use App\Models\ShopSmartAction;
+use App\Models\UserShiksho;
+use App\Tools\PriceTools;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Schema;
 
@@ -59,6 +61,8 @@ class SmartActionGenerator
                     || in_array(ShopCustomerSegment::TAG_READY_REPURCHASE, $tags, true);
             });
 
+        $names = self::customerNames($atelierId, $segments->pluck('phone')->all());
+
         foreach ($segments as $seg) {
             $metric = ShopCustomerMetric::query()
                 ->where('atelier_id', $atelierId)
@@ -68,7 +72,7 @@ class SmartActionGenerator
                 continue;
             }
 
-            $actions = self::buildActionsFor($seg, $metric, $thresholds, $suggestedSendAt);
+            $actions = self::buildActionsFor($seg, $metric, $thresholds, $suggestedSendAt, $names[$seg->phone] ?? null);
             foreach ($actions as $action) {
                 if (self::inCooldown($atelierId, $seg->phone, $action['action_type'], $cooldownDays, $now)) {
                     continue;
@@ -93,6 +97,66 @@ class SmartActionGenerator
         }
 
         return ['created' => $created, 'expired' => (int) $expired];
+    }
+
+    /**
+     * @param  array<int, string>  $phones
+     * @return array<string, string>
+     */
+    public static function customerNames(int $atelierId, array $phones): array
+    {
+        $phones = array_values(array_unique(array_filter(array_map('strval', $phones))));
+        if ($phones === [] || ! Schema::hasColumn('user_shiksho', 'name')) {
+            return [];
+        }
+
+        $names = [];
+        foreach (array_chunk($phones, 500) as $chunk) {
+            UserShiksho::query()
+                ->where('atelier_id', $atelierId)
+                ->whereIn('phone', $chunk)
+                ->whereNotNull('name')
+                ->get(['phone', 'name'])
+                ->each(function (UserShiksho $u) use (&$names) {
+                    $name = trim((string) $u->name);
+                    if ($name !== '') {
+                        $names[$u->phone] = $name;
+                    }
+                });
+        }
+
+        return $names;
+    }
+
+    public static function customerName(int $atelierId, string $phone): ?string
+    {
+        return self::customerNames($atelierId, [$phone])[$phone] ?? null;
+    }
+
+    /** خطاب پیامک: «علی عزیز» یا در نبود نام «مشتری گرامی» — هرگز شماره موبایل. */
+    public static function greeting(?string $name): string
+    {
+        $name = trim((string) $name);
+
+        return $name !== '' ? "{$name} عزیز" : 'مشتری گرامی';
+    }
+
+    /**
+     * آماده‌سازی متن پیشنهاد پیش از ارسال: توکن‌ها جایگزین می‌شوند و
+     * پیشنهادهای قدیمی که به‌جای نام، شماره موبایل داشتند اصلاح می‌شوند.
+     */
+    public static function renderTemplate(string $template, int $atelierId, string $phone, ?float $credit = null): string
+    {
+        $name = self::customerName($atelierId, $phone);
+        $greeting = self::greeting($name);
+
+        $text = str_replace(["{$phone} عزیز", $phone], [$greeting, $greeting], $template);
+
+        return str_replace(
+            ['{greeting}', '{name}', '{credit}'],
+            [$greeting, $name ?? 'مشتری', $credit !== null ? number_format($credit) : ''],
+            $text
+        );
     }
 
     protected static function inCooldown(
@@ -124,14 +188,17 @@ class SmartActionGenerator
         ShopCustomerSegment $seg,
         ShopCustomerMetric $metric,
         $thresholds,
-        Carbon $suggestedSendAt
+        Carbon $suggestedSendAt,
+        ?string $customerName = null
     ): array {
         $out = [];
         $credit = (float) $thresholds->winback_credit_amount;
         $factor = (float) $thresholds->winback_revenue_factor;
         $est = round((float) $metric->avg_order_value * $factor, 0);
         $avg = $metric->avg_days_between !== null ? (float) $metric->avg_days_between : null;
-        $nameHint = $seg->phone;
+        $greeting = self::greeting($customerName);
+        $winbackCredit = PriceTools::roundToThousand($credit);
+        $nearVipCredit = PriceTools::roundToThousand(round($credit * 0.5, 0));
 
         if (in_array($seg->primary_segment, [ShopCustomerSegment::AT_RISK, ShopCustomerSegment::INACTIVE], true)) {
             $avgText = $avg !== null ? number_format($avg, 0) . ' روز' : 'نامشخص';
@@ -147,7 +214,9 @@ class SmartActionGenerator
                 'payload' => [
                     'credit' => $credit,
                     'sms' => true,
-                    'template' => "{$nameHint} عزیز، با اعتبار هدیه فروشگاه منتظر بازگشت شما هستیم.",
+                    'template' => $winbackCredit >= 1
+                        ? "{$greeting}، دلمان برایتان تنگ شده! " . number_format($winbackCredit) . ' تومان اعتبار هدیه در فروشگاه منتظر شماست.'
+                        : "{$greeting}، دلمان برایتان تنگ شده! منتظر بازگشت شما هستیم.",
                     'suggested_send_at' => $suggestedSendAt->toDateTimeString(),
                 ],
                 'estimated_revenue' => $est,
@@ -168,7 +237,8 @@ class SmartActionGenerator
                 'payload' => [
                     'credit' => round($credit * 0.5, 0),
                     'sms' => true,
-                    'template' => 'یک قدم تا عضویت VIP مانده‌اید — با خرید بعدی وارد باشگاه ویژه شوید.',
+                    'template' => "{$greeting}، یک قدم تا عضویت VIP مانده‌اید — با خرید بعدی وارد باشگاه ویژه شوید."
+                        . ($nearVipCredit >= 1 ? ' ' . number_format($nearVipCredit) . ' تومان اعتبار هدیه هم برایتان شارژ شد.' : ''),
                 ],
                 'estimated_revenue' => round($est * 1.2, 0),
             ];
@@ -188,7 +258,7 @@ class SmartActionGenerator
                 'payload' => [
                     'credit' => 0,
                     'sms' => true,
-                    'template' => 'زمان خرید بعدی‌تان نزدیک است — منتظر دیدنتان هستیم.',
+                    'template' => "{$greeting}، زمان خرید بعدی‌تان نزدیک است — منتظر دیدنتان هستیم.",
                 ],
                 'estimated_revenue' => $est,
             ];

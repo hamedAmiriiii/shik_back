@@ -10,6 +10,10 @@ use Carbon\Carbon;
 
 class ExpireUserCredits extends Command
 {
+    private const DEFAULT_EXPIRY_DAYS = 60;
+
+    private const WARNING_BEFORE_DAYS = 7;
+
     /**
      * The name and signature of the console command.
      *
@@ -24,6 +28,9 @@ class ExpireUserCredits extends Command
      */
     protected $description = 'بررسی و صفر کردن اعتبارهای منقضی شده و ارسال هشدار به کاربران';
 
+    /** @var array<string, int> */
+    private array $expiryDaysCache = [];
+
     /**
      * Execute the console command.
      *
@@ -31,47 +38,76 @@ class ExpireUserCredits extends Command
      */
     public function handle()
     {
-        // دریافت تعداد روز انقضا از Setting (پیش‌فرض 60 روز)
-        $expiryDays = (int) Setting::get('credit_expiry_days', 60);
-        $warningDays = $expiryDays - 7; // 7 روز قبل از انقضا
-
         $this->info("شروع بررسی اعتبارهای منقضی شده...");
-        $this->info("تعداد روز انقضا: {$expiryDays} روز");
-        $this->info("تعداد روز هشدار: {$warningDays} روز");
 
         $campaignExpired = \App\Services\UserCreditGrantService::expireLapsedForAtelier();
         $this->info("اعتبار کمپین منقضی‌شده برای {$campaignExpired} مشتری برداشته شد.");
 
-        // 1. ارسال هشدار به کاربرانی که 7 روز دیگر اعتبارشان منقضی می‌شود
-        $this->sendWarningSms($warningDays);
+        $atelierIds = UserShiksho::query()
+            ->where('credit', '>', 0)
+            ->whereNotNull('credit_last_updated_at')
+            ->distinct()
+            ->pluck('atelier_id');
 
-        // 2. صفر کردن اعتبارهای منقضی شده
-        $this->expireCredits($expiryDays);
+        $previousContext = Setting::contextAtelierId();
+        try {
+            foreach ($atelierIds as $atelierId) {
+                $atelierId = $atelierId !== null ? (int) $atelierId : null;
+                $expiryDays = $this->expiryDaysFor($atelierId);
+                $label = $atelierId !== null ? "#{$atelierId}" : 'بدون فروشگاه';
+                $this->info("فروشگاه {$label}: مهلت اعتبار {$expiryDays} روز");
+
+                // 1. هشدار ۷ روز قبل از انقضا (اگر مهلت کوتاه‌تر از ۷ روز باشد هشدار نمی‌رود)
+                if ($expiryDays > self::WARNING_BEFORE_DAYS) {
+                    $this->sendWarningSms($atelierId, $expiryDays);
+                }
+
+                // 2. صفر کردن اعتبارهای منقضی شده
+                $this->expireCredits($atelierId, $expiryDays);
+            }
+        } finally {
+            Setting::setContextAtelierId($previousContext);
+        }
 
         $this->info("عملیات با موفقیت انجام شد.");
         return 0;
     }
 
     /**
-     * ارسال پیامک هشدار به کاربرانی که 7 روز دیگر اعتبارشان منقضی می‌شود
-     *
-     * @param int $warningDays
-     * @return void
+     * مهلت انقضای اعتبار از تنظیمات همان فروشگاه (پیش‌فرض ۶۰ روز).
      */
-    private function sendWarningSms($warningDays)
+    private function expiryDaysFor(?int $atelierId): int
     {
-        // تاریخ دقیق 53 روز پیش (7 روز قبل از انقضا)
-        $warningDate = Carbon::now()->subDays($warningDays);
-        
-        // پیدا کردن کاربرانی که:
-        // - اعتبار > 0 دارند
-        // - credit_last_updated_at آنها دقیقاً warningDays روز پیش است (یا قبل از آن)
-        // - هنوز هشدار ارسال نشده (last_warning_sent_at null است)
-        // - اما هنوز 60 روز کامل نگذشته (یعنی هنوز منقضی نشده)
-        $expiryDate = Carbon::now()->subDays($warningDays + 7); // 60 روز پیش
-        
-        $usersToWarn = UserShiksho::where('credit', '>', 0)
-            ->whereNotNull('credit_last_updated_at')
+        $key = $atelierId === null ? 'global' : (string) $atelierId;
+        if (! isset($this->expiryDaysCache[$key])) {
+            Setting::setContextAtelierId($atelierId);
+            $days = (int) Setting::get('credit_expiry_days', self::DEFAULT_EXPIRY_DAYS);
+            $this->expiryDaysCache[$key] = $days >= 1 && $days <= 365 ? $days : self::DEFAULT_EXPIRY_DAYS;
+        }
+
+        return $this->expiryDaysCache[$key];
+    }
+
+    private function usersOf(?int $atelierId)
+    {
+        $q = UserShiksho::query()
+            ->where('credit', '>', 0)
+            ->whereNotNull('credit_last_updated_at');
+
+        return $atelierId !== null
+            ? $q->where('atelier_id', $atelierId)
+            : $q->whereNull('atelier_id');
+    }
+
+    /**
+     * ارسال پیامک هشدار به کاربرانی که ۷ روز دیگر اعتبارشان منقضی می‌شود
+     */
+    private function sendWarningSms(?int $atelierId, int $expiryDays): void
+    {
+        $warningDate = Carbon::now()->subDays($expiryDays - self::WARNING_BEFORE_DAYS);
+        $expiryDate = Carbon::now()->subDays($expiryDays);
+
+        $usersToWarn = $this->usersOf($atelierId)
             ->where('credit_last_updated_at', '<=', $warningDate)
             ->where('credit_last_updated_at', '>', $expiryDate) // هنوز منقضی نشده
             ->whereNull('last_warning_sent_at')
@@ -81,25 +117,22 @@ class ExpireUserCredits extends Command
 
         foreach ($usersToWarn as $user) {
             try {
-                // فرمت کردن مبلغ اعتبار
                 $creditAmount = number_format($user->credit, 0);
-                
-                $shopName = SmsTools::shopSmsBrand($user->atelier_id ? (int) $user->atelier_id : null);
-                $message = "{$shopName}\nاعتبار شما به مبلغ {$creditAmount} تومان در حال اتمام است (7 روز دیگر)";
-                
-                // ارسال پیامک برای فروشگاه (ثبت در shop_sms_logs)
-                $atelierId = $user->atelier_id ? (int) $user->atelier_id : null;
+                $daysLeft = max(1, $expiryDays - (int) Carbon::parse($user->credit_last_updated_at)->diffInDays(Carbon::now()));
+
+                $shopName = SmsTools::shopSmsBrand($atelierId);
+                $message = "{$shopName}\nاعتبار شما به مبلغ {$creditAmount} تومان در حال اتمام است ({$daysLeft} روز دیگر)";
+
                 try {
                     SmsTools::sendShopSms($user->phone, $message, null, $user->credit, 'warning', $atelierId);
                 } catch (\App\Exceptions\InsufficientShopSmsQuotaException $e) {
                     $this->warn("اعتبار پیامک فروشگاه #{$atelierId} کافی نیست برای {$user->phone}");
                     continue;
                 }
-                
-                // به‌روزرسانی last_warning_sent_at
+
                 $user->last_warning_sent_at = Carbon::now();
                 $user->save();
-                
+
                 $this->line("پیامک هشدار به {$user->phone} ارسال شد. مبلغ اعتبار: {$creditAmount} تومان");
             } catch (\Exception $e) {
                 $this->error("خطا در ارسال پیامک به {$user->phone}: " . $e->getMessage());
@@ -109,19 +142,12 @@ class ExpireUserCredits extends Command
 
     /**
      * صفر کردن اعتبارهای منقضی شده
-     *
-     * @param int $expiryDays
-     * @return void
      */
-    private function expireCredits($expiryDays)
+    private function expireCredits(?int $atelierId, int $expiryDays): void
     {
         $expiryDate = Carbon::now()->subDays($expiryDays);
-        
-        // پیدا کردن کاربرانی که:
-        // - اعتبار > 0 دارند
-        // - credit_last_updated_at آنها از expiryDate گذشته است
-        $usersToExpire = UserShiksho::where('credit', '>', 0)
-            ->whereNotNull('credit_last_updated_at')
+
+        $usersToExpire = $this->usersOf($atelierId)
             ->whereDate('credit_last_updated_at', '<=', $expiryDate->format('Y-m-d'))
             ->get();
 
@@ -130,13 +156,13 @@ class ExpireUserCredits extends Command
         $expiredCount = 0;
         foreach ($usersToExpire as $user) {
             $oldCredit = $user->credit;
-            
+
             // صفر کردن اعتبار (بدون تغییر updated_at)
             $user->timestamps = false;
             $user->credit = 0;
             $user->save();
             $user->timestamps = true;
-            
+
             $expiredCount++;
             $this->line("اعتبار کاربر {$user->phone} صفر شد. مبلغ قبلی: " . number_format($oldCredit, 0) . " تومان");
         }
@@ -144,4 +170,3 @@ class ExpireUserCredits extends Command
         $this->info("تعداد {$expiredCount} اعتبار منقضی شد و صفر شد.");
     }
 }
-

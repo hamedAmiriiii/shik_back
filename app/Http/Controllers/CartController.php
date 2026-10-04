@@ -429,8 +429,8 @@ class CartController extends Controller
             if ($phone) {
                 $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
                 
-                if ($enableLoyaltyCredit) {
-                    // به‌روزرسانی اعتبار
+                if ($enableLoyaltyCredit && $creditEarned > 0) {
+                    // اعتبار جدید روی اعتبار قبلی جمع می‌شود
                     UserShiksho::updateCredit($phone, $creditEarned, $atelierId);
 
                     // ارسال پیامک

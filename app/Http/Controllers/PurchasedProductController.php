@@ -647,7 +647,7 @@ class PurchasedProductController extends Controller
             $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
             
             if ($enableLoyaltyCredit && $creditEarned > 0) {
-                // به‌روزرسانی اعتبار (اعتبار قبلی صفر می‌شود و اعتبار جدید اضافه می‌شود)
+                // اعتبار این خرید روی اعتبار قبلی مشتری جمع می‌شود
                 UserShiksho::updateCredit($phone, $creditEarned, $purchaseAtelierId);
 
                 // ارسال پیامک بعد از ذخیره خرید (فقط اگر اعتبار کسب شده باشد)

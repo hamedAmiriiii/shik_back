@@ -246,11 +246,12 @@ class CampaignRunner
                 if ($message === '') {
                     $message = 'پیام باشگاه مشتریان';
                 }
-                // replace simple tokens
-                $message = str_replace(
-                    ['{phone}', '{recency}', '{credit}'],
-                    [$phone, (string) $metric->recency_days, (string) ($results['credit']['added'] ?? '')],
-                    $message
+                $message = str_replace('{recency}', (string) $metric->recency_days, $message);
+                $message = SmartActionGenerator::renderTemplate(
+                    str_replace(['{phone} عزیز', '{phone}'], ['{greeting}', '{greeting}'], $message),
+                    $atelierId,
+                    $phone,
+                    isset($results['credit']['added']) ? (float) $results['credit']['added'] : null
                 );
                 SmsTools::sendShopSms($phone, $message, null, null, 'campaign', $atelierId);
                 $results['sms'] = true;
