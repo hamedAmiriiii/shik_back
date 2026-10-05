@@ -90,7 +90,62 @@ class Handler extends ExceptionHandler
             ], 403);
         }
 
+        if ($request instanceof Request && $request->segment(1) === 'api' && $this->becomesServerError($e)) {
+            $errorId = \App\Support\ApiErrorLog::exception($e, $request);
+            $payload = [
+                'message' => 'خطای سرور. کد پیگیری: '.$errorId,
+                'error_id' => $errorId,
+            ];
+            if ($this->mayShowErrorDetails($request)) {
+                $payload['exception'] = get_class($e);
+                $payload['error'] = mb_substr((string) $e->getMessage(), 0, 1000);
+                $payload['file'] = str_replace(base_path().DIRECTORY_SEPARATOR, '', $e->getFile());
+                $payload['line'] = $e->getLine();
+            }
+
+            return response()->json($payload, 500);
+        }
+
         return parent::render($request, $e);
+    }
+
+    private function becomesServerError(Throwable $e): bool
+    {
+        if ($e instanceof \Symfony\Component\HttpKernel\Exception\HttpExceptionInterface) {
+            return $e->getStatusCode() >= 500;
+        }
+
+        foreach ([
+            \Illuminate\Http\Exceptions\HttpResponseException::class,
+            ValidationException::class,
+            AuthenticationException::class,
+            \Illuminate\Auth\Access\AuthorizationException::class,
+            \Illuminate\Database\Eloquent\ModelNotFoundException::class,
+            \Illuminate\Database\RecordsNotFoundException::class,
+            \Illuminate\Session\TokenMismatchException::class,
+            \Symfony\Component\HttpFoundation\Exception\SuspiciousOperationException::class,
+        ] as $handled) {
+            if ($e instanceof $handled) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * جزئیات خطا فقط برای پرسنل لاگین‌شده (نه مشتری یا مهمان) در پاسخ برمی‌گردد.
+     */
+    private function mayShowErrorDetails(Request $request): bool
+    {
+        if (config('app.debug')) {
+            return true;
+        }
+        try {
+            return $request->user('sanctum') instanceof \App\Models\User;
+        } catch (Throwable $ignored) {
+            return false;
+        }
     }
 
     /**

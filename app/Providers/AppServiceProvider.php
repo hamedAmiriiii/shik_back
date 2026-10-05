@@ -32,6 +32,8 @@ class AppServiceProvider extends ServiceProvider
             return;
         }
 
+        \App\Support\ApiErrorLog::registerFatalHandler();
+
         $started = microtime(true);
         $this->app->terminating(function () use ($started) {
             $ms = (int) round((microtime(true) - $started) * 1000);
