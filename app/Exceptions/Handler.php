@@ -44,6 +44,20 @@ class Handler extends ExceptionHandler
     }
 
     /**
+     * اگر نوشتن laravel.log شکست بخورد (مثلاً دسترسی فایل)، render هرگز اجرا نمی‌شود
+     * و پاسخ 500 خام بدون CORS برمی‌گردد؛ پس خطای لاگ نباید به بیرون نشت کند.
+     */
+    public function report(Throwable $e)
+    {
+        try {
+            parent::report($e);
+        } catch (Throwable $logFailure) {
+            \App\Support\ApiErrorLog::exception($logFailure, request());
+            \App\Support\ApiErrorLog::exception($e, request());
+        }
+    }
+
+    /**
      * @param  \Illuminate\Http\Request  $request
      * @return \Symfony\Component\HttpFoundation\Response
      */

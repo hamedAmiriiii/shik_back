@@ -155,46 +155,6 @@ class SettingController extends Controller
     }
 
     /**
-     * مهلت بازگشت کالای فروش‌رفته. خالی یعنی بدون محدودیت.
-     */
-    public function getSaleReturnDays(Request $request)
-    {
-        $this->bindShopSettingAtelierFromRequest($request);
-        $raw = Setting::get('sale_return_days', '');
-        $days = ($raw === null || trim((string) $raw) === '') ? null : (int) $raw;
-
-        return response([
-            'key' => 'sale_return_days',
-            'value' => $days === null ? '' : (string) $days,
-            'days' => $days,
-        ], 200);
-    }
-
-    public function setSaleReturnDays(Request $request)
-    {
-        $this->bindShopSettingAtelierFromRequest($request);
-        $request->validate([
-            'days' => 'nullable|integer|min:0|max:3650',
-        ]);
-
-        $days = $request->input('days');
-        if ($days === null || $days === '') {
-            Setting::set('sale_return_days', '');
-            $stored = null;
-        } else {
-            $stored = (int) $days;
-            Setting::set('sale_return_days', (string) $stored);
-        }
-
-        return response([
-            'message' => 'مهلت بازگشت کالا ذخیره شد',
-            'key' => 'sale_return_days',
-            'value' => $stored === null ? '' : (string) $stored,
-            'days' => $stored,
-        ], 200);
-    }
-
-    /**
      * مهلت بازگشت کالای فروش‌رفته. days خالی = بدون محدودیت.
      */
     public function getSaleReturnDays(Request $request)
