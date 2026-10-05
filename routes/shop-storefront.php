@@ -59,6 +59,9 @@ Route::prefix('{shop}')
             ->name('table-order.receipt');
         Route::post('table-order/{tableOrder}/cancel', [\App\Http\Controllers\TableOrderController::class, 'guestCancel'])
             ->name('table-order.cancel');
+        Route::post('table-order/{tableOrder}/pay-online', [\App\Http\Controllers\TableOrderController::class, 'guestPayOnline'])
+            ->middleware('throttle:20,1')
+            ->name('table-order.pay-online');
 
         Route::get('shop-services', [\App\Http\Controllers\ShopServiceController::class, 'publicIndex'])
             ->name('shop-services.index');

@@ -7,7 +7,9 @@ use App\Models\GatewayPayment;
 use App\Models\RepairRequest;
 use App\Models\SmsPackage;
 use App\Models\SmsPackageOrder;
+use App\Models\Setting;
 use App\Models\ShopPlan;
+use App\Models\TableOrder;
 use App\Models\User;
 use App\Services\Repair\RepairRequestService;
 use App\Services\Repair\RepairSms;
@@ -176,7 +178,7 @@ class GatewayPaymentService
             'description' => $description,
             'status' => GatewayPayment::STATUS_PENDING,
             'gateway' => $gateway,
-            'return_url' => $this->sanitizeReturnUrl($returnUrl),
+            'return_url' => $this->sanitizeReturnUrl($returnUrl, $type === GatewayPayment::TYPE_TABLE_ORDER),
             'meta' => $meta,
         ]);
 
@@ -202,7 +204,8 @@ class GatewayPaymentService
             (int) $payment->amount_rial,
             $callback.'?pid='.$payment->id,
             (string) $payment->description,
-            $metadata
+            $metadata,
+            $this->paymentMerchantId($payment)
         );
 
         $payment->update(['authority' => $authority]);
@@ -305,7 +308,11 @@ class GatewayPaymentService
         }
 
         try {
-            $verified = $this->zarinpal->verify((string) $payment->authority, (int) $payment->amount_rial);
+            $verified = $this->zarinpal->verify(
+                (string) $payment->authority,
+                (int) $payment->amount_rial,
+                $this->paymentMerchantId($payment)
+            );
             $this->fulfill($payment, $verified['ref_id'] ?? null, $verified, 'zarinpal');
         } catch (RuntimeException $e) {
             $payment->update(['status' => GatewayPayment::STATUS_FAILED]);
@@ -473,6 +480,8 @@ class GatewayPaymentService
                 app(RepairRequestService::class)->fulfillOnlinePayment($locked, $refId);
             } elseif ($locked->type === GatewayPayment::TYPE_REPAIR_SMS) {
                 $this->fulfillRepairSms($locked);
+            } elseif ($locked->type === GatewayPayment::TYPE_TABLE_ORDER) {
+                app(TableOrderCheckoutService::class)->fulfillOnlinePayment($locked, $refId);
             } else {
                 throw new RuntimeException('نوع خرید پشتیبانی نمی‌شود.');
             }
@@ -657,7 +666,43 @@ class GatewayPaymentService
             ];
         }
 
+        if ($type === GatewayPayment::TYPE_TABLE_ORDER) {
+            $order = TableOrder::query()->find($itemId);
+            if (! $order || ($atelierId !== null && (int) $order->atelier_id !== (int) $atelierId)) {
+                throw new RuntimeException('سفارش یافت نشد.');
+            }
+            if (! $order->isPending() || $order->purchase_id || $order->isPaidOnline()) {
+                throw new RuntimeException('این سفارش منتظر پرداخت آنلاین نیست.');
+            }
+
+            Setting::setShopContext((int) $order->atelier_id);
+            if (! TableOrder::onlineGatewayAvailable()) {
+                throw new RuntimeException('درگاه پرداخت آنلاین برای این فروشگاه تنظیم نشده است.');
+            }
+
+            $payableToman = $order->payableAmountToman();
+            $atelier = Atelier::query()->find($order->atelier_id);
+
+            return [
+                $payableToman * 10,
+                'سفارش '.($order->table_label ?: 'میز').' #'.$order->id.($atelier ? ' - '.$atelier->name : ''),
+                [
+                    'table_order_id' => (int) $order->id,
+                    'payable_toman' => $payableToman,
+                    'merchant_id' => TableOrder::shopZarinpalMerchantId(),
+                ],
+            ];
+        }
+
         throw new RuntimeException('نوع خرید نامعتبر است. sms_package یا shop_plan بفرستید.');
+    }
+
+    /** مرچنت اختصاصی (مثلاً مرچنت فروشگاه برای سفارش میز)؛ null یعنی مرچنت مرکزی وبینو. */
+    protected function paymentMerchantId(GatewayPayment $payment): ?string
+    {
+        $merchant = $payment->meta['merchant_id'] ?? null;
+
+        return is_string($merchant) && trim($merchant) !== '' ? trim($merchant) : null;
     }
 
     protected function fulfillSms(GatewayPayment $payment): void
@@ -738,7 +783,7 @@ class GatewayPaymentService
         ShopReferralService::onPaidPlanActivated($atelier->fresh());
     }
 
-    protected function sanitizeReturnUrl(?string $url): string
+    protected function sanitizeReturnUrl(?string $url, bool $keepPathOnFallbackHost = false): string
     {
         $fallback = (string) config('zarinpal.frontend_return_url');
         if (! is_string($url) || trim($url) === '') {
@@ -748,7 +793,14 @@ class GatewayPaymentService
         $host = $parts['host'] ?? null;
         $allowed = config('zarinpal.allowed_return_hosts', []);
         if (! is_string($host) || ! in_array($host, $allowed, true)) {
-            return $fallback;
+            if (! $keepPathOnFallbackHost || ! is_array($parts)) {
+                return $fallback;
+            }
+
+            // دامنهٔ اختصاصی فروشگاه: همان مسیر روی دامنهٔ اصلی وبینو
+            $path = '/'.ltrim((string) ($parts['path'] ?? ''), '/');
+
+            return rtrim($fallback, '/').$path.(! empty($parts['query']) ? '?'.$parts['query'] : '');
         }
 
         return $url;

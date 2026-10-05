@@ -4,7 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\InsufficientShopSmsQuotaException;
 use App\Models\CustomerPhone;
-use App\Models\Product;
+use App\Models\GatewayPayment;
 use App\Models\Purchase;
 use App\Models\PurchasedProduct;
 use App\Models\Setting;
@@ -12,11 +12,56 @@ use App\Models\TableOrder;
 use App\Models\UserShiksho;
 use App\Services\CustomerCreditExpenseService;
 use App\Tools\SmsTools;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
 
 class TableOrderCheckoutService
 {
+    public function __construct(
+        protected ShopPosSaleService $posSale,
+    ) {
+    }
+
+    /**
+     * ردیف‌های ورودی ShopPosSaleService از اقلام سفارش (قیمت همان قیمت زمان سفارش).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function prepareOrderLines(TableOrder $order): array
+    {
+        $rows = [];
+        foreach ($order->items as $line) {
+            $row = [
+                'quantity' => (float) $line->quantity,
+                'size' => $line->size,
+                'color' => $line->color,
+            ];
+            if (! empty($line->produced_good_id)) {
+                $row['produced_good_id'] = (int) $line->produced_good_id;
+            } elseif (! empty($line->raw_material_id)) {
+                $row['raw_material_id'] = (int) $line->raw_material_id;
+            } else {
+                $row['product_id'] = (int) $line->product_id;
+            }
+            $rows[] = $row;
+        }
+
+        try {
+            $prepared = $this->posSale->prepareLines($rows, (int) $order->atelier_id);
+        } catch (RuntimeException $e) {
+            abort(response()->json(['message' => $e->getMessage()], 422));
+        }
+
+        foreach ($order->items->values() as $i => $line) {
+            $prepared[$i]['sale_price'] = (float) $line->sale_price;
+        }
+
+        return $prepared;
+    }
+
     /**
      * تبدیل سفارش پای میز به خرید واقعی بعد از پرداخت.
      */
@@ -35,16 +80,11 @@ class TableOrderCheckoutService
             $atelierId = (int) $order->atelier_id;
             Setting::setShopContext($atelierId);
 
-            foreach ($order->items as $line) {
-                $product = $line->product;
-                if (! $product) {
-                    abort(response()->json(['message' => 'یک یا چند محصول یافت نشد'], 404));
-                }
-                if ((float) $product->quantity < (float) $line->quantity) {
-                    abort(response()->json([
-                        'message' => "موجودی محصول «{$product->name}» کافی نیست.",
-                    ], 400));
-                }
+            $prepared = $this->prepareOrderLines($order);
+            try {
+                $this->posSale->assertStock($prepared);
+            } catch (RuntimeException $e) {
+                abort(response()->json(['message' => $e->getMessage()], 400));
             }
 
             $grossTotal = (float) $order->total_amount;
@@ -91,18 +131,26 @@ class TableOrderCheckoutService
             \App\Services\DailyTicketNumberService::assign($purchase);
             CustomerCreditExpenseService::recordCreditUsed($purchase);
 
-            foreach ($order->items as $line) {
-                PurchasedProduct::create([
+            $createdLines = [];
+            foreach ($prepared as $line) {
+                $createdLines[] = PurchasedProduct::create([
                     'purchase_id' => $purchase->id,
-                    'product_id' => $line->product_id,
-                    'quantity' => $line->quantity,
-                    'purchase_price' => $line->purchase_price,
-                    'sale_price' => $line->sale_price,
-                    'size' => $line->size,
-                    'color' => $line->color,
+                    'product_id' => $line['product_id'],
+                    'produced_good_id' => $line['produced_good_id'],
+                    'raw_material_id' => $line['raw_material_id'],
+                    'item_name' => $line['item_name'],
+                    'quantity' => $line['quantity'],
+                    'purchase_price' => $line['purchase_price'],
+                    'sale_price' => $line['sale_price'],
+                    'size' => $line['size'] ?? null,
+                    'color' => $line['color'] ?? null,
                 ]);
+            }
 
-                Product::where('id', $line->product_id)->decrement('quantity', $line->quantity);
+            try {
+                $this->posSale->commitStock($prepared, $createdLines);
+            } catch (RuntimeException $e) {
+                abort(response()->json(['message' => $e->getMessage()], 409));
             }
 
             if ($phone) {
@@ -135,6 +183,66 @@ class TableOrderCheckoutService
 
             return $purchase;
         }, 5);
+    }
+
+    /**
+     * بعد از تأیید زرین‌پال: سفارش علامت «پرداخت آنلاین» می‌خورد و خودکار فاکتور می‌شود.
+     * اگر ساخت فاکتور خطا بدهد، پرداخت درگاه حفظ می‌شود و سفارش برای تسویهٔ دستی پرسنل می‌ماند.
+     */
+    public function fulfillOnlinePayment(GatewayPayment $payment, ?string $refId): void
+    {
+        $orderId = (int) ($payment->meta['table_order_id'] ?? $payment->item_id);
+        $order = TableOrder::query()->where('id', $orderId)->lockForUpdate()->first();
+        if (! $order) {
+            throw new RuntimeException('سفارش پرداخت‌شده یافت نشد.');
+        }
+
+        if (TableOrder::hasOnlineColumns()) {
+            $updates = [
+                'gateway_payment_id' => $payment->id,
+                'online_paid_at' => now(),
+                'online_ref_id' => $refId,
+            ];
+            // پرداخت بعد از لغو خودکار (انقضای مهلت) رسید: سفارش دوباره فعال شود.
+            if ($order->status === TableOrder::STATUS_CANCELLED && ! $order->purchase_id) {
+                $updates['status'] = TableOrder::STATUS_PENDING;
+                $updates['cancelled_by'] = null;
+                $updates['cancelled_at'] = null;
+            }
+            $order->update($updates);
+        }
+
+        if (! $order->isPending() || $order->purchase_id) {
+            return;
+        }
+
+        $note = trim(implode(' | ', array_filter([
+            $order->note,
+            'پرداخت آنلاین زرین‌پال'.($refId ? ' - کد پیگیری '.$refId : ''),
+        ])));
+
+        $request = Request::create('/', 'POST', [
+            'payment_settlement' => 'card',
+            'note' => mb_substr($note, 0, 500),
+        ]);
+
+        try {
+            $this->pay($order, $request);
+        } catch (HttpResponseException $e) {
+            $this->logFulfillFailure($order, $payment, $e->getResponse()->getContent());
+        } catch (\Throwable $e) {
+            report($e);
+            $this->logFulfillFailure($order, $payment, $e->getMessage());
+        }
+    }
+
+    private function logFulfillFailure(TableOrder $order, GatewayPayment $payment, $reason): void
+    {
+        Log::warning('table_order.online_fulfill_failed', [
+            'table_order_id' => $order->id,
+            'gateway_payment_id' => $payment->id,
+            'reason' => is_string($reason) ? mb_substr($reason, 0, 500) : $reason,
+        ]);
     }
 
     /**

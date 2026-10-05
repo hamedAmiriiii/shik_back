@@ -7,10 +7,10 @@ use RuntimeException;
 
 class ZarinpalClient
 {
-    public function request(int $amountRial, string $callbackUrl, string $description, array $metadata = []): string
+    public function request(int $amountRial, string $callbackUrl, string $description, array $metadata = [], ?string $merchantId = null): string
     {
         $payload = [
-            'merchant_id' => $this->merchantId(),
+            'merchant_id' => $this->merchantId($merchantId),
             'amount' => $amountRial,
             'callback_url' => $callbackUrl,
             'description' => mb_substr($description, 0, 255),
@@ -32,10 +32,10 @@ class ZarinpalClient
     /**
      * @return array{code: int, ref_id: string|null, card_pan: string|null}
      */
-    public function verify(string $authority, int $amountRial): array
+    public function verify(string $authority, int $amountRial, ?string $merchantId = null): array
     {
         $json = $this->post($this->verifyUrl(), [
-            'merchant_id' => $this->merchantId(),
+            'merchant_id' => $this->merchantId($merchantId),
             'amount' => $amountRial,
             'authority' => $authority,
         ]);
@@ -74,14 +74,14 @@ class ZarinpalClient
             : 'https://api.zarinpal.com/pg/v4/payment/verify.json';
     }
 
-    protected function merchantId(): string
+    protected function merchantId(?string $override = null): string
     {
-        $id = trim((string) config('zarinpal.merchant_id'));
-        if ($id === '') {
-            $id = '';
+        $override = trim((string) $override);
+        if ($override !== '') {
+            return $override;
         }
 
-        return $id;
+        return trim((string) config('zarinpal.merchant_id'));
     }
 
     protected function sandbox(): bool
