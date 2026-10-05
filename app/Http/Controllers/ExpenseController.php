@@ -72,23 +72,20 @@ class ExpenseController extends Controller
             $query->where('payment_status', $request->input('payment_status'));
         }
 
-        if (CustomerCreditExpenseService::supports() && $request->filled('credit_source')) {
-            $source = (string) $request->input('credit_source');
-            if (in_array($source, [
+        if (CustomerCreditExpenseService::supports()) {
+            $source = (string) $request->input('credit_source', 'none');
+            if ($source === '' ) {
+                $source = 'none';
+            }
+            if ($source === 'none' || $source === 'without_credit') {
+                $query->whereNull('credit_source');
+            } elseif (in_array($source, [
                 CustomerCreditExpenseService::SOURCE_LOYALTY,
                 CustomerCreditExpenseService::SOURCE_RETURN,
                 CustomerCreditExpenseService::SOURCE_MANUAL,
             ], true)) {
                 $query->where('credit_source', $source);
             }
-        } elseif (CustomerCreditExpenseService::supports()) {
-            $query->where(function ($q) {
-                $q->whereNull('credit_source')
-                    ->orWhereNotIn('credit_source', [
-                        CustomerCreditExpenseService::SOURCE_RETURN,
-                        CustomerCreditExpenseService::SOURCE_MANUAL,
-                    ]);
-            });
         }
 
         // جستجو بر اساس searchFilterModel

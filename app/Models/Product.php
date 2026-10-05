@@ -18,9 +18,10 @@ class Product extends Model
 
     public const DEFAULT_DISPLAY_ORDER = 50;
 
-    protected $fillable = ["name", "description", "display_order", "price_buy", "quantity", "unit_type", "barcode", "sale_price", "purchase_price", "original_sale_price", "sizes", "colors", "manufacturer_id", "atelier_id"];
+    protected $fillable = ["name", "description", "display_order", "price_buy", "quantity", "unit_type", "barcode", "sale_price", "purchase_price", "purchased_on", "original_sale_price", "sizes", "colors", "manufacturer_id", "atelier_id"];
 
     protected $casts = [
+        'purchased_on' => 'date:Y-m-d',
         'purchase_price' => 'decimal:2',
         'sale_price' => 'decimal:2',
         'original_sale_price' => 'decimal:2',

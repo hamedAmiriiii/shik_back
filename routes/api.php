@@ -589,7 +589,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/payroll', [\App\Http\Controllers\SettingController::class, 'getPayrollSettings']);
         Route::post('/payroll', [\App\Http\Controllers\SettingController::class, 'setPayrollSettings']);
         Route::put('/payroll', [\App\Http\Controllers\SettingController::class, 'setPayrollSettings']);
-        $reservedSettingKeys = 'loyalty-credit-tiers|loyalty-credit|credit-expiry-days|installment-interest-rate|payroll';
+        Route::get('/sale-return-days', [\App\Http\Controllers\SettingController::class, 'getSaleReturnDays']);
+        Route::post('/sale-return-days', [\App\Http\Controllers\SettingController::class, 'setSaleReturnDays']);
+        Route::put('/sale-return-days', [\App\Http\Controllers\SettingController::class, 'setSaleReturnDays']);
+        $reservedSettingKeys = 'loyalty-credit-tiers|loyalty-credit|credit-expiry-days|installment-interest-rate|payroll|sale-return-days';
         Route::get('/{key}', [\App\Http\Controllers\SettingController::class, 'show'])
             ->where('key', '^(?!'.$reservedSettingKeys.').+');
         Route::put('/{key}', [\App\Http\Controllers\SettingController::class, 'update'])

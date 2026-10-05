@@ -304,6 +304,7 @@ class ProductController extends Controller
             'description' => 'nullable|string|max:500',
             'display_order' => 'nullable|integer|min:0|max:9999',
             'purchase_price' => 'required|numeric|min:0',
+            'purchased_on' => 'nullable|date_format:Y-m-d',
             'sale_price' => 'required|numeric|min:0',
             'quantity' => 'required|numeric|min:0',
             'unit_type' => 'nullable|string|in:'.Product::UNIT_PIECE.','.Product::UNIT_KG.','.Product::UNIT_METER,
@@ -824,6 +825,26 @@ class ProductController extends Controller
     }
 
     /**
+     * @param  array<string, mixed>  $fields
+     * @return array<string, mixed>
+     */
+    private function normalizePurchasedOnField(array $fields): array
+    {
+        if (! array_key_exists('purchased_on', $fields)) {
+            return $fields;
+        }
+        if (! Schema::hasColumn('products', 'purchased_on')) {
+            unset($fields['purchased_on']);
+
+            return $fields;
+        }
+        $value = $fields['purchased_on'];
+        $fields['purchased_on'] = ($value === null || $value === '') ? null : $value;
+
+        return $fields;
+    }
+
+    /**
      * آماده‌سازی فیلدهای به‌روزرسانی محصول (قیمت، موجودی، واحد).
      *
      * @return array<string, mixed>|string
@@ -862,6 +883,7 @@ class ProductController extends Controller
         }
 
         unset($fields['id'], $fields['images'], $fields['category_ids']);
+        $fields = $this->normalizePurchasedOnField($fields);
 
         return $fields;
     }
@@ -897,6 +919,7 @@ class ProductController extends Controller
         }
 
         unset($fields['discount_percent'], $fields['images'], $fields['category_ids']);
+        $fields = $this->normalizePurchasedOnField($fields);
 
         if (isset($fields['barcode'])) {
             $fields['barcode'] = trim((string) $fields['barcode']);

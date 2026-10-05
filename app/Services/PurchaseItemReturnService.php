@@ -9,6 +9,7 @@ use App\Models\PurchaseItemReturn;
 use App\Models\PurchasedProduct;
 use App\Models\Product;
 use App\Models\ReturnedProduct;
+use App\Models\Setting;
 use App\Models\UserShiksho;
 use App\Services\CustomerCreditExpenseService;
 use App\Tools\PhoneTools;
@@ -106,6 +107,104 @@ class PurchaseItemReturnService
         }
 
         return null;
+    }
+
+    /**
+     * مهلت بازگشت از تنظیم فروشگاه. خالی = بدون محدودیت.
+     * مثلاً ۱ روز: همان روز فروش و روز بعد مجاز است؛ از روز دوم خطا می‌دهد.
+     */
+    public static function assertSaleReturnWindow(Purchase $purchase): void
+    {
+        $atelierId = self::purchaseAtelierId($purchase);
+        if ($atelierId === null || $atelierId <= 0) {
+            return;
+        }
+        if (! Schema::hasTable('settings')) {
+            return;
+        }
+
+        $raw = Setting::query()
+            ->where('atelier_id', $atelierId)
+            ->where('key', 'sale_return_days')
+            ->value('value');
+        if ($raw === null || trim((string) $raw) === '' || ! is_numeric($raw)) {
+            return;
+        }
+
+        $days = (int) $raw;
+        if ($days < 0) {
+            return;
+        }
+
+        $soldAt = $purchase->created_at
+            ? Carbon::parse($purchase->created_at)->timezone('Asia/Tehran')->startOfDay()
+            : now('Asia/Tehran')->startOfDay();
+        $today = now('Asia/Tehran')->startOfDay();
+        if ($today->lt($soldAt)) {
+            return;
+        }
+
+        $elapsed = (int) $soldAt->diffInDays($today);
+        if ($elapsed <= $days) {
+            return;
+        }
+
+        if ($days === 0) {
+            throw new \InvalidArgumentException('بازگشت این خرید فقط در همان روز فروش ممکن است.');
+        }
+
+        throw new \InvalidArgumentException(
+            "مهلت بازگشت این خرید گذشته است. بازگشت فقط تا {$days} روز بعد از تاریخ فروش مجاز است."
+        );
+    }
+
+    /**
+     * مهلت بازگشت از تنظیم فروشگاه. خالی = بدون محدودیت.
+     * مثلاً ۱ روز: همان روز فروش و روز بعد مجاز است؛ از روز دوم خطا می‌دهد.
+     */
+    public static function assertSaleReturnWindow(Purchase $purchase): void
+    {
+        $atelierId = self::purchaseAtelierId($purchase);
+        if ($atelierId === null || $atelierId <= 0) {
+            return;
+        }
+        if (! Schema::hasTable('settings')) {
+            return;
+        }
+
+        $raw = Setting::query()
+            ->where('atelier_id', $atelierId)
+            ->where('key', 'sale_return_days')
+            ->value('value');
+        if ($raw === null || trim((string) $raw) === '' || ! is_numeric($raw)) {
+            return;
+        }
+
+        $days = (int) $raw;
+        if ($days < 0) {
+            return;
+        }
+
+        $soldAt = $purchase->created_at
+            ? Carbon::parse($purchase->created_at)->timezone('Asia/Tehran')->startOfDay()
+            : now('Asia/Tehran')->startOfDay();
+        $today = now('Asia/Tehran')->startOfDay();
+        if ($today->lt($soldAt)) {
+            return;
+        }
+
+        $elapsed = (int) $soldAt->diffInDays($today);
+        if ($elapsed <= $days) {
+            return;
+        }
+
+        if ($days === 0) {
+            throw new \InvalidArgumentException('بازگشت این خرید فقط در همان روز فروش ممکن است.');
+        }
+
+        throw new \InvalidArgumentException(
+            "مهلت بازگشت این خرید گذشته است. بازگشت فقط تا {$days} روز بعد از تاریخ فروش مجاز است."
+        );
     }
 
     /**
@@ -209,6 +308,7 @@ class PurchaseItemReturnService
             if ((int) $purchasedProduct->purchase_id !== (int) $purchase->id) {
                 throw new \InvalidArgumentException('این محصول متعلق به این خرید نیست');
             }
+            self::assertSaleReturnWindow($purchase);
 
             $purchasedProduct->load(['product', 'producedGood', 'rawMaterial']);
 
