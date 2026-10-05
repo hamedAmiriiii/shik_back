@@ -34,7 +34,12 @@ class Setting extends Model
     {
         static::setContextAtelierId($atelierId);
         if ($atelierId !== null) {
-            static::ensureDefaultsForAtelier($atelierId);
+            // ساخت پیش‌فرض‌ها نباید کل درخواست (تنظیمات، فروش‌ها، ...) را با 500 از کار بیندازد
+            try {
+                static::ensureDefaultsForAtelier($atelierId);
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
     }
 
