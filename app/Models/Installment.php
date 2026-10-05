@@ -42,10 +42,7 @@ class Installment extends Model
      */
     public function getDueDateJalaliAttribute()
     {
-        if (!$this->due_date) {
-            return null;
-        }
-        return Jalalian::fromCarbon(\Carbon\Carbon::parse($this->due_date))->format('Y/m/d');
+        return \App\Tools\JalaliTools::format($this->attributes['due_date'] ?? null, 'Y/m/d', null);
     }
 
     /**
@@ -53,10 +50,7 @@ class Installment extends Model
      */
     public function getPaidAtJalaliAttribute()
     {
-        if (!$this->paid_at) {
-            return null;
-        }
-        return Jalalian::fromCarbon(\Carbon\Carbon::parse($this->paid_at))->format('Y/m/d H:i:s');
+        return \App\Tools\JalaliTools::format($this->attributes['paid_at'] ?? null, 'Y/m/d H:i:s', null);
     }
 
     /**

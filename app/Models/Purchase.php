@@ -55,13 +55,9 @@ class Purchase extends Model
         'daily_ticket_date' => 'date',
     ];
 
-    public function getCreatedAtAttribute($value): string
+    public function getCreatedAtAttribute($value): ?string
     {
-        if (!$value) {
-            return null;
-        }
-        $carbon = \Carbon\Carbon::parse($value)->setTimezone('Asia/Tehran');
-        return Jalalian::fromCarbon($carbon)->format('Y-m-d H:i:s');
+        return \App\Tools\JalaliTools::format($value);
     }
 
     /**

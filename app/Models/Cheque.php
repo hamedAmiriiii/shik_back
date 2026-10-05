@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\Purchase;
 use App\Models\ShopAccount;
 use App\Services\DocumentPaymentService;
+use App\Tools\JalaliTools;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -89,7 +90,7 @@ class Cheque extends Model
         return $this->belongsTo(Purchase::class);
     }
 
-    public function getTypeLabelAttribute(): string
+    public function getTypeLabelAttribute(): ?string
     {
         return match ($this->type) {
             self::TYPE_ISSUED => 'صادره',
@@ -98,7 +99,7 @@ class Cheque extends Model
         };
     }
 
-    public function getStatusLabelAttribute(): string
+    public function getStatusLabelAttribute(): ?string
     {
         return match ($this->status) {
             self::STATUS_PENDING => 'در انتظار وصول',
@@ -110,50 +111,27 @@ class Cheque extends Model
 
     public function getIssueDateJalaliAttribute(): ?string
     {
-        $value = $this->attributes['issue_date'] ?? null;
-        if (!$value) {
-            return null;
-        }
-
-        return Jalalian::fromDateTime($value)->format('Y-m-d');
+        return JalaliTools::format($this->attributes['issue_date'] ?? null, 'Y-m-d', null);
     }
 
     public function getDueDateJalaliAttribute(): ?string
     {
-        $value = $this->attributes['due_date'] ?? null;
-        if (!$value) {
-            return null;
-        }
-
-        return Jalalian::fromDateTime($value)->format('Y-m-d');
+        return JalaliTools::format($this->attributes['due_date'] ?? null, 'Y-m-d', null);
     }
 
     public function getIssueDateAttribute($value): ?string
     {
-        if (!$value) {
-            return null;
-        }
-
-        return Jalalian::fromDateTime($value)->format('Y-m-d');
+        return JalaliTools::format($value, 'Y-m-d', null);
     }
 
     public function getDueDateAttribute($value): ?string
     {
-        if (!$value) {
-            return null;
-        }
-
-        return Jalalian::fromDateTime($value)->format('Y-m-d');
+        return JalaliTools::format($value, 'Y-m-d', null);
     }
 
     public function getCreatedAtAttribute($value): ?string
     {
-        if (!$value) {
-            return null;
-        }
-        $carbon = Carbon::parse($value)->setTimezone('Asia/Tehran');
-
-        return Jalalian::fromCarbon($carbon)->format('Y-m-d H:i:s');
+        return JalaliTools::format($value);
     }
 
     public function getUpdatedAtAttribute($value): ?string

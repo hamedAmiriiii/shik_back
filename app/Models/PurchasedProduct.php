@@ -32,13 +32,9 @@ class PurchasedProduct extends Model
 
     protected $appends = ['item_type', 'display_name'];
 
-    public function getCreatedAtAttribute($value): string
+    public function getCreatedAtAttribute($value): ?string
     {
-        if (!$value) {
-            return null;
-        }
-        $carbon = \Carbon\Carbon::parse($value)->setTimezone('Asia/Tehran');
-        return Jalalian::fromCarbon($carbon)->format('Y-m-d H:i:s');
+        return \App\Tools\JalaliTools::format($value);
     }
 
     public function getItemTypeAttribute(): string
