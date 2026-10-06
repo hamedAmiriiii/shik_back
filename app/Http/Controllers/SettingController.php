@@ -77,11 +77,12 @@ class SettingController extends Controller
         }
 
         $this->bindShopSettingAtelierFromRequest($request);
+        $this->mergeRequestPayload($request, ['value']);
         $request->validate([
-            'value' => 'required',
+            'value' => 'nullable',
         ]);
 
-        $value = $request->input('value');
+        $value = $this->normalizeSettingValue($request->input('value'));
         if ($key === ReservMenuTheme::THEME_KEY) {
             $value = ReservMenuTheme::normalize((string) $value);
         }
@@ -304,9 +305,10 @@ class SettingController extends Controller
     public function store(Request $request)
     {
         $this->bindShopSettingAtelierFromRequest($request);
+        $this->mergeRequestPayload($request, ['key', 'value']);
         $request->validate([
             'key' => 'required|string|max:255',
-            'value' => 'required',
+            'value' => 'nullable',
         ]);
 
         if (in_array($request->input('key'), self::ADMIN_ONLY_KEYS, true)) {
@@ -318,9 +320,9 @@ class SettingController extends Controller
             return response()->json(['message' => 'این تنظیم از این مسیر قابل تغییر نیست.'], 403);
         }
 
-        $value = $request->input('value');
+        $value = $this->normalizeSettingValue($request->input('value'));
         if ($request->input('key') === ReservMenuTheme::THEME_KEY) {
-            $value = ReservMenuTheme::normalize((string) $value);
+            $value = ReservMenuTheme::normalize($value);
         }
 
         Setting::set($request->input('key'), $value);
@@ -498,6 +500,24 @@ class SettingController extends Controller
         }
 
         return $normalized;
+    }
+
+    /**
+     * مقدار تنظیم می‌تواند خالی باشد (مثلاً مرچنت زرین‌پال یا شماره کارت).
+     */
+    private function normalizeSettingValue($value): string
+    {
+        if ($value === null || $value === false) {
+            return '';
+        }
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        }
+        if (is_scalar($value)) {
+            return trim((string) $value);
+        }
+
+        return '';
     }
 }
 
