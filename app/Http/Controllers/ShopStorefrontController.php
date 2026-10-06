@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Atelier;
 use App\Models\Setting;
 use App\Models\TableOrder;
+use App\Services\ReservMenuTheme;
 use App\Services\ShopLoyaltyCreditTierService;
 use Illuminate\Http\Request;
 
@@ -34,6 +35,7 @@ class ShopStorefrontController extends Controller
                 'room_services_enabled' => Setting::isEnabled('room_services_enabled', false),
             ],
             'payment_methods' => TableOrder::paymentMethodsForApi(),
+            'menu_theme' => ReservMenuTheme::forApi(),
         ]);
     }
 }

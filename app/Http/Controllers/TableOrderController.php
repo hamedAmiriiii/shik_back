@@ -678,6 +678,7 @@ class TableOrderController extends Controller
             // منو برای میز و اتاق وقتی رستوران/کافه فعال باشد
             'allow_menu' => $restaurantCafeEnabled,
             'allow_services' => $roomServicesEnabled,
+            'menu_theme' => \App\Services\ReservMenuTheme::forApi(),
             'shop' => [
                 'id' => $atelier?->id,
                 'name' => $atelier?->name,

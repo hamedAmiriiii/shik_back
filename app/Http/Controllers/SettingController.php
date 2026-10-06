@@ -4,8 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\Setting;
 use App\Services\GoogleSheets\ShopGoogleOAuth;
+use App\Services\ReservMenuTheme;
 use App\Services\ShopLoyaltyCreditTierService;
+use App\Tools\ImageTools;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
 
 class SettingController extends Controller
@@ -68,7 +71,8 @@ class SettingController extends Controller
                 'message' => 'این تنظیم فقط توسط ادمین سامانه قابل تغییر است.',
             ], 403);
         }
-        if (in_array($key, ShopGoogleOAuth::PRIVATE_SETTING_KEYS, true)) {
+        if (in_array($key, ShopGoogleOAuth::PRIVATE_SETTING_KEYS, true)
+            || in_array($key, ReservMenuTheme::MANAGED_KEYS, true)) {
             return response()->json(['message' => 'این تنظیم از این مسیر قابل تغییر نیست.'], 403);
         }
 
@@ -77,13 +81,111 @@ class SettingController extends Controller
             'value' => 'required',
         ]);
 
-        Setting::set($key, $request->input('value'));
+        $value = $request->input('value');
+        if ($key === ReservMenuTheme::THEME_KEY) {
+            $value = ReservMenuTheme::normalize((string) $value);
+        }
+
+        Setting::set($key, $value);
         
         return response([
             'message' => 'تنظیمات با موفقیت به‌روزرسانی شد',
             'key' => $key,
-            'value' => $request->input('value')
+            'value' => $value
         ], 200);
+    }
+
+    /**
+     * تم منوی سفارش میز + پس‌زمینهٔ آپلودشده.
+     */
+    public function getReservMenuTheme(Request $request)
+    {
+        $this->bindShopSettingAtelierFromRequest($request);
+
+        return response([
+            'themes' => ReservMenuTheme::THEMES,
+            'menu_theme' => ReservMenuTheme::forApi(),
+        ], 200);
+    }
+
+    /**
+     * آپلود ویدیو/تصویر متحرک پس‌زمینهٔ منوی میز (فیلد file).
+     */
+    public function uploadReservMenuBackground(Request $request)
+    {
+        if ($this->staffShopAtelierId($request) === null) {
+            return response()->json(['message' => 'این تنظیم فقط برای حساب متصل به فروشگاه است.'], 422);
+        }
+        $this->bindShopSettingAtelierFromRequest($request);
+
+        $maxKb = (int) (ReservMenuTheme::BG_MAX_BYTES / 1024);
+        $request->validate([
+            'file' => "required|file|max:{$maxKb}|mimes:mp4,webm,mov,gif,webp,jpeg,jpg,png",
+        ], [
+            'file.max' => 'حجم فایل نباید بیشتر از ۱۵ مگابایت باشد.',
+            'file.mimes' => 'فقط ویدیو (mp4، webm، mov) یا تصویر (gif، webp، jpg، png) مجاز است.',
+        ]);
+
+        $file = $request->file('file');
+        $mime = strtolower((string) $file->getMimeType());
+        $extName = strtolower((string) $file->getClientOriginalExtension());
+        $isVideo = str_starts_with($mime, 'video/') || in_array($extName, ['mp4', 'webm', 'mov'], true);
+        if ($extName === 'webm') {
+            $ext = 'webm';
+        } elseif ($extName === 'mov') {
+            $ext = 'mov';
+        } elseif ($isVideo) {
+            $ext = 'mp4';
+        } elseif ($extName === 'gif' || $mime === 'image/gif') {
+            $ext = 'gif';
+        } elseif ($extName === 'webp' || $mime === 'image/webp') {
+            $ext = 'webp';
+        } elseif ($extName === 'png' || $mime === 'image/png') {
+            $ext = 'png';
+        } else {
+            $ext = 'jpg';
+        }
+
+        $atelierId = Setting::contextAtelierId();
+        $contents = file_get_contents($file->getRealPath());
+        if ($contents === false || $contents === '') {
+            return response()->json(['message' => 'خواندن فایل ناموفق بود.'], 422);
+        }
+        $oldPath = trim((string) Setting::get(ReservMenuTheme::BG_MEDIA_KEY, ''));
+        $path = ImageTools::saveFile(
+            "/reserv-menu/{$atelierId}/background_".time().".{$ext}",
+            $contents
+        );
+
+        Setting::set(ReservMenuTheme::BG_MEDIA_KEY, $path);
+        Setting::set(ReservMenuTheme::BG_MEDIA_TYPE_KEY, $isVideo ? 'video' : 'image');
+        $this->deletePublicFile($oldPath);
+
+        return response([
+            'message' => 'پس‌زمینهٔ منو ذخیره شد',
+            'menu_theme' => ReservMenuTheme::forApi(),
+        ], 200);
+    }
+
+    public function deleteReservMenuBackground(Request $request)
+    {
+        $this->bindShopSettingAtelierFromRequest($request);
+
+        $this->deletePublicFile(trim((string) Setting::get(ReservMenuTheme::BG_MEDIA_KEY, '')));
+        Setting::set(ReservMenuTheme::BG_MEDIA_KEY, '');
+        Setting::set(ReservMenuTheme::BG_MEDIA_TYPE_KEY, '');
+
+        return response([
+            'message' => 'پس‌زمینهٔ منو حذف شد',
+            'menu_theme' => ReservMenuTheme::forApi(),
+        ], 200);
+    }
+
+    private function deletePublicFile(string $path): void
+    {
+        if ($path !== '' && Storage::exists('public/'.$path)) {
+            Storage::delete('public/'.$path);
+        }
     }
 
     /**
@@ -212,13 +314,21 @@ class SettingController extends Controller
                 'message' => 'اعتبار پیامک فقط توسط ادمین قابل شارژ است.',
             ], 403);
         }
+        if (in_array($request->input('key'), ReservMenuTheme::MANAGED_KEYS, true)) {
+            return response()->json(['message' => 'این تنظیم از این مسیر قابل تغییر نیست.'], 403);
+        }
 
-        Setting::set($request->input('key'), $request->input('value'));
+        $value = $request->input('value');
+        if ($request->input('key') === ReservMenuTheme::THEME_KEY) {
+            $value = ReservMenuTheme::normalize((string) $value);
+        }
+
+        Setting::set($request->input('key'), $value);
         
         return response([
             'message' => 'تنظیمات با موفقیت ایجاد/به‌روزرسانی شد',
             'key' => $request->input('key'),
-            'value' => $request->input('value')
+            'value' => $value
         ], 201);
     }
 

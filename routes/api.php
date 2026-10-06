@@ -592,7 +592,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/sale-return-days', [\App\Http\Controllers\SettingController::class, 'getSaleReturnDays']);
         Route::post('/sale-return-days', [\App\Http\Controllers\SettingController::class, 'setSaleReturnDays']);
         Route::put('/sale-return-days', [\App\Http\Controllers\SettingController::class, 'setSaleReturnDays']);
-        $reservedSettingKeys = 'loyalty-credit-tiers|loyalty-credit|credit-expiry-days|installment-interest-rate|payroll|sale-return-days';
+        Route::get('/reserv-menu-theme', [\App\Http\Controllers\SettingController::class, 'getReservMenuTheme']);
+        Route::post('/reserv-menu-background', [\App\Http\Controllers\SettingController::class, 'uploadReservMenuBackground']);
+        Route::delete('/reserv-menu-background', [\App\Http\Controllers\SettingController::class, 'deleteReservMenuBackground']);
+        $reservedSettingKeys = 'loyalty-credit-tiers|loyalty-credit|credit-expiry-days|installment-interest-rate|payroll|sale-return-days|reserv-menu-theme|reserv-menu-background';
         Route::get('/{key}', [\App\Http\Controllers\SettingController::class, 'show'])
             ->where('key', '^(?!'.$reservedSettingKeys.').+');
         Route::put('/{key}', [\App\Http\Controllers\SettingController::class, 'update'])

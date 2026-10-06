@@ -63,6 +63,10 @@ class Setting extends Model
             'shop_card_number' => '',
             'shop_card_holder' => '',
             'shop_bank_name' => '',
+            'table_payment_online_enabled' => '0',
+            'table_payment_card_to_card_enabled' => '1',
+            'table_payment_pos_enabled' => '1',
+            'shop_zarinpal_merchant_id' => '',
             'room_services_enabled' => '0',
             'restaurant_cafe_enabled' => '0',
             'produced_goods_enabled' => '0',
@@ -70,6 +74,7 @@ class Setting extends Model
             'customer_club_enabled' => \App\Services\ShopFeatureFlags::customerClubDefaultForAtelier($atelierId) ? '1' : '0',
             'receipt_print_settings' => '',
             'shop_browser_settings' => '',
+            \App\Services\ReservMenuTheme::THEME_KEY => \App\Services\ReservMenuTheme::DEFAULT_THEME,
             PriceTools::ROUND_SALE_PRICE_TO_THOUSAND_KEY => '1',
         ];
 
