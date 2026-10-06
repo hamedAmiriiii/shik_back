@@ -49,6 +49,8 @@ Route::get('product-plans', [\App\Http\Controllers\ProductPlanController::class,
     ->middleware('throttle:60,1');
 Route::post('product-plans/purchase', [\App\Http\Controllers\ProductPlanController::class, 'purchase'])
     ->middleware('throttle:20,1');
+Route::get('shop-packages', [\App\Http\Controllers\ShopPackageController::class, 'index'])
+    ->middleware('throttle:60,1');
 
 Route::prefix('oil')->name('oil.')->group(function () {
     Route::post('login', [\App\Http\Controllers\Oil\OilAuthController::class, 'login']);
@@ -510,7 +512,9 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::post('payments/start', [\App\Http\Controllers\GatewayPaymentController::class, 'start']);
     Route::get('payments/{authority}', [\App\Http\Controllers\GatewayPaymentController::class, 'show'])
         ->where('authority', '[A-Za-z0-9\-]+');
-    
+    Route::post('shop-packages/start', [\App\Http\Controllers\ShopPackageController::class, 'start'])
+        ->middleware('throttle:20,1');
+
     // Manufacturer routes - require authentication (POST/PUT/DELETE)
     Route::post('manufacturers', [\App\Http\Controllers\ManufacturerController::class, 'store']);
     Route::put('manufacturers/{manufacturer}', [\App\Http\Controllers\ManufacturerController::class, 'update']);

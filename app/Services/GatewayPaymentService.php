@@ -476,6 +476,8 @@ class GatewayPaymentService
                 $this->fulfillSms($locked);
             } elseif ($locked->type === GatewayPayment::TYPE_SHOP_PLAN) {
                 $this->fulfillShopPlan($locked);
+            } elseif ($locked->type === GatewayPayment::TYPE_SHOP_PACKAGE) {
+                $this->fulfillShopPackage($locked);
             } elseif ($locked->type === GatewayPayment::TYPE_REPAIR_INVOICE) {
                 app(RepairRequestService::class)->fulfillOnlinePayment($locked, $refId);
             } elseif ($locked->type === GatewayPayment::TYPE_REPAIR_SMS) {
@@ -595,6 +597,26 @@ class GatewayPaymentService
             ];
         }
 
+        if ($type === GatewayPayment::TYPE_SHOP_PACKAGE) {
+            $pkg = ShopPackageCatalog::findById($itemId);
+            if (! $pkg) {
+                throw new RuntimeException('پکیج پنل یافت نشد.');
+            }
+            $amount = (int) $pkg['price_rial'];
+            $days = (int) $pkg['duration_days'];
+
+            return [
+                $amount,
+                'خرید پکیج '.$pkg['name'],
+                [
+                    'package_slug' => $pkg['slug'],
+                    'name' => $pkg['name'],
+                    'duration_days' => $days,
+                    'feature_flags' => $pkg['feature_flags'] ?? [],
+                ],
+            ];
+        }
+
         if ($type === GatewayPayment::TYPE_SHOP_PLAN) {
             $atelier = $atelierId ? Atelier::query()->find($atelierId) : null;
             $plan = $itemId > 0 ? ShopPlan::query()->active()->find($itemId) : null;
@@ -694,7 +716,7 @@ class GatewayPaymentService
             ];
         }
 
-        throw new RuntimeException('نوع خرید نامعتبر است. sms_package یا shop_plan بفرستید.');
+        throw new RuntimeException('نوع خرید نامعتبر است. sms_package، shop_plan یا shop_package بفرستید.');
     }
 
     /** مرچنت اختصاصی (مثلاً مرچنت فروشگاه برای سفارش میز)؛ null یعنی مرچنت مرکزی وبینو. */
@@ -779,6 +801,53 @@ class GatewayPaymentService
         }
 
         $atelier->save();
+
+        ShopReferralService::onPaidPlanActivated($atelier->fresh());
+    }
+
+    protected function fulfillShopPackage(GatewayPayment $payment): void
+    {
+        $meta = is_array($payment->meta) ? $payment->meta : [];
+        $pkg = ShopPackageCatalog::findById((int) $payment->item_id)
+            ?? (isset($meta['package_slug']) ? ShopPackageCatalog::findBySlug((string) $meta['package_slug']) : null);
+        if (! $pkg) {
+            throw new RuntimeException('پکیج پنل نامعتبر است.');
+        }
+
+        $days = (int) ($meta['duration_days'] ?? $pkg['duration_days'] ?? 0);
+        if ($days <= 0) {
+            throw new RuntimeException('مدت پکیج نامعتبر است.');
+        }
+
+        $atelier = Atelier::query()->where('id', $payment->atelier_id)->lockForUpdate()->first();
+        if (! $atelier) {
+            throw new RuntimeException('فروشگاه یافت نشد.');
+        }
+
+        $from = $atelier->shop_access_ends_at && $atelier->shop_access_ends_at->isFuture()
+            ? $atelier->shop_access_ends_at
+            : now();
+        $atelier->shop_access_ends_at = $from->copy()->addDays($days);
+        $atelier->shop_access_suspended = false;
+        if (! $atelier->shop_access_starts_at) {
+            $atelier->shop_access_starts_at = now();
+        }
+        $atelier->subscription_current_price_rial = (int) $payment->amount_rial;
+        if (! $atelier->hasCustomRenewalPrice()) {
+            $atelier->subscription_renewal_price_rial = (int) $payment->amount_rial;
+            $atelier->subscription_renewal_days = $days;
+        }
+        $atelier->save();
+
+        $flags = $meta['feature_flags'] ?? $pkg['feature_flags'] ?? [];
+        if (is_array($flags)) {
+            foreach ($flags as $key => $enabled) {
+                if (! is_string($key)) {
+                    continue;
+                }
+                ShopFeatureFlags::set((int) $atelier->id, $key, (bool) $enabled);
+            }
+        }
 
         ShopReferralService::onPaidPlanActivated($atelier->fresh());
     }

@@ -193,7 +193,10 @@ class MarketingService
 
         $rows = GatewayPayment::query()
             ->join('marketer_referrals as mr', 'mr.atelier_id', '=', 'gateway_payments.atelier_id')
-            ->where('gateway_payments.type', GatewayPayment::TYPE_SHOP_PLAN)
+            ->whereIn('gateway_payments.type', [
+                GatewayPayment::TYPE_SHOP_PLAN,
+                GatewayPayment::TYPE_SHOP_PACKAGE,
+            ])
             ->where('gateway_payments.status', GatewayPayment::STATUS_PAID)
             ->when($only, fn ($q) => $q->where('mr.marketer_id', $only->id))
             ->whereNotExists(function ($q) {

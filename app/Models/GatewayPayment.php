@@ -11,6 +11,9 @@ class GatewayPayment extends Model
 
     public const TYPE_SHOP_PLAN = 'shop_plan';
 
+    /** خرید پکیج پنل از لندینگ (پایه / فروش کامل / نسخه ۲۱) */
+    public const TYPE_SHOP_PACKAGE = 'shop_package';
+
     public const TYPE_REPAIR_INVOICE = 'repair_invoice';
 
     public const TYPE_REPAIR_SMS = 'repair_sms_package';
