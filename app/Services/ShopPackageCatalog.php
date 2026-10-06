@@ -2,9 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\Setting;
+
 /**
  * پکیج‌های فروش پنل از لندینگ (پایه / فروش کامل / نسخه ۲۱).
  * شناسهٔ عددی برای gateway_payments.item_id ثابت است.
+ * قیمت از تنظیمات سراسری قابل ویرایش است؛ آیتم‌ها ثابت‌اند.
  */
 class ShopPackageCatalog
 {
@@ -14,10 +17,14 @@ class ShopPackageCatalog
 
     public const SLUG_V21 = 'v21';
 
+    public const PRICE_KEY_PREFIX = 'shop_package_price_';
+
+    public const PRICE_KEY_SUFFIX = '_toman';
+
     /**
      * @return list<array<string, mixed>>
      */
-    public static function all(): array
+    public static function defaults(): array
     {
         return [
             [
@@ -98,6 +105,73 @@ class ShopPackageCatalog
         ];
     }
 
+    public static function priceSettingKey(string $slug): string
+    {
+        return self::PRICE_KEY_PREFIX.$slug.self::PRICE_KEY_SUFFIX;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public static function all(): array
+    {
+        return self::withPriceOverrides(self::defaults());
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $packages
+     * @return list<array<string, mixed>>
+     */
+    public static function withPriceOverrides(array $packages): array
+    {
+        $prev = Setting::contextAtelierId();
+        Setting::setContextAtelierId(null);
+        try {
+            foreach ($packages as &$pkg) {
+                $slug = (string) ($pkg['slug'] ?? '');
+                if ($slug === '') {
+                    continue;
+                }
+                $raw = Setting::get(self::priceSettingKey($slug));
+                if ($raw === null || $raw === '' || ! is_numeric($raw)) {
+                    continue;
+                }
+                $toman = max(0, (int) $raw);
+                $pkg['price_toman'] = $toman;
+                $pkg['price_rial'] = $toman * 10;
+                $pkg['price_overridden'] = true;
+            }
+            unset($pkg);
+        } finally {
+            Setting::setContextAtelierId($prev);
+        }
+
+        return $packages;
+    }
+
+    public static function setPriceToman(string $slug, int $priceToman): void
+    {
+        $pkg = null;
+        foreach (self::defaults() as $row) {
+            if ($row['slug'] === $slug) {
+                $pkg = $row;
+                break;
+            }
+        }
+        if (! $pkg) {
+            throw new \InvalidArgumentException('پکیج یافت نشد.');
+        }
+
+        $toman = max(0, $priceToman);
+        $prev = Setting::contextAtelierId();
+        Setting::setContextAtelierId(null);
+        try {
+            Setting::set(self::priceSettingKey($slug), (string) $toman);
+        } finally {
+            Setting::setContextAtelierId($prev);
+        }
+    }
+
     /**
      * @return array<string, mixed>|null
      */
@@ -144,6 +218,29 @@ class ShopPackageCatalog
                 'duration_days' => $pkg['duration_days'],
                 'popular' => $pkg['popular'],
                 'features' => $pkg['features'],
+            ];
+        }, self::all());
+    }
+
+    /**
+     * لیست ادمین (بدون feature_flags؛ با فلگ override قیمت).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function adminList(): array
+    {
+        return array_map(static function (array $pkg) {
+            return [
+                'id' => $pkg['id'],
+                'slug' => $pkg['slug'],
+                'name' => $pkg['name'],
+                'tag' => $pkg['tag'],
+                'description' => $pkg['description'],
+                'price_toman' => (int) $pkg['price_toman'],
+                'price_rial' => (int) $pkg['price_rial'],
+                'duration_days' => (int) $pkg['duration_days'],
+                'popular' => (bool) $pkg['popular'],
+                'price_overridden' => (bool) ($pkg['price_overridden'] ?? false),
             ];
         }, self::all());
     }

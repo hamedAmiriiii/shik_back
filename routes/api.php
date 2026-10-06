@@ -681,6 +681,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::post('shop-plans', [\App\Http\Controllers\Admin\ShopPlanController::class, 'store']);
         Route::put('shop-plans/{shopPlan}', [\App\Http\Controllers\Admin\ShopPlanController::class, 'update']);
 
+        Route::get('shop-packages', [\App\Http\Controllers\Admin\ShopPackageController::class, 'index']);
+        Route::put('shop-packages/{slug}', [\App\Http\Controllers\Admin\ShopPackageController::class, 'update'])
+            ->where('slug', '[A-Za-z0-9_\-]+');
+
         Route::get('product-plans', [\App\Http\Controllers\Admin\ProductPlanController::class, 'index']);
         Route::post('product-plans', [\App\Http\Controllers\Admin\ProductPlanController::class, 'store']);
         Route::put('product-plans/{productPlan}', [\App\Http\Controllers\Admin\ProductPlanController::class, 'update']);
