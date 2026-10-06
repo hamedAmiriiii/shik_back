@@ -55,7 +55,7 @@ class MarketingTrackController extends Controller
             return response()->json(['ok' => false, 'final' => true, 'message' => 'فقط حساب فروشگاه قابل ثبت است.']);
         }
 
-        $code = MarketingService::normalizeCode($request->input('code'));
+        $code = MarketingService::normalizeCode($request->input('code') ?? $request->input('marketer_code'));
         if ($code === null) {
             return response()->json(['ok' => false, 'final' => true, 'message' => 'کد بازاریاب معتبر نیست.'], 422);
         }

@@ -223,30 +223,52 @@ class AuthController extends Controller
             $marketerCode = MarketingService::normalizeCode(
                 $request->input('marketer_code') ?? $request->input('mref')
             );
-            $marketerClaim = null;
+            $marketerClaim = [
+                'ok' => false,
+                'final' => true,
+                'message' => 'کد معرف ارسال نشده است.',
+                'code' => null,
+            ];
             if ($marketerCode !== null) {
-                $visitorId = $request->input('marketer_visitor_id');
-                $visitorId = is_string($visitorId) && preg_match('/^[A-Za-z0-9\-]{8,64}$/', $visitorId)
-                    ? $visitorId
-                    : null;
-                try {
-                    $marketerClaim = app(MarketingService::class)->claim($user->fresh(), $marketerCode, $visitorId);
-                    if (! ($marketerClaim['ok'] ?? false)) {
-                        \Log::warning('marketer_claim_failed_on_register', [
-                            'user_id' => $user->id,
-                            'atelier_id' => $user->atelier_id,
+                if (! \Illuminate\Support\Facades\Schema::hasTable('marketer_referrals')) {
+                    $marketerClaim = [
+                        'ok' => false,
+                        'final' => true,
+                        'message' => 'جدول marketer_referrals روی سرور ساخته نشده است.',
+                        'code' => $marketerCode,
+                    ];
+                    \Log::error('marketer_referrals_table_missing');
+                } else {
+                    $visitorId = $request->input('marketer_visitor_id');
+                    $visitorId = is_string($visitorId) && preg_match('/^[A-Za-z0-9\-]{8,64}$/', $visitorId)
+                        ? $visitorId
+                        : null;
+                    try {
+                        $marketerClaim = app(MarketingService::class)->claim($user->fresh(), $marketerCode, $visitorId);
+                        $marketerClaim['code'] = $marketerCode;
+                        if (! ($marketerClaim['ok'] ?? false)) {
+                            \Log::warning('marketer_claim_failed_on_register', [
+                                'user_id' => $user->id,
+                                'atelier_id' => $user->atelier_id,
+                                'code' => $marketerCode,
+                                'claim' => $marketerClaim,
+                            ]);
+                        }
+                    } catch (\Throwable $e) {
+                        report($e);
+                        $marketerClaim = [
+                            'ok' => false,
+                            'final' => true,
+                            'message' => 'خطا در انتساب بازاریاب: '.$e->getMessage(),
                             'code' => $marketerCode,
-                            'claim' => $marketerClaim,
-                        ]);
+                        ];
                     }
-                } catch (\Throwable $e) {
-                    report($e);
-                    $marketerClaim = ['ok' => false, 'final' => true, 'message' => 'خطا در انتساب بازاریاب.'];
                 }
             } else {
                 \Log::info('marketer_claim_skipped_no_code', [
                     'user_id' => $user->id,
                     'atelier_id' => $user->atelier_id,
+                    'raw' => $request->input('marketer_code') ?? $request->input('mref'),
                 ]);
             }
         }
