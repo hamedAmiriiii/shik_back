@@ -122,14 +122,35 @@ class MarketingService
      */
     public function claim(User $user, string $code, ?string $visitorId): array
     {
+        if (! Schema::hasTable('marketers') || ! Schema::hasTable('marketer_referrals')) {
+            return [
+                'ok' => false,
+                'final' => true,
+                'message' => 'جداول بازاریاب روی سرور موجود نیست.',
+            ];
+        }
+
+        $code = self::normalizeCode($code) ?? trim($code);
         $marketer = Marketer::query()->where('code', $code)->where('is_active', true)->first();
         if (! $marketer) {
-            return ['ok' => false, 'final' => true, 'message' => 'کد بازاریاب معتبر نیست.'];
+            // اگر کد فقط رقم است ولی is_active=0 باشد هم گزارش بده
+            $any = Marketer::query()->where('code', $code)->first();
+            return [
+                'ok' => false,
+                'final' => true,
+                'message' => $any
+                    ? 'این کد بازاریاب غیرفعال است.'
+                    : 'کد بازاریاب معتبر نیست ('.$code.').',
+            ];
         }
 
         $atelierId = (int) ($user->atelier_id ?? 0);
-        if ($atelierId <= 0 || ($user->shop_staff_role ?? null) === ShopStaffAccess::ROLE_STAFF) {
+        if ($atelierId <= 0) {
             return ['ok' => false, 'final' => false, 'message' => 'هنوز فروشگاهی برای این کاربر ثبت نشده است.'];
+        }
+        // پرسنل معمولی نمی‌تواند claim کند؛ مالک/بدون نقش OK
+        if (($user->shop_staff_role ?? null) === ShopStaffAccess::ROLE_STAFF) {
+            return ['ok' => false, 'final' => true, 'message' => 'فقط مالک فروشگاه قابل انتساب است.'];
         }
 
         $existing = MarketerReferral::query()->where('atelier_id', $atelierId)->first();
@@ -137,26 +158,17 @@ class MarketingService
             return [
                 'ok' => (int) $existing->marketer_id === (int) $marketer->id,
                 'final' => true,
-                'message' => 'این فروشگاه قبلاً ثبت شده است.',
+                'message' => (int) $existing->marketer_id === (int) $marketer->id
+                    ? 'قبلاً به همین بازاریاب ثبت شده است.'
+                    : 'این فروشگاه قبلاً به بازاریاب دیگری ثبت شده است.',
+                'referral_id' => $existing->id,
             ];
         }
 
-        if (self::normalizePhone($user->phone) === $marketer->phone) {
-            // تست با همان شماره بازاریاب معمولاً همین‌جا گیر می‌کند — مانع نمی‌شویم ولی SMS نمی‌رود
-            \Log::info('marketer_claim_self_referral_allowed', [
-                'marketer_id' => $marketer->id,
-                'user_id' => $user->id,
-                'atelier_id' => $atelierId,
-            ]);
-        }
-
         $atelier = Atelier::query()->find($atelierId);
-        if (! $atelier || ! $atelier->created_at) {
+        if (! $atelier) {
             return ['ok' => false, 'final' => true, 'message' => 'فروشگاه یافت نشد.'];
         }
-
-        // فروشگاه تازه‌ثبت‌نام‌شده: با داشتن کد معرف، بدون اجبار به ردیف visit انتساب می‌شود
-        $isFreshShop = $atelier->created_at->gte(now()->subHours(self::CLAIM_WITHOUT_VISIT_HOURS));
 
         $visit = null;
         if ($visitorId !== null && $visitorId !== '') {
@@ -167,21 +179,8 @@ class MarketingService
                 ->first();
         }
 
-        if (! $isFreshShop) {
-            if ($visit) {
-                if ($atelier->created_at->lt($visit->created_at->copy()->subMinutes(10))) {
-                    return ['ok' => false, 'final' => true, 'message' => 'این فروشگاه قبل از ورود با لینک ثبت شده بود.'];
-                }
-                if ($atelier->created_at->gt($visit->created_at->copy()->addDays(MarketingSetting::attributionDays()))) {
-                    return ['ok' => false, 'final' => true, 'message' => 'مهلت انتساب لینک تمام شده است.'];
-                }
-            } else {
-                return ['ok' => false, 'final' => true, 'message' => 'بازدیدی از لینک بازاریاب ثبت نشده است.'];
-            }
-        }
-
         try {
-            MarketerReferral::create([
+            $referral = MarketerReferral::query()->create([
                 'marketer_id' => $marketer->id,
                 'atelier_id' => $atelierId,
                 'user_id' => $user->id,
@@ -189,13 +188,44 @@ class MarketingService
                 'first_visit_at' => $visit?->created_at,
             ]);
         } catch (QueryException $e) {
-            return ['ok' => false, 'final' => true, 'message' => 'این فروشگاه قبلاً ثبت شده است.'];
+            \Log::error('marketer_referral_create_failed', [
+                'message' => $e->getMessage(),
+                'atelier_id' => $atelierId,
+                'marketer_id' => $marketer->id,
+            ]);
+            // اگر همزمان ثبت شده
+            $again = MarketerReferral::query()->where('atelier_id', $atelierId)->first();
+            if ($again) {
+                return [
+                    'ok' => (int) $again->marketer_id === (int) $marketer->id,
+                    'final' => true,
+                    'message' => 'این فروشگاه قبلاً ثبت شده است.',
+                    'referral_id' => $again->id,
+                ];
+            }
+
+            return [
+                'ok' => false,
+                'final' => true,
+                'message' => 'خطا در ذخیره انتساب: '.$e->getMessage(),
+            ];
         }
 
         $this->notifyMarketerRegistration($marketer, $atelier, (string) $user->phone);
-        $this->syncCommissions($marketer);
+        try {
+            $this->syncCommissions($marketer);
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
-        return ['ok' => true, 'final' => true, 'message' => 'ثبت‌نام شما به نام معرف ثبت شد.'];
+        return [
+            'ok' => true,
+            'final' => true,
+            'message' => 'ثبت‌نام شما به نام معرف ثبت شد.',
+            'referral_id' => $referral->id,
+            'marketer_id' => $marketer->id,
+            'atelier_id' => $atelierId,
+        ];
     }
 
     /**
