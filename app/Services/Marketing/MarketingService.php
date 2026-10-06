@@ -59,9 +59,9 @@ class MarketingService
 
     public static function normalizeCode(?string $code): ?string
     {
-        $code = strtoupper(trim((string) $code));
+        $digits = preg_replace('/\D/', '', self::toLatinDigits(trim((string) $code)));
 
-        return preg_match('/^[A-Z0-9]{4,16}$/', $code) ? $code : null;
+        return preg_match('/^\d{4}$/', $digits) ? $digits : null;
     }
 
     public function referralLink(Marketer $marketer): string

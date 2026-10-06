@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Support\Str;
 
 /**
  * بازاریاب: فقط با شماره موبایل و کد پیامکی وارد می‌شود و با لینک اختصاصی فروشگاه معرفی می‌کند.
@@ -64,12 +63,16 @@ class Marketer extends Model
         return MarketingSetting::defaultCommissionPercent();
     }
 
+    /** کد معرف فقط عدد ۴ رقمی (۱۰۰۰ تا ۹۹۹۹) */
     public static function generateUniqueCode(): string
     {
-        do {
-            $code = strtoupper(Str::random(6));
-        } while (preg_match('/[0O1IL]/', $code) || static::query()->where('code', $code)->exists());
+        for ($i = 0; $i < 200; $i++) {
+            $code = (string) random_int(1000, 9999);
+            if (! static::query()->where('code', $code)->exists()) {
+                return $code;
+            }
+        }
 
-        return $code;
+        throw new \RuntimeException('امکان تولید کد معرف یکتا وجود ندارد.');
     }
 }
