@@ -773,5 +773,7 @@ Route::middleware('auth:sanctum')->prefix('orders')->name('orders.')->group(func
     Route::put('/{cart}/status', [\App\Http\Controllers\OrderController::class, 'updateStatus']);
 });
 
+require __DIR__.'/marketing.php';
+
 // ویترین آنلاین — api/{shop}/... (باید بعد از مسیرهای ثابت باشد)
 require __DIR__.'/shop-storefront.php';
