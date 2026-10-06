@@ -175,6 +175,13 @@ class ShopBackupTables
                 ],
             ],
             [
+                'name' => 'table_pager_calls',
+                'scope' => 'atelier',
+                'fks' => [
+                    'shop_table_id' => 'shop_tables',
+                ],
+            ],
+            [
                 'name' => 'customers',
                 'scope' => 'atelier',
                 'fks' => [],

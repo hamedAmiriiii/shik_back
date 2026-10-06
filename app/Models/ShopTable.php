@@ -75,4 +75,9 @@ class ShopTable extends Model
         return $this->hasMany(TableOrder::class, 'shop_table_id')
             ->where('status', TableOrder::STATUS_PENDING);
     }
+
+    public function pagerCalls(): HasMany
+    {
+        return $this->hasMany(TablePagerCall::class, 'shop_table_id');
+    }
 }

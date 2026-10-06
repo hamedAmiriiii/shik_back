@@ -64,7 +64,7 @@ class ShopPermissionCatalog
             ['key' => 'partners', 'label' => 'شرکا و تقسیم سود', 'prefixes' => ['shop-partners']],
             ['key' => 'daily_reconciliations', 'label' => 'تطبیق روزانه', 'prefixes' => ['daily-reconciliations']],
             ['key' => 'employees', 'label' => 'کارمندان و حقوق', 'prefixes' => ['shop-employees', 'employee-payrolls']],
-            ['key' => 'shop_tables', 'label' => 'میز و سفارش میز', 'prefixes' => ['shop-tables', 'table-orders']],
+            ['key' => 'shop_tables', 'label' => 'میز و سفارش میز', 'prefixes' => ['shop-tables', 'table-orders', 'table-pagers']],
             ['key' => 'shop_services', 'label' => 'خدمات اتاق', 'prefixes' => ['shop-services', 'table-service-requests']],
             ['key' => 'settings', 'label' => 'تنظیمات فروشگاه', 'prefixes' => ['settings']],
             ['key' => 'reports', 'label' => 'گزارش مالی', 'prefixes' => ['financial-report', 'reports']],

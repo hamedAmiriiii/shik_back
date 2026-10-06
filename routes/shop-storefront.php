@@ -72,6 +72,14 @@ Route::prefix('{shop}')
         Route::post('table-service-request/{tableServiceRequest}/cancel', [\App\Http\Controllers\TableServiceRequestController::class, 'guestCancel'])
             ->name('table-service-request.cancel');
 
+        Route::post('table-pager', [\App\Http\Controllers\TablePagerController::class, 'guestStore'])
+            ->middleware('throttle:20,1')
+            ->name('table-pager.store');
+        Route::get('table-pagers', [\App\Http\Controllers\TablePagerController::class, 'guestIndex'])
+            ->name('table-pager.index');
+        Route::post('table-pager/{tablePagerCall}/cancel', [\App\Http\Controllers\TablePagerController::class, 'guestCancel'])
+            ->name('table-pager.cancel');
+
         // اعتبار و سفارش‌های قبلی با شماره موبایل — بدون لاگین
         Route::match(['get', 'post'], 'guest/lookup', [\App\Http\Controllers\GuestCustomerController::class, 'lookup'])
             ->name('guest.lookup');

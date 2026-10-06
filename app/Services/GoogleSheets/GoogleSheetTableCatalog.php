@@ -111,6 +111,7 @@ class GoogleSheetTableCatalog
             'shop_tables' => 'میز و اتاق',
             'shop_services' => 'خدمات اتاق',
             'table_service_requests' => 'درخواست‌های خدمت',
+            'table_pager_calls' => 'پیجر میز',
             'oil_visits' => 'مراجعات روغن',
             'oil_visit_items' => 'اقلام مراجعات روغن',
         ],

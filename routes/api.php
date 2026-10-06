@@ -310,6 +310,13 @@ Route::middleware('auth:sanctum')->prefix('table-service-requests')->name('table
     Route::post('/{tableServiceRequest}/cancel', [\App\Http\Controllers\TableServiceRequestController::class, 'cancel']);
 });
 
+Route::middleware('auth:sanctum')->prefix('table-pagers')->name('table-pagers.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\TablePagerController::class, 'index']);
+    Route::get('/pending-count', [\App\Http\Controllers\TablePagerController::class, 'pendingCount']);
+    Route::post('/{tablePagerCall}/ack', [\App\Http\Controllers\TablePagerController::class, 'ack']);
+    Route::post('/{tablePagerCall}/cancel', [\App\Http\Controllers\TablePagerController::class, 'cancel']);
+});
+
 Route::group(['middleware' => ['auth:sanctum']], function () {
     // Store/Shop related routes - require authentication
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
