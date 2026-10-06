@@ -182,6 +182,70 @@ class SettingController extends Controller
         ], 200);
     }
 
+    /**
+     * آپلود آیکون فروشگاه برای هدر منوی میز (فیلد file).
+     */
+    public function uploadReservMenuIcon(Request $request)
+    {
+        if ($this->staffShopAtelierId($request) === null) {
+            return response()->json(['message' => 'این تنظیم فقط برای حساب متصل به فروشگاه است.'], 422);
+        }
+        $this->bindShopSettingAtelierFromRequest($request);
+
+        $maxKb = (int) (ReservMenuTheme::ICON_MAX_BYTES / 1024);
+        $request->validate([
+            'file' => "required|file|max:{$maxKb}|mimes:jpeg,jpg,png,webp,gif",
+        ], [
+            'file.max' => 'حجم آیکون نباید بیشتر از ۲ مگابایت باشد.',
+            'file.mimes' => 'فقط تصویر (jpg، png، webp، gif) مجاز است.',
+        ]);
+
+        $file = $request->file('file');
+        $mime = strtolower((string) $file->getMimeType());
+        $extName = strtolower((string) $file->getClientOriginalExtension());
+        if ($extName === 'webp' || $mime === 'image/webp') {
+            $ext = 'webp';
+        } elseif ($extName === 'png' || $mime === 'image/png') {
+            $ext = 'png';
+        } elseif ($extName === 'gif' || $mime === 'image/gif') {
+            $ext = 'gif';
+        } else {
+            $ext = 'jpg';
+        }
+
+        $atelierId = Setting::contextAtelierId();
+        $contents = file_get_contents($file->getRealPath());
+        if ($contents === false || $contents === '') {
+            return response()->json(['message' => 'خواندن فایل ناموفق بود.'], 422);
+        }
+        $oldPath = trim((string) Setting::get(ReservMenuTheme::ICON_MEDIA_KEY, ''));
+        $path = ImageTools::saveFile(
+            "/reserv-menu/{$atelierId}/icon_".time().".{$ext}",
+            $contents
+        );
+
+        Setting::set(ReservMenuTheme::ICON_MEDIA_KEY, $path);
+        $this->deletePublicFile($oldPath);
+
+        return response([
+            'message' => 'آیکون فروشگاه ذخیره شد',
+            'menu_theme' => ReservMenuTheme::forApi(),
+        ], 200);
+    }
+
+    public function deleteReservMenuIcon(Request $request)
+    {
+        $this->bindShopSettingAtelierFromRequest($request);
+
+        $this->deletePublicFile(trim((string) Setting::get(ReservMenuTheme::ICON_MEDIA_KEY, '')));
+        Setting::set(ReservMenuTheme::ICON_MEDIA_KEY, '');
+
+        return response([
+            'message' => 'آیکون فروشگاه حذف شد',
+            'menu_theme' => ReservMenuTheme::forApi(),
+        ], 200);
+    }
+
     private function deletePublicFile(string $path): void
     {
         if ($path !== '' && Storage::exists('public/'.$path)) {

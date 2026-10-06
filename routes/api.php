@@ -602,7 +602,9 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/reserv-menu-theme', [\App\Http\Controllers\SettingController::class, 'getReservMenuTheme']);
         Route::post('/reserv-menu-background', [\App\Http\Controllers\SettingController::class, 'uploadReservMenuBackground']);
         Route::delete('/reserv-menu-background', [\App\Http\Controllers\SettingController::class, 'deleteReservMenuBackground']);
-        $reservedSettingKeys = 'loyalty-credit-tiers|loyalty-credit|credit-expiry-days|installment-interest-rate|payroll|sale-return-days|reserv-menu-theme|reserv-menu-background';
+        Route::post('/reserv-menu-icon', [\App\Http\Controllers\SettingController::class, 'uploadReservMenuIcon']);
+        Route::delete('/reserv-menu-icon', [\App\Http\Controllers\SettingController::class, 'deleteReservMenuIcon']);
+        $reservedSettingKeys = 'loyalty-credit-tiers|loyalty-credit|credit-expiry-days|installment-interest-rate|payroll|sale-return-days|reserv-menu-theme|reserv-menu-background|reserv-menu-icon';
         Route::get('/{key}', [\App\Http\Controllers\SettingController::class, 'show'])
             ->where('key', '^(?!'.$reservedSettingKeys.').+');
         Route::put('/{key}', [\App\Http\Controllers\SettingController::class, 'update'])

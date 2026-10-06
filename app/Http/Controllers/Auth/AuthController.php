@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\Atelier;
 use App\Models\User;
+use App\Services\Marketing\MarketingService;
 use App\Services\ShopReferralService;
 use App\Tools\ImageTools;
 use App\Tools\SmsTools;
@@ -217,6 +218,22 @@ class AuthController extends Controller
                 $atelier,
                 $fields['referral_code'] ?? $request->input('referral_code')
             );
+
+            // انتساب بازاریاب (?mref=) — کد ۴ رقمی از فرانت
+            $marketerCode = MarketingService::normalizeCode(
+                $request->input('marketer_code') ?? $request->input('mref')
+            );
+            if ($marketerCode !== null) {
+                $visitorId = $request->input('marketer_visitor_id');
+                $visitorId = is_string($visitorId) && preg_match('/^[A-Za-z0-9\-]{8,64}$/', $visitorId)
+                    ? $visitorId
+                    : null;
+                try {
+                    app(MarketingService::class)->claim($user->fresh(), $marketerCode, $visitorId);
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            }
         }
 
         $user->load(['roles', 'atelier']);
