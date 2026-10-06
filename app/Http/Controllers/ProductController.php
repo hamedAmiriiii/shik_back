@@ -1065,7 +1065,7 @@ class ProductController extends Controller
      */
     private function syncProductRelations(Product $product, array $data): void
     {
-        if (array_key_exists('images', $data) && is_array($data['images']) && ! empty($data['images'])) {
+        if (array_key_exists('images', $data) && is_array($data['images'])) {
             $this->saveProductImages($product, $data['images']);
         }
 
@@ -1228,47 +1228,102 @@ class ProductController extends Controller
     }
 
     /**
-     * ذخیره عکس‌های محصول
+     * همگام‌سازی عکس‌های محصول: آرایهٔ ارسالی لیست نهایی است.
+     * URLهای موجود نگه داشته می‌شوند، base64 جدید اضافه و بقیه حذف می‌شوند.
      */
     private function saveProductImages(Product $product, array $images)
     {
-        // دریافت آخرین order برای ادامه دادن از آن (برای اضافه کردن به عکس‌های قبلی)
-        $lastOrder = ProductImage::where('product_id', $product->id)->max('order') ?? 0;
-        
+        $existing = ProductImage::where('product_id', $product->id)->orderBy('order')->get();
+        $keepIds = [];
+        $lastOrder = (int) ($existing->max('order') ?? 0);
+
         foreach ($images as $imageData) {
-            if (empty($imageData)) {
+            if (is_array($imageData)) {
+                $id = (int) ($imageData['id'] ?? 0);
+                if ($id > 0 && $existing->firstWhere('id', $id)) {
+                    $keepIds[] = $id;
+                    continue;
+                }
+                $imageData = $imageData['image_url'] ?? $imageData['url'] ?? $imageData['data'] ?? '';
+            }
+
+            if (! is_string($imageData) || trim($imageData) === '') {
                 continue;
             }
 
-            // استخراج base64 از string (اگر به صورت data:image/png;base64,xxx باشد)
+            $isBase64 = strpos($imageData, 'base64') !== false
+                || (strpos($imageData, 'data:image') === 0);
+
+            if (! $isBase64) {
+                foreach ($existing as $row) {
+                    if (in_array($row->id, $keepIds, true)) {
+                        continue;
+                    }
+                    if ($this->productImageMatchesInput($row, $imageData)) {
+                        $keepIds[] = $row->id;
+                        break;
+                    }
+                }
+                continue;
+            }
+
             $imageString = $imageData;
             if (strpos($imageData, ',') !== false) {
                 $parts = explode(',', $imageData);
                 $imageString = $parts[1];
             }
-
-            // decode base64
             $imageContent = base64_decode($imageString);
             if ($imageContent === false) {
                 continue;
             }
 
-            // افزایش order برای عکس جدید
             $lastOrder++;
-
-            // ذخیره عکس با نام منحصر به فرد
             $imagePath = ImageTools::saveFile(
                 "/products/{$product->id}/image_" . time() . "_" . $lastOrder . ".jpeg",
                 $imageContent
             );
-
-            // ذخیره در دیتابیس
-            ProductImage::create([
+            $created = ProductImage::create([
                 'product_id' => $product->id,
                 'image_path' => $imagePath,
                 'order' => $lastOrder,
             ]);
+            $keepIds[] = $created->id;
         }
+
+        foreach ($existing as $row) {
+            if (in_array($row->id, $keepIds, true)) {
+                continue;
+            }
+            $originalPath = $row->getOriginal('image_path') ?: $row->image_path;
+            if ($originalPath && Storage::exists('public/'.$originalPath)) {
+                Storage::delete('public/'.$originalPath);
+            }
+            $row->delete();
+        }
+    }
+
+    private function productImageMatchesInput(ProductImage $image, string $input): bool
+    {
+        $path = (string) ($image->getOriginal('image_path') ?: $image->image_path);
+        $inputPath = (string) (parse_url($input, PHP_URL_PATH) ?: $input);
+        $inputPath = ltrim(str_replace('\\', '/', $inputPath), '/');
+        if (strpos($inputPath, 'storage/') === 0) {
+            $inputPath = substr($inputPath, strlen('storage/'));
+        }
+        $normalizedPath = ltrim(str_replace('\\', '/', $path), '/');
+        if ($normalizedPath !== '' && (
+            $inputPath === $normalizedPath
+            || strpos($input, $normalizedPath) !== false
+            || strpos($inputPath, $normalizedPath) !== false
+        )) {
+            return true;
+        }
+        $url = (string) $image->image_url;
+        if ($url !== '' && (strpos($input, $url) !== false || ($inputPath !== '' && strpos($url, $inputPath) !== false))) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
