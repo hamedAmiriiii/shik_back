@@ -12,6 +12,7 @@ use App\Models\MarketerVisit;
 use App\Models\MarketingSetting;
 use App\Models\User;
 use App\Services\ShopStaffAccess;
+use App\Tools\SmsTools;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -59,7 +60,12 @@ class MarketingService
 
     public static function normalizeCode(?string $code): ?string
     {
-        $digits = preg_replace('/\D/', '', self::toLatinDigits(trim((string) $code)));
+        $raw = strtoupper(trim(self::toLatinDigits((string) $code)));
+        // کد قدیمی منوی آنلاین → ۴ رقمی
+        if ($raw === '4Z3T6F') {
+            return '4366';
+        }
+        $digits = preg_replace('/\D/', '', $raw);
 
         return preg_match('/^\d{4}$/', $digits) ? $digits : null;
     }
@@ -136,13 +142,21 @@ class MarketingService
         }
 
         if (self::normalizePhone($user->phone) === $marketer->phone) {
-            return ['ok' => false, 'final' => true, 'message' => 'بازاریاب نمی‌تواند خودش را معرفی کند.'];
+            // تست با همان شماره بازاریاب معمولاً همین‌جا گیر می‌کند — مانع نمی‌شویم ولی SMS نمی‌رود
+            \Log::info('marketer_claim_self_referral_allowed', [
+                'marketer_id' => $marketer->id,
+                'user_id' => $user->id,
+                'atelier_id' => $atelierId,
+            ]);
         }
 
         $atelier = Atelier::query()->find($atelierId);
         if (! $atelier || ! $atelier->created_at) {
             return ['ok' => false, 'final' => true, 'message' => 'فروشگاه یافت نشد.'];
         }
+
+        // فروشگاه تازه‌ثبت‌نام‌شده: با داشتن کد معرف، بدون اجبار به ردیف visit انتساب می‌شود
+        $isFreshShop = $atelier->created_at->gte(now()->subHours(self::CLAIM_WITHOUT_VISIT_HOURS));
 
         $visit = null;
         if ($visitorId !== null && $visitorId !== '') {
@@ -153,16 +167,17 @@ class MarketingService
                 ->first();
         }
 
-        if ($visit) {
-            // فقط فروشگاهی که بعد از کلیک روی لینک ساخته شده، در بازهٔ مجاز
-            if ($atelier->created_at->lt($visit->created_at->copy()->subMinutes(10))) {
-                return ['ok' => false, 'final' => true, 'message' => 'این فروشگاه قبل از ورود با لینک ثبت شده بود.'];
+        if (! $isFreshShop) {
+            if ($visit) {
+                if ($atelier->created_at->lt($visit->created_at->copy()->subMinutes(10))) {
+                    return ['ok' => false, 'final' => true, 'message' => 'این فروشگاه قبل از ورود با لینک ثبت شده بود.'];
+                }
+                if ($atelier->created_at->gt($visit->created_at->copy()->addDays(MarketingSetting::attributionDays()))) {
+                    return ['ok' => false, 'final' => true, 'message' => 'مهلت انتساب لینک تمام شده است.'];
+                }
+            } else {
+                return ['ok' => false, 'final' => true, 'message' => 'بازدیدی از لینک بازاریاب ثبت نشده است.'];
             }
-            if ($atelier->created_at->gt($visit->created_at->copy()->addDays(MarketingSetting::attributionDays()))) {
-                return ['ok' => false, 'final' => true, 'message' => 'مهلت انتساب لینک تمام شده است.'];
-            }
-        } elseif ($atelier->created_at->lt(now()->subHours(self::CLAIM_WITHOUT_VISIT_HOURS))) {
-            return ['ok' => false, 'final' => true, 'message' => 'بازدیدی از لینک بازاریاب ثبت نشده است.'];
         }
 
         try {
@@ -177,6 +192,7 @@ class MarketingService
             return ['ok' => false, 'final' => true, 'message' => 'این فروشگاه قبلاً ثبت شده است.'];
         }
 
+        $this->notifyMarketerRegistration($marketer, $atelier, (string) $user->phone);
         $this->syncCommissions($marketer);
 
         return ['ok' => true, 'final' => true, 'message' => 'ثبت‌نام شما به نام معرف ثبت شد.'];
@@ -225,8 +241,10 @@ class MarketingService
             ->get()
             ->keyBy('id');
 
-        $now = now();
-        $inserts = [];
+        $atelierIds = $rows->pluck('atelier_id')->unique()->all();
+        $ateliers = Atelier::query()->whereIn('id', $atelierIds)->get()->keyBy('id');
+
+        $created = 0;
         foreach ($rows as $row) {
             $marketer = $marketers->get($row->mr_marketer_id);
             if (! $marketer) {
@@ -234,22 +252,88 @@ class MarketingService
             }
             $purchaseToman = intdiv((int) $row->amount_rial, 10);
             $percent = $marketer->effectiveCommissionPercent();
-            $inserts[] = [
-                'marketer_id' => $marketer->id,
-                'marketer_referral_id' => $row->mr_id,
-                'atelier_id' => $row->atelier_id,
-                'gateway_payment_id' => $row->id,
-                'purchase_amount_toman' => $purchaseToman,
-                'percent' => $percent,
-                'commission_toman' => (int) round($purchaseToman * $percent / 100),
-                'description' => $row->description !== null ? mb_substr((string) $row->description, 0, 255) : null,
-                'purchased_at' => $row->paid_at ?? $row->created_at,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ];
+            $commissionToman = (int) round($purchaseToman * $percent / 100);
+
+            $commission = MarketerCommission::query()->firstOrCreate(
+                ['gateway_payment_id' => $row->id],
+                [
+                    'marketer_id' => $marketer->id,
+                    'marketer_referral_id' => $row->mr_id,
+                    'atelier_id' => $row->atelier_id,
+                    'purchase_amount_toman' => $purchaseToman,
+                    'percent' => $percent,
+                    'commission_toman' => $commissionToman,
+                    'description' => $row->description !== null ? mb_substr((string) $row->description, 0, 255) : null,
+                    'purchased_at' => $row->paid_at ?? $row->created_at,
+                ]
+            );
+
+            if (! $commission->wasRecentlyCreated) {
+                continue;
+            }
+
+            $created++;
+            $atelier = $ateliers->get($row->atelier_id);
+            $this->notifyMarketerPurchase($marketer, $atelier, $commissionToman);
         }
 
-        return $inserts === [] ? 0 : MarketerCommission::query()->insertOrIgnore($inserts);
+        return $created;
+    }
+
+    /** همگام‌سازی پورسانت بعد از پرداخت موفق یک فروشگاه معرفی‌شده */
+    public function syncCommissionsForAtelier(int $atelierId): int
+    {
+        if ($atelierId <= 0) {
+            return 0;
+        }
+        $referral = MarketerReferral::query()->where('atelier_id', $atelierId)->first();
+        if (! $referral) {
+            return 0;
+        }
+        $marketer = Marketer::query()->find($referral->marketer_id);
+        if (! $marketer) {
+            return 0;
+        }
+
+        return $this->syncCommissions($marketer);
+    }
+
+    protected function notifyMarketerRegistration(Marketer $marketer, Atelier $atelier, ?string $userPhone = null): void
+    {
+        // خودمعرفی: رکورد ذخیره می‌شود ولی پیامک نمی‌رود
+        if ($userPhone && self::normalizePhone($userPhone) === self::normalizePhone($marketer->phone)) {
+            return;
+        }
+        $phone = self::normalizePhone($marketer->phone);
+        if (! $phone) {
+            return;
+        }
+        $shop = trim((string) $atelier->name) !== '' ? $atelier->name : 'فروشگاه';
+        $text = "وبینو\nثبت‌نام جدید از لینک شما:\n{$shop}";
+        try {
+            SmsTools::sendSms($phone, $text);
+        } catch (\Throwable) {
+            //
+        }
+    }
+
+    protected function notifyMarketerPurchase(
+        Marketer $marketer,
+        ?Atelier $atelier,
+        int $commissionToman
+    ): void {
+        $phone = self::normalizePhone($marketer->phone);
+        if (! $phone) {
+            return;
+        }
+        $shop = $atelier && trim((string) $atelier->name) !== '' ? $atelier->name : 'فروشگاه';
+        $commission = number_format(max(0, $commissionToman));
+        $text = "وبینو\nخرید از معرفی شما:\n{$shop}\nپورسانت {$commission} ت";
+        try {
+            SmsTools::sendSms($phone, $text);
+        } catch (\Throwable) {
+            //
+        }
     }
 
     /**

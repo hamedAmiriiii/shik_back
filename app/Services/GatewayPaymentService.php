@@ -803,6 +803,12 @@ class GatewayPaymentService
         $atelier->save();
 
         ShopReferralService::onPaidPlanActivated($atelier->fresh());
+        try {
+            app(\App\Services\Marketing\MarketingService::class)
+                ->syncCommissionsForAtelier((int) $atelier->id);
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     protected function fulfillShopPackage(GatewayPayment $payment): void
@@ -850,6 +856,12 @@ class GatewayPaymentService
         }
 
         ShopReferralService::onPaidPlanActivated($atelier->fresh());
+        try {
+            app(\App\Services\Marketing\MarketingService::class)
+                ->syncCommissionsForAtelier((int) $atelier->id);
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     protected function sanitizeReturnUrl(?string $url, bool $keepPathOnFallbackHost = false): string

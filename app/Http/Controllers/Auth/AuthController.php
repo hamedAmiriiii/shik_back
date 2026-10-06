@@ -223,16 +223,31 @@ class AuthController extends Controller
             $marketerCode = MarketingService::normalizeCode(
                 $request->input('marketer_code') ?? $request->input('mref')
             );
+            $marketerClaim = null;
             if ($marketerCode !== null) {
                 $visitorId = $request->input('marketer_visitor_id');
                 $visitorId = is_string($visitorId) && preg_match('/^[A-Za-z0-9\-]{8,64}$/', $visitorId)
                     ? $visitorId
                     : null;
                 try {
-                    app(MarketingService::class)->claim($user->fresh(), $marketerCode, $visitorId);
+                    $marketerClaim = app(MarketingService::class)->claim($user->fresh(), $marketerCode, $visitorId);
+                    if (! ($marketerClaim['ok'] ?? false)) {
+                        \Log::warning('marketer_claim_failed_on_register', [
+                            'user_id' => $user->id,
+                            'atelier_id' => $user->atelier_id,
+                            'code' => $marketerCode,
+                            'claim' => $marketerClaim,
+                        ]);
+                    }
                 } catch (\Throwable $e) {
                     report($e);
+                    $marketerClaim = ['ok' => false, 'final' => true, 'message' => 'خطا در انتساب بازاریاب.'];
                 }
+            } else {
+                \Log::info('marketer_claim_skipped_no_code', [
+                    'user_id' => $user->id,
+                    'atelier_id' => $user->atelier_id,
+                ]);
             }
         }
 
@@ -250,6 +265,9 @@ class AuthController extends Controller
         ], $shopFields);
         if ($user->atelier) {
             $payload['shop_access'] = $user->atelier->accessStatusForApi();
+        }
+        if (isset($marketerClaim) && is_array($marketerClaim)) {
+            $payload['marketer_claim'] = $marketerClaim;
         }
 
         return response($payload, 201);
