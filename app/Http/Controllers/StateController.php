@@ -14,8 +14,9 @@ class StateController extends Controller
      */
     public function index()
     {
-        $states = State::all();
-        return Response($states);
+        $states = State::query()->orderBy('name')->get();
+
+        return response($states);
     }
 
     /**

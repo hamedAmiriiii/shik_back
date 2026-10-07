@@ -10,10 +10,12 @@ class State extends Model
 {
     use HasFactory, QueryTools;
 
+    public $timestamps = false;
+
     protected $fillable = ["name", "code"];
 
-
-    public function cities(){
+    public function cities()
+    {
         return $this->hasMany(City::class);
     }
 }

@@ -15,31 +15,44 @@ class CityController extends Controller
     public function index(Request $request)
     {
         $query = City::query();
-        
-        // فیلتر بر اساس استان
+
+        // فیلتر بر اساس استان (id یا code)
         $stateId = $request->query('state_id');
-        if ($stateId) {
-            $query->where('state_id', $stateId);
+        if ($stateId !== null && $stateId !== '') {
+            $state = \App\Models\State::query()
+                ->where('id', $stateId)
+                ->orWhere('code', $stateId)
+                ->first(['id', 'code']);
+
+            if ($state) {
+                $query->where(function ($q) use ($state) {
+                    $q->where('state_id', $state->id);
+                    if ($state->code !== null && (string) $state->code !== (string) $state->id) {
+                        $q->orWhere('state_id', $state->code);
+                    }
+                });
+            } else {
+                $query->where('state_id', $stateId);
+            }
         }
-        
+
         // جستجو بر اساس searchFilterModel
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         if ($searchDataModel) {
-            $query->where(function($q) use ($searchDataModel) {
+            $query->where(function ($q) use ($searchDataModel) {
                 if (is_object($searchDataModel)) {
-                    // جستجو بر اساس نام شهر
                     if (isset($searchDataModel->name)) {
-                        $q->where('name', 'like', '%' . $searchDataModel->name . '%');
+                        $q->where('name', 'like', '%'.$searchDataModel->name.'%');
                     }
-                } else if (is_string($searchDataModel)) {
-                    // اگر یک رشته ساده بود، در نام شهر جستجو می‌کند
-                    $q->where('name', 'like', '%' . $searchDataModel . '%');
+                } elseif (is_string($searchDataModel)) {
+                    $q->where('name', 'like', '%'.$searchDataModel.'%');
                 }
             });
         }
-        
-        $cities = $query->get();
-        return Response($cities);
+
+        $cities = $query->orderBy('name')->get();
+
+        return response($cities);
     }
 
     /**
