@@ -72,6 +72,7 @@ class Setting extends Model
             'produced_goods_enabled' => '0',
             'accounting_enabled' => '0',
             'customer_club_enabled' => \App\Services\ShopFeatureFlags::customerClubDefaultForAtelier($atelierId) ? '1' : '0',
+            'smart_customer_club_enabled' => \App\Services\ShopFeatureFlags::customerClubDefaultForAtelier($atelierId) ? '1' : '0',
             'receipt_print_settings' => '',
             'shop_browser_settings' => '',
             \App\Services\ReservMenuTheme::THEME_KEY => \App\Services\ReservMenuTheme::DEFAULT_THEME,

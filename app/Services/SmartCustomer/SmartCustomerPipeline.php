@@ -17,7 +17,7 @@ class SmartCustomerPipeline
             return ['ok' => false, 'message' => 'not_ready'];
         }
 
-        if (! ShopFeatureFlags::enabled($atelierId, ShopFeatureFlags::CUSTOMER_CLUB)) {
+        if (! ShopFeatureFlags::enabled($atelierId, ShopFeatureFlags::SMART_CUSTOMER_CLUB)) {
             return ['ok' => false, 'message' => 'club_disabled'];
         }
 
@@ -43,7 +43,7 @@ class SmartCustomerPipeline
         $results = [];
         $count = 0;
         foreach ($ids as $id) {
-            if (! ShopFeatureFlags::enabled($id, ShopFeatureFlags::CUSTOMER_CLUB)) {
+            if (! ShopFeatureFlags::enabled($id, ShopFeatureFlags::SMART_CUSTOMER_CLUB)) {
                 continue;
             }
             $results[$id] = self::runForAtelier($id);

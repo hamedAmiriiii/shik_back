@@ -50,6 +50,7 @@ class ShopPackageCatalog
                     ShopFeatureFlags::PRODUCED_GOODS => false,
                     ShopFeatureFlags::ACCOUNTING => false,
                     ShopFeatureFlags::CUSTOMER_CLUB => false,
+                    ShopFeatureFlags::SMART_CUSTOMER_CLUB => false,
                 ],
             ],
             [
@@ -67,14 +68,15 @@ class ShopPackageCatalog
                     'سفارش آنلاین میز و اتاق',
                     'نسیه، خرید و سود',
                     'پرداخت آنلاین روی منو',
-                    'پیجر گارسون و حقوق پرسنل',
+                    'باشگاه مشتریان معمولی و اعتبار خرید',
                 ],
                 'feature_flags' => [
                     ShopFeatureFlags::RESTAURANT_CAFE => true,
                     ShopFeatureFlags::ROOM_SERVICES => true,
                     ShopFeatureFlags::PRODUCED_GOODS => true,
                     ShopFeatureFlags::ACCOUNTING => false,
-                    ShopFeatureFlags::CUSTOMER_CLUB => false,
+                    ShopFeatureFlags::CUSTOMER_CLUB => true,
+                    ShopFeatureFlags::SMART_CUSTOMER_CLUB => false,
                 ],
             ],
             [
@@ -89,8 +91,7 @@ class ShopPackageCatalog
                 'popular' => false,
                 'features' => [
                     'همه امکانات فروش کامل',
-                    'باشگاه مشتریان و اعتبار خرید',
-                    'گروه‌بندی هوشمند و کمپین',
+                    'باشگاه هوشمند، گروه‌بندی و کمپین',
                     'پیامک هدفمند و گزارش اثر',
                     'دفتر حسابداری و بستن سال',
                 ],
@@ -100,6 +101,7 @@ class ShopPackageCatalog
                     ShopFeatureFlags::PRODUCED_GOODS => true,
                     ShopFeatureFlags::ACCOUNTING => true,
                     ShopFeatureFlags::CUSTOMER_CLUB => true,
+                    ShopFeatureFlags::SMART_CUSTOMER_CLUB => true,
                 ],
             ],
         ];

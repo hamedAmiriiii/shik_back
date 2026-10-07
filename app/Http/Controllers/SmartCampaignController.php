@@ -20,8 +20,8 @@ class SmartCampaignController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         if (! Schema::hasTable('shop_campaigns')) {
@@ -42,8 +42,8 @@ class SmartCampaignController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         $validated = $this->validatePayload($request);
@@ -88,8 +88,8 @@ class SmartCampaignController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         $row = ShopCampaign::query()
@@ -104,8 +104,8 @@ class SmartCampaignController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         $row = ShopCampaign::query()
@@ -162,8 +162,8 @@ class SmartCampaignController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         $row = ShopCampaign::query()
@@ -178,8 +178,8 @@ class SmartCampaignController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         $row = ShopCampaign::query()
@@ -194,8 +194,8 @@ class SmartCampaignController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         $row = ShopCampaign::query()
@@ -213,8 +213,8 @@ class SmartCampaignController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         ShopCampaign::query()
@@ -238,8 +238,8 @@ class SmartCampaignController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         $row = ShopCampaign::query()
@@ -358,8 +358,8 @@ class SmartCampaignController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         $filter = (string) $request->query('filter', 'discounted');
@@ -381,8 +381,8 @@ class SmartCampaignController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         $validated = $request->validate([
@@ -402,8 +402,8 @@ class SmartCampaignController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         ShopCampaign::query()

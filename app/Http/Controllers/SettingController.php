@@ -20,6 +20,8 @@ class SettingController extends Controller
         'restaurant_cafe_enabled',
         'produced_goods_enabled',
         'accounting_enabled',
+        'customer_club_enabled',
+        'smart_customer_club_enabled',
     ];
 
     /**

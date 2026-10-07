@@ -16,6 +16,9 @@ class ShopFeatureFlags
 
     public const CUSTOMER_CLUB = 'customer_club_enabled';
 
+    /** باشگاه هوشمند (RFM، کمپین، پیشنهاد اقدام) — جدا از باشگاه معمولی */
+    public const SMART_CUSTOMER_CLUB = 'smart_customer_club_enabled';
+
     /** فروشگاه‌هایی که به‌صورت پیش‌فرض باشگاه مشتریان دارند (اگر هنوز در settings ست نشده). */
     public const CUSTOMER_CLUB_DEFAULT_ATELIER_IDS = [1, 5, 13, 17];
 
@@ -25,6 +28,7 @@ class ShopFeatureFlags
         self::PRODUCED_GOODS,
         self::ACCOUNTING,
         self::CUSTOMER_CLUB,
+        self::SMART_CUSTOMER_CLUB,
     ];
 
     public const ALIASES = [
@@ -33,11 +37,13 @@ class ShopFeatureFlags
         'produced_goods' => self::PRODUCED_GOODS,
         'accounting' => self::ACCOUNTING,
         'customer_club' => self::CUSTOMER_CLUB,
+        'smart_customer_club' => self::SMART_CUSTOMER_CLUB,
         self::RESTAURANT_CAFE => self::RESTAURANT_CAFE,
         self::ROOM_SERVICES => self::ROOM_SERVICES,
         self::PRODUCED_GOODS => self::PRODUCED_GOODS,
         self::ACCOUNTING => self::ACCOUNTING,
         self::CUSTOMER_CLUB => self::CUSTOMER_CLUB,
+        self::SMART_CUSTOMER_CLUB => self::SMART_CUSTOMER_CLUB,
     ];
 
     public static function normalizeKey(string $feature): ?string
@@ -56,6 +62,7 @@ class ShopFeatureFlags
             self::PRODUCED_GOODS => false,
             self::ACCOUNTING => false,
             self::CUSTOMER_CLUB => false,
+            self::SMART_CUSTOMER_CLUB => false,
         ];
     }
 
@@ -87,6 +94,8 @@ class ShopFeatureFlags
             $aid = (int) $id;
             $flags = self::empty();
             $flags[self::CUSTOMER_CLUB] = self::customerClubDefaultForAtelier($aid);
+            // فروشگاه‌های قدیمی با باشگاه پیش‌فرض، باشگاه هوشمند هم داشتند
+            $flags[self::SMART_CUSTOMER_CLUB] = self::customerClubDefaultForAtelier($aid);
             $map[$aid] = $flags;
         }
         if ($atelierIds === []) {
@@ -98,13 +107,28 @@ class ShopFeatureFlags
             ->whereIn('key', self::KEYS)
             ->get(['atelier_id', 'key', 'value']);
 
+        $smartExplicit = [];
         foreach ($rows as $row) {
             $id = (int) $row->atelier_id;
             if (! isset($map[$id])) {
                 $map[$id] = self::empty();
                 $map[$id][self::CUSTOMER_CLUB] = self::customerClubDefaultForAtelier($id);
+                $map[$id][self::SMART_CUSTOMER_CLUB] = self::customerClubDefaultForAtelier($id);
             }
             $map[$id][$row->key] = self::isTruthy($row->value);
+            if ($row->key === self::SMART_CUSTOMER_CLUB) {
+                $smartExplicit[$id] = true;
+            }
+        }
+
+        // قبل از جدا شدن فلگ هوشمند، باشگاه معمولی همان دسترسی هوشمند را هم می‌داد
+        foreach ($map as $id => $flags) {
+            if (! empty($smartExplicit[$id])) {
+                continue;
+            }
+            if ($flags[self::CUSTOMER_CLUB] ?? false) {
+                $map[$id][self::SMART_CUSTOMER_CLUB] = true;
+            }
         }
 
         return $map;

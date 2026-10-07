@@ -23,8 +23,8 @@ class SmartCustomerController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         if (! Schema::hasTable('shop_customer_segments')) {
@@ -43,8 +43,8 @@ class SmartCustomerController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         if (! Schema::hasTable('shop_customer_metrics')) {
@@ -135,8 +135,8 @@ class SmartCustomerController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         if (! ShopSegmentThresholdService::tableReady()) {
@@ -152,8 +152,8 @@ class SmartCustomerController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         $validated = $request->validate([
@@ -191,8 +191,8 @@ class SmartCustomerController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         $result = SmartCustomerPipeline::runForAtelier($atelierId);
@@ -209,8 +209,8 @@ class SmartCustomerController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         $type = $request->query('type', 'bad');
@@ -227,8 +227,8 @@ class SmartCustomerController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         if (! Schema::hasTable('shop_smart_actions')) {
@@ -275,8 +275,8 @@ class SmartCustomerController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         try {
@@ -292,8 +292,8 @@ class SmartCustomerController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         try {
@@ -319,8 +319,8 @@ class SmartCustomerController extends Controller
     {
         $atelierId = $this->assertShopFeature(
             $request,
-            ShopFeatureFlags::CUSTOMER_CLUB,
-            'باشگاه مشتریان برای این فروشگاه فعال نیست.'
+            ShopFeatureFlags::SMART_CUSTOMER_CLUB,
+            'باشگاه هوشمند برای این فروشگاه فعال نیست.'
         );
 
         $fields = $request->validate([
