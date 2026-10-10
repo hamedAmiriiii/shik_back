@@ -212,8 +212,9 @@ class MarketingService
         }
 
         $this->notifyMarketerRegistration($marketer, $atelier, (string) $user->phone);
+        // فقط ثبت پورسانت‌های قبلی در حساب؛ پیامک خرید فقط موقع پرداخت می‌رود
         try {
-            $this->syncCommissions($marketer);
+            $this->syncCommissions($marketer, false);
         } catch (\Throwable $e) {
             report($e);
         }
@@ -230,8 +231,11 @@ class MarketingService
 
     /**
      * پرداخت‌های موفق پلن فروشگاه‌های معرفی‌شده را به سهم بازاریاب تبدیل می‌کند (idempotent).
+     *
+     * @param  bool  $notifyPurchases  فقط بعد از پرداخت موفق true باشد؛ پنل/ادمین نباید پیامک بزنند
+     * @param  int|null  $onlyAtelierId  محدود به یک فروشگاه (مسیر تأیید پرداخت)
      */
-    public function syncCommissions(?Marketer $only = null): int
+    public function syncCommissions(?Marketer $only = null, bool $notifyPurchases = false, ?int $onlyAtelierId = null): int
     {
         if (! Schema::hasTable('gateway_payments') || ! Schema::hasTable('marketer_commissions')) {
             return 0;
@@ -245,6 +249,7 @@ class MarketingService
             ])
             ->where('gateway_payments.status', GatewayPayment::STATUS_PAID)
             ->when($only, fn ($q) => $q->where('mr.marketer_id', $only->id))
+            ->when($onlyAtelierId, fn ($q) => $q->where('gateway_payments.atelier_id', $onlyAtelierId))
             ->whereNotExists(function ($q) {
                 $q->select(DB::raw(1))
                     ->from('marketer_commissions as mc')
@@ -303,14 +308,16 @@ class MarketingService
             }
 
             $created++;
-            $atelier = $ateliers->get($row->atelier_id);
-            $this->notifyMarketerPurchase($marketer, $atelier, $commissionToman);
+            if ($notifyPurchases) {
+                $atelier = $ateliers->get($row->atelier_id);
+                $this->notifyMarketerPurchase($marketer, $atelier, $commissionToman);
+            }
         }
 
         return $created;
     }
 
-    /** همگام‌سازی پورسانت بعد از پرداخت موفق یک فروشگاه معرفی‌شده */
+    /** همگام‌سازی پورسانت بعد از پرداخت موفق یک فروشگاه معرفی‌شده (+ پیامک خرید) */
     public function syncCommissionsForAtelier(int $atelierId): int
     {
         if ($atelierId <= 0) {
@@ -325,7 +332,7 @@ class MarketingService
             return 0;
         }
 
-        return $this->syncCommissions($marketer);
+        return $this->syncCommissions($marketer, true, $atelierId);
     }
 
     protected function notifyMarketerRegistration(Marketer $marketer, Atelier $atelier, ?string $userPhone = null): void
