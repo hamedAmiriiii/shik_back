@@ -40,7 +40,29 @@ class AccountingAccountController extends Controller
     }
 
     /**
-     * ساخت معین یا تفصیلی غیرسیستمی.
+     * کد پیشنهادی برای زیرحساب جدید یک حساب (و سطحی که زیرحساب خواهد داشت).
+     * GET /api/accounting/accounts/{accountingAccount}/next-code
+     */
+    public function nextCode(Request $request, AccountingAccount $accountingAccount)
+    {
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null || (int) $accountingAccount->atelier_id !== $atelierId) {
+            return response()->json(['message' => 'یافت نشد'], 404);
+        }
+
+        $level = $accountingAccount->childLevel();
+
+        return response([
+            'data' => [
+                'code' => $accountingAccount->suggestChildCode(),
+                'level' => $level,
+                'level_label' => (new AccountingAccount(['level' => $level]))->levelLabel(),
+            ],
+        ], 200);
+    }
+
+    /**
+     * ساخت زیرحساب (کل / معین / تفصیلی) غیرسیستمی زیر هر حساب.
      * POST /api/accounting/accounts
      */
     public function store(Request $request)
@@ -70,10 +92,10 @@ class AccountingAccountController extends Controller
                 'required',
                 'string',
                 'max:32',
+                'regex:/^[0-9A-Za-z\-_.]+$/',
                 Rule::unique('accounting_accounts', 'code')->where(fn ($q) => $q->where('atelier_id', $atelierId)),
             ],
             'name' => 'required|string|max:255',
-            'level' => ['required', Rule::in([AccountingAccount::LEVEL_MOEIN, AccountingAccount::LEVEL_TAFSILI])],
         ]);
 
         $parent = AccountingAccount::query()
@@ -83,20 +105,17 @@ class AccountingAccountController extends Controller
         if (! $parent) {
             return response()->json(['message' => 'حساب والد یافت نشد.'], 422);
         }
-
-        if ($fields['level'] === AccountingAccount::LEVEL_MOEIN && $parent->level !== AccountingAccount::LEVEL_KOL) {
-            return response()->json(['message' => 'معین باید زیر حساب کل ساخته شود.'], 422);
-        }
-        if ($fields['level'] === AccountingAccount::LEVEL_TAFSILI && $parent->level !== AccountingAccount::LEVEL_MOEIN) {
-            return response()->json(['message' => 'تفصیلی باید زیر حساب معین ساخته شود.'], 422);
+        if (! $parent->is_active) {
+            return response()->json(['message' => 'زیر حساب غیرفعال نمی‌توان حساب ساخت.'], 422);
         }
 
+        // سطح (کل / معین / تفصیلی) از روی والد تعیین می‌شود؛ عمق درخت محدودیتی ندارد.
         $account = AccountingAccount::create([
             'atelier_id' => $atelierId,
             'parent_id' => $parent->id,
             'code' => trim($fields['code']),
             'name' => trim($fields['name']),
-            'level' => $fields['level'],
+            'level' => $parent->childLevel(),
             'nature' => $parent->nature,
             'kind' => $parent->kind,
             'is_system' => false,
@@ -135,6 +154,11 @@ class AccountingAccountController extends Controller
             $accountingAccount->name = trim($fields['name']);
         }
         if (array_key_exists('is_active', $fields)) {
+            if (! $fields['is_active'] && $accountingAccount->children()->where('is_active', true)->exists()) {
+                return response()->json([
+                    'message' => 'این حساب زیرحساب فعال دارد. ابتدا زیرحساب‌ها را غیرفعال کنید.',
+                ], 422);
+            }
             $accountingAccount->is_active = (bool) $fields['is_active'];
         }
         $accountingAccount->save();

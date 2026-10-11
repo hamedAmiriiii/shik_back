@@ -101,6 +101,68 @@ class AccountingAccount extends Model
         return $query->where('is_active', true);
     }
 
+    /**
+     * سطح حساب فرزند بر اساس والد: گروه→کل، کل→معین، معین/تفصیلی→تفصیلی (بدون محدودیت عمق).
+     */
+    public function childLevel(): string
+    {
+        return match ($this->level) {
+            self::LEVEL_GROUP => self::LEVEL_KOL,
+            self::LEVEL_KOL => self::LEVEL_MOEIN,
+            default => self::LEVEL_TAFSILI,
+        };
+    }
+
+    /**
+     * کد پیشنهادی برای فرزند جدید با توجه به موقعیت والد.
+     * قاعده: گروه ۱ رقمی، کل/معین یک رقم بعد از کد والد، تفصیلی و عمیق‌تر دو رقم بعد از کد والد
+     * (مثلاً ۱۱۱ → ۱۱۱۰۱). شمارهٔ بعدی از بیشترین کد فرزندان گرفته می‌شود و کد تکراری نمی‌دهد.
+     */
+    public function suggestChildCode(): string
+    {
+        $parentCode = (string) $this->code;
+        $level = $this->childLevel();
+        $width = $level === self::LEVEL_TAFSILI ? 2 : 1;
+
+        $used = static::query()
+            ->forAtelier((int) $this->atelier_id)
+            ->pluck('code')
+            ->flip();
+
+        if (! preg_match('/^\d+$/', $parentCode)) {
+            $n = 1;
+            while (isset($used[$parentCode.'-'.$n])) {
+                $n++;
+            }
+
+            return $parentCode.'-'.$n;
+        }
+
+        $max = 0;
+        $prefixLen = strlen($parentCode);
+        foreach ($this->children()->pluck('code') as $childCode) {
+            $childCode = (string) $childCode;
+            if (strlen($childCode) <= $prefixLen || ! preg_match('/^\d+$/', $childCode)
+                || strpos($childCode, $parentCode) !== 0) {
+                continue;
+            }
+            $suffix = (int) substr($childCode, $prefixLen);
+            if ($suffix > $max) {
+                $max = $suffix;
+            }
+        }
+
+        $next = $max + 1;
+        while (true) {
+            $suffixWidth = max($width, strlen((string) $next));
+            $code = $parentCode.str_pad((string) $next, $suffixWidth, '0', STR_PAD_LEFT);
+            if (! isset($used[$code])) {
+                return $code;
+            }
+            $next++;
+        }
+    }
+
     public function levelLabel(): string
     {
         return [

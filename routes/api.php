@@ -444,6 +444,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
     Route::get('accounting/accounts', [\App\Http\Controllers\AccountingAccountController::class, 'index']);
     Route::post('accounting/accounts', [\App\Http\Controllers\AccountingAccountController::class, 'store']);
+    Route::get('accounting/accounts/{accountingAccount}/next-code', [\App\Http\Controllers\AccountingAccountController::class, 'nextCode']);
     Route::put('accounting/accounts/{accountingAccount}', [\App\Http\Controllers\AccountingAccountController::class, 'update']);
 
     Route::get('accounting/vouchers', [\App\Http\Controllers\AccountingVoucherController::class, 'index']);

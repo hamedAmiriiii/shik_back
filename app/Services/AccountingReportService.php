@@ -302,7 +302,7 @@ class AccountingReportService
     }
 
     /**
-     * معین بدون تفصیلی + همهٔ تفصیلی‌ها، به ترتیب درخت.
+     * حساب‌های نهایی (برگ) هر سطح + حساب‌های دارای زیرشاخه که خودشان سند دارند، به ترتیب درخت.
      *
      * @return Collection<int, AccountingAccount>
      */
@@ -310,13 +310,22 @@ class AccountingReportService
     {
         $all = AccountingAccount::query()->forAtelier($atelierId)->orderBy('code')->get();
         $childIds = $all->whereNotNull('parent_id')->pluck('parent_id')->unique()->map(fn ($id) => (int) $id)->all();
+        // حساب‌دارای‌زیرشاخه فقط وقتی در گزارش می‌آید که خودش هم سند خورده باشد (مثل صندوق فروش سیستمی).
+        $postedIds = DB::table('accounting_lines')
+            ->join('accounting_vouchers', 'accounting_vouchers.id', '=', 'accounting_lines.voucher_id')
+            ->where('accounting_vouchers.atelier_id', $atelierId)
+            ->distinct()
+            ->pluck('accounting_lines.account_id')
+            ->map(fn ($id) => (int) $id)
+            ->flip()
+            ->all();
         $ordered = collect();
         $byParent = $all->groupBy(fn (AccountingAccount $a) => (string) ($a->parent_id ?? '0'));
-        $walk = function ($parentKey) use (&$walk, &$ordered, $byParent, $childIds) {
+        $walk = function ($parentKey) use (&$walk, &$ordered, $byParent, $childIds, $postedIds) {
             foreach ($byParent->get($parentKey, collect())->sortBy('code') as $node) {
-                $isLeafMoein = $node->level === AccountingAccount::LEVEL_MOEIN
-                    && ! in_array($node->id, $childIds, true);
-                if ($node->level === AccountingAccount::LEVEL_TAFSILI || $isLeafMoein) {
+                $hasChildren = in_array((int) $node->id, $childIds, true);
+                $isGroup = $node->level === AccountingAccount::LEVEL_GROUP;
+                if (! $isGroup && (! $hasChildren || isset($postedIds[(int) $node->id]))) {
                     $ordered->push($node);
                 }
                 $walk((string) $node->id);

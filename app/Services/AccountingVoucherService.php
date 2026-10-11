@@ -38,7 +38,10 @@ class AccountingVoucherService
             throw new RuntimeException('کلید رویداد سند نامعتبر است.');
         }
 
-            $normalized = self::normalizeLines($atelierId, $lines);
+        $normalized = self::normalizeLines($atelierId, $lines);
+        if (in_array($sourceType, [AccountingVoucher::SOURCE_MANUAL, AccountingVoucher::SOURCE_PRIOR_YEAR_ADJUST], true)) {
+            self::assertLeafAccounts($atelierId, $normalized);
+        }
         $dateString = self::normalizeDate($date);
         if ($sourceType !== AccountingVoucher::SOURCE_YEAR_CLOSE) {
             AccountingPeriodCloseService::assertDateUnlocked($atelierId, $dateString);
@@ -303,6 +306,36 @@ class AccountingVoucherService
      * @param  array<int, array<string, mixed>>  $lines
      * @return array<int, array{account_id: int, debit: float, credit: float, description: ?string}>
      */
+    /**
+     * سند دستی فقط روی حساب نهایی (بدون زیرشاخهٔ فعال) ثبت می‌شود تا مانده والد با مجموع فرزندان نخواند.
+     * سندهای خودکار سیستم از این قاعده مستثنی‌اند (مثلاً صندوق فروش).
+     *
+     * @param  array<int, array<string, mixed>>  $normalized
+     */
+    protected static function assertLeafAccounts(int $atelierId, array $normalized): void
+    {
+        $ids = array_values(array_unique(array_map(fn ($row) => (int) $row['account_id'], $normalized)));
+        if ($ids === []) {
+            return;
+        }
+
+        $parents = AccountingAccount::query()
+            ->forAtelier($atelierId)
+            ->whereIn('parent_id', $ids)
+            ->where('is_active', true)
+            ->pluck('parent_id')
+            ->unique()
+            ->all();
+        if ($parents === []) {
+            return;
+        }
+
+        $account = AccountingAccount::query()->forAtelier($atelierId)->where('id', (int) $parents[0])->first();
+        throw new RuntimeException(
+            'حساب «'.($account ? $account->code.' — '.$account->name : '').'» زیرشاخه دارد. یکی از زیرحساب‌های آن را انتخاب کنید.'
+        );
+    }
+
     protected static function normalizeLines(int $atelierId, array $lines): array
     {
         if (count($lines) < 2) {
