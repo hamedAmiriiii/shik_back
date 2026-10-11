@@ -88,14 +88,16 @@ class ShopPosSaleService
                 continue;
             }
 
-            if ($error = ProductQuantityTools::validateSaleQuantity($qty, Product::UNIT_KG)) {
+            $lineUnit = $this->lineUnitType($line);
+            if ($error = ProductQuantityTools::validateSaleQuantity($qty, $lineUnit)) {
                 throw new RuntimeException($name.': '.$error);
             }
 
             $stock = $this->availableKg($line);
             if (! ProductQuantityTools::hasSufficientStock($stock, $qty)) {
+                $unitLabel = ProductQuantityTools::unitLabel($lineUnit);
                 throw new RuntimeException(
-                    "موجودی «{$name}» کافی نیست. موجودی: {$stock} کیلو، درخواستی: {$qty} کیلو"
+                    "موجودی «{$name}» کافی نیست. موجودی: {$stock} {$unitLabel}، درخواستی: {$qty} {$unitLabel}"
                 );
             }
         }
@@ -235,7 +237,10 @@ class ShopPosSaleService
         if (! $good) {
             throw new RuntimeException('کالای تولیدی یافت نشد');
         }
-        $qty = ProductQuantityTools::normalize($row['quantity'], Product::UNIT_KG);
+        $qty = ProductQuantityTools::normalize(
+            $row['quantity'],
+            $good->isPieceUnit() ? Product::UNIT_PIECE : Product::UNIT_KG
+        );
         $salePrice = $this->resolveSalePrice($row, (float) $good->sale_price, $good->atelier_id);
 
         return [
@@ -260,7 +265,10 @@ class ShopPosSaleService
         if (! $material) {
             throw new RuntimeException('ماده اولیه یافت نشد');
         }
-        $qty = ProductQuantityTools::normalize($row['quantity'], Product::UNIT_KG);
+        $qty = ProductQuantityTools::normalize(
+            $row['quantity'],
+            $material->isPieceUnit() ? Product::UNIT_PIECE : Product::UNIT_KG
+        );
         $salePrice = $this->resolveSalePrice($row, (float) $material->sale_price, $material->atelier_id);
         $plan = $this->fifo->plan($material, $qty);
 
@@ -296,6 +304,17 @@ class ShopPosSaleService
         }
 
         return PriceTools::roundSalePrice($baseSalePrice, $atelierId);
+    }
+
+    private function lineUnitType(array $line): string
+    {
+        if (isset($line['model'])
+            && ($line['model'] instanceof RawMaterial || $line['model'] instanceof ProducedGood)
+            && $line['model']->isPieceUnit()) {
+            return Product::UNIT_PIECE;
+        }
+
+        return Product::UNIT_KG;
     }
 
     private function availableKg(array $line): float
@@ -373,7 +392,7 @@ class ShopPosSaleService
         $material = RawMaterial::findOrFail($rawMaterialId);
         $plan = $this->fifo->plan($material, $needKg, true);
         if ($plan['shortage_kg'] > 0) {
-            throw new RuntimeException('موجودی «'.$material->name.'» کافی نیست. کمبود: '.$plan['shortage_kg'].' کیلو.');
+            throw new RuntimeException('موجودی «'.$material->name.'» کافی نیست. کمبود: '.$plan['shortage_kg'].' '.($material->isPieceUnit() ? 'عدد' : 'کیلو').'.');
         }
 
         foreach ($plan['slices'] as $slice) {

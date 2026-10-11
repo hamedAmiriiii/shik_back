@@ -9,6 +9,7 @@ use App\Models\RawMaterial;
 use App\Services\ProducedGoodCostService;
 use App\Services\RawMaterialFifoService;
 use App\Tools\PriceTools;
+use App\Tools\ProductQuantityTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -85,8 +86,16 @@ class ProducedGoodController extends Controller
         $this->assertIngredientsBelongToShop($fields['ingredients'] ?? [], $atelierId);
         $pricing = $this->pricingFromFields($fields, null, $atelierId);
 
-        $good = DB::transaction(function () use ($atelierId, $fields, $pricing) {
-            $good = ProducedGood::create([
+        $unitType = $fields['unit_type'] ?? ProducedGood::UNIT_KG;
+        $hasUnitColumn = Schema::hasColumn('produced_goods', 'unit_type');
+        if ($unitType === ProducedGood::UNIT_PIECE && ! $hasUnitColumn) {
+            return response()->json([
+                'message' => 'ستون unit_type در جدول produced_goods وجود ندارد. migration یا SQL مربوط را اجرا کنید.',
+            ], 503);
+        }
+
+        $good = DB::transaction(function () use ($atelierId, $fields, $pricing, $unitType, $hasUnitColumn) {
+            $payload = [
                 'atelier_id' => $atelierId,
                 'name' => $fields['name'],
                 'display_order' => $this->normalizedDisplayOrder($fields['display_order'] ?? null, true),
@@ -94,7 +103,11 @@ class ProducedGoodController extends Controller
                 'markup_percent' => $pricing['markup_percent'],
                 'round_sale_price' => $this->boolField($fields, 'round_sale_price', false),
                 'note' => $fields['note'] ?? null,
-            ]);
+            ];
+            if ($hasUnitColumn) {
+                $payload['unit_type'] = $unitType;
+            }
+            $good = ProducedGood::create($payload);
             $this->syncIngredients($good, $fields['ingredients'] ?? []);
             $this->syncCategories($good, $fields['category_ids'] ?? [], $atelierId);
 
@@ -133,8 +146,21 @@ class ProducedGoodController extends Controller
             $this->assertIngredientsBelongToShop($fields['ingredients'], $atelierId);
         }
 
+        if (array_key_exists('unit_type', $fields)) {
+            if (! Schema::hasColumn('produced_goods', 'unit_type')) {
+                unset($fields['unit_type']);
+            } elseif ($fields['unit_type'] !== $producedGood->unitType() && $producedGood->productions()->exists()) {
+                return response()->json([
+                    'message' => 'بعد از ثبت تولید، واحد کالا قابل تغییر نیست.',
+                ], 422);
+            }
+        }
+
         DB::transaction(function () use ($producedGood, $fields) {
             $payload = [];
+            if (array_key_exists('unit_type', $fields)) {
+                $payload['unit_type'] = $fields['unit_type'];
+            }
             if (array_key_exists('name', $fields)) {
                 $payload['name'] = $fields['name'];
             }
@@ -201,6 +227,12 @@ class ProducedGoodController extends Controller
             'note' => 'nullable|string',
         ]);
 
+        if ($producedGood->isPieceUnit() && ! ProductQuantityTools::isWholeNumber($fields['quantity_kg'])) {
+            return response()->json([
+                'message' => 'تعداد تولید باید عدد صحیح باشد.',
+            ], 422);
+        }
+
         try {
             $production = $fifo->produce(
                 $producedGood,
@@ -264,6 +296,7 @@ class ProducedGoodController extends Controller
             'id' => $production->id,
             'produced_good_id' => $production->produced_good_id,
             'produced_good_name' => optional($production->producedGood)->name,
+            'unit_type' => $production->producedGood ? $production->producedGood->unitType() : ProducedGood::UNIT_KG,
             'quantity_kg' => (float) $production->quantity_kg,
             'remaining_kg' => (float) $production->remaining_kg,
             'sold_kg' => round((float) $production->quantity_kg - (float) $production->remaining_kg, 3),
@@ -308,6 +341,7 @@ class ProducedGoodController extends Controller
         return $request->validate([
             'name' => $nameRule,
             'display_order' => 'nullable|integer|min:0|max:9999',
+            'unit_type' => ['sometimes', Rule::in([ProducedGood::UNIT_KG, ProducedGood::UNIT_PIECE])],
             'sale_price' => 'nullable|numeric|min:0',
             'markup_percent' => 'nullable|numeric|min:0|max:9999',
             'round_sale_price' => 'sometimes|boolean',

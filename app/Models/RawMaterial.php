@@ -8,16 +8,45 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class RawMaterial extends Model
 {
+    public const UNIT_KG = 'kg';
+
+    public const UNIT_PIECE = 'piece';
+
     protected $fillable = [
         'atelier_id',
         'name',
+        'unit_type',
         'sale_price',
         'note',
     ];
 
+    protected $appends = [
+        'unit_type',
+    ];
+
+    public function getUnitTypeAttribute(): string
+    {
+        return $this->unitType();
+    }
+
     protected $casts = [
         'sale_price' => 'decimal:2',
     ];
+
+    /**
+     * واحد ماده: kg یا piece. رکوردهای قدیمی (بدون ستون/مقدار) کیلو حساب می‌شوند.
+     */
+    public function unitType(): string
+    {
+        return ($this->attributes['unit_type'] ?? null) === self::UNIT_PIECE
+            ? self::UNIT_PIECE
+            : self::UNIT_KG;
+    }
+
+    public function isPieceUnit(): bool
+    {
+        return $this->unitType() === self::UNIT_PIECE;
+    }
 
     public function atelier(): BelongsTo
     {

@@ -11,9 +11,14 @@ class ProducedGood extends Model
 {
     public const DEFAULT_DISPLAY_ORDER = 50;
 
+    public const UNIT_KG = 'kg';
+
+    public const UNIT_PIECE = 'piece';
+
     protected $fillable = [
         'atelier_id',
         'name',
+        'unit_type',
         'display_order',
         'sale_price',
         'original_sale_price',
@@ -32,7 +37,13 @@ class ProducedGood extends Model
 
     protected $appends = [
         'sale_price_mode',
+        'unit_type',
     ];
+
+    public function getUnitTypeAttribute(): string
+    {
+        return $this->unitType();
+    }
 
     /**
      * فیلدهای محاسباتی که ستون جدول نیستند و نباید با save نوشته شوند.
@@ -57,6 +68,21 @@ class ProducedGood extends Model
         }
 
         return $dirty;
+    }
+
+    /**
+     * واحد کالا: kg یا piece. رکوردهای قدیمی کیلو حساب می‌شوند.
+     */
+    public function unitType(): string
+    {
+        return ($this->attributes['unit_type'] ?? null) === self::UNIT_PIECE
+            ? self::UNIT_PIECE
+            : self::UNIT_KG;
+    }
+
+    public function isPieceUnit(): bool
+    {
+        return $this->unitType() === self::UNIT_PIECE;
     }
 
     public function getSalePriceModeAttribute(): string

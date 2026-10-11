@@ -9,6 +9,7 @@ use App\Models\RawMaterialLot;
 use App\Services\ProducedGoodCostService;
 use App\Services\RawMaterialFifoService;
 use App\Services\RawMaterialInvoiceService;
+use App\Tools\ProductQuantityTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -93,6 +94,7 @@ class RawMaterialController extends Controller
                     Rule::unique('raw_materials', 'name')->where('atelier_id', $atelierId),
                 ],
                 'note' => 'nullable|string',
+                'unit_type' => ['nullable', Rule::in([RawMaterial::UNIT_KG, RawMaterial::UNIT_PIECE])],
                 'sale_price' => 'nullable|numeric|min:0',
                 'quantity_kg' => 'nullable|numeric|min:0.001',
                 'price_per_kg' => 'nullable|numeric|min:0|required_with:quantity_kg',
@@ -102,6 +104,19 @@ class RawMaterialController extends Controller
         );
 
         $fields = $this->prepareRawMaterialPurchase($fields);
+
+        $unitType = $fields['unit_type'] ?? RawMaterial::UNIT_KG;
+        if ($unitType === RawMaterial::UNIT_PIECE && ! Schema::hasColumn('raw_materials', 'unit_type')) {
+            return response()->json([
+                'message' => 'ستون unit_type در جدول raw_materials وجود ندارد. migration یا SQL مربوط را اجرا کنید.',
+            ], 503);
+        }
+        if ($unitType === RawMaterial::UNIT_PIECE && ! empty($fields['quantity_kg'])
+            && ! ProductQuantityTools::isWholeNumber($fields['quantity_kg'])) {
+            return response()->json([
+                'message' => 'تعداد ماده اولیه تعدادی باید عدد صحیح باشد.',
+            ], 422);
+        }
 
         if ($invoices->wantsInvoice($fields) && empty($fields['quantity_kg'])) {
             return response()->json([
@@ -115,13 +130,17 @@ class RawMaterialController extends Controller
         }
 
         try {
-            $material = DB::transaction(function () use ($atelierId, $fields, $invoices, $request) {
-                $material = RawMaterial::create([
+            $material = DB::transaction(function () use ($atelierId, $fields, $invoices, $request, $unitType) {
+                $payload = [
                     'atelier_id' => $atelierId,
                     'name' => $fields['name'],
                     'sale_price' => $fields['sale_price'] ?? 0,
                     'note' => $fields['note'] ?? null,
-                ]);
+                ];
+                if (Schema::hasColumn('raw_materials', 'unit_type')) {
+                    $payload['unit_type'] = $unitType;
+                }
+                $material = RawMaterial::create($payload);
 
                 if (! empty($fields['quantity_kg'])) {
                     $lot = $this->createLot($material, $fields);
@@ -168,7 +187,21 @@ class RawMaterialController extends Controller
             ],
             'sale_price' => 'nullable|numeric|min:0',
             'note' => 'nullable|string',
+            'unit_type' => ['sometimes', Rule::in([RawMaterial::UNIT_KG, RawMaterial::UNIT_PIECE])],
         ]);
+
+        if (array_key_exists('unit_type', $fields)) {
+            if (! Schema::hasColumn('raw_materials', 'unit_type')) {
+                unset($fields['unit_type']);
+            } elseif ($fields['unit_type'] !== $rawMaterial->unitType()) {
+                if ($rawMaterial->lots()->exists()
+                    || ProducedGoodIngredient::where('raw_material_id', $rawMaterial->id)->exists()) {
+                    return response()->json([
+                        'message' => 'بعد از ثبت خرید یا استفاده در فرمول، واحد ماده اولیه قابل تغییر نیست.',
+                    ], 422);
+                }
+            }
+        }
 
         $rawMaterial->update($fields);
 
@@ -208,6 +241,12 @@ class RawMaterialController extends Controller
         $this->assertModelBelongsToStaffAtelier($request, $rawMaterial);
 
         $this->prepareRawMaterialPurchaseRequest($request);
+
+        if ($rawMaterial->isPieceUnit() && ! ProductQuantityTools::isWholeNumber($request->input('quantity_kg'))) {
+            return response()->json([
+                'message' => 'تعداد ماده اولیه تعدادی باید عدد صحیح باشد.',
+            ], 422);
+        }
 
         $fields = $request->validate(
             array_merge([
@@ -391,7 +430,7 @@ class RawMaterialController extends Controller
     private function prepareRawMaterialPurchaseRequest(Request $request): void
     {
         $this->mergeRequestPayload($request, [
-            'name', 'note', 'sale_price', 'quantity_kg', 'price_per_kg', 'purchased_at',
+            'name', 'unit_type', 'note', 'sale_price', 'quantity_kg', 'price_per_kg', 'purchased_at',
             'create_invoice', 'invoice_id', 'invoice_link', 'invoice_item_id', 'invoice_title',
             'date', 'invoice_date',
             'shop_account_id', 'payment_method', 'cheque', 'cheque_id',

@@ -19,6 +19,25 @@ class RawMaterialFifoService
     }
 
     /**
+     * مقدار مصرف ماده برای تولید.
+     * کیلویی: مقدار فرمول «گرم در هر کیلو کالا» است.
+     * تعدادی: مقدار فرمول «عدد در هر کیلو کالا» است (بدون تقسیم بر ۱۰۰۰).
+     */
+    public function neededQuantity(?RawMaterial $material, float $recipeValue, float $productKg): float
+    {
+        if ($material && $material->isPieceUnit()) {
+            return round($recipeValue * $productKg, 3);
+        }
+
+        return $this->kgFromGrams($recipeValue, $productKg);
+    }
+
+    private function unitLabel(?RawMaterial $material): string
+    {
+        return $material && $material->isPieceUnit() ? 'عدد' : 'کیلو';
+    }
+
+    /**
      * تخصیص FIFO بدون کم کردن موجودی (برای پیش‌نمایش هزینه).
      */
     public function plan(RawMaterial $material, float $needKg, bool $lock = false)
@@ -162,7 +181,7 @@ class RawMaterialFifoService
         foreach ($good->ingredients as $line) {
             $material = $line->rawMaterial;
             $grams = (float) $line->grams_per_kg;
-            $needKg = $this->kgFromGrams($grams, $quantityKg);
+            $needKg = $this->neededQuantity($material, $grams, $quantityKg);
             $plan = $material
                 ? $this->plan($material, $needKg)
                 : [
@@ -213,6 +232,7 @@ class RawMaterialFifoService
                 'id' => $line->id,
                 'raw_material_id' => $line->raw_material_id,
                 'name' => $material ? $material->name : null,
+                'unit_type' => $material ? $material->unitType() : RawMaterial::UNIT_KG,
                 'grams_per_kg' => $grams,
                 'needed_kg' => $needKg,
                 'cost' => $cost,
@@ -287,6 +307,9 @@ class RawMaterialFifoService
                     $byMaterial[$mid] = [
                         'raw_material_id' => $mid,
                         'name' => optional($consumption->rawMaterial)->name,
+                        'unit_type' => $consumption->rawMaterial
+                            ? $consumption->rawMaterial->unitType()
+                            : RawMaterial::UNIT_KG,
                         'qty_per_kg' => 0.0,
                         'cost_per_kg' => 0.0,
                         'lots' => [],
@@ -357,7 +380,8 @@ class RawMaterialFifoService
                 'id' => null,
                 'raw_material_id' => $mid,
                 'name' => $inv['name'],
-                'grams_per_kg' => round($inv['qty_per_kg'] * 1000, 3),
+                'unit_type' => $inv['unit_type'] ?? RawMaterial::UNIT_KG,
+                'grams_per_kg' => round($inv['qty_per_kg'] * (($inv['unit_type'] ?? RawMaterial::UNIT_KG) === RawMaterial::UNIT_PIECE ? 1 : 1000), 3),
                 'needed_kg' => round($inv['qty_per_kg'] * $qty, 3),
                 'cost' => round($inv['cost_per_kg'] * $qty, 2),
                 'lots' => $scaleLots($inv),
@@ -388,11 +412,11 @@ class RawMaterialFifoService
                     throw new RuntimeException('ماده اولیه فرمول یافت نشد.');
                 }
 
-                $needKg = $this->kgFromGrams((float) $line->grams_per_kg, $quantityKg);
+                $needKg = $this->neededQuantity($material, (float) $line->grams_per_kg, $quantityKg);
                 $plan = $this->plan($material, $needKg, true);
                 if ($plan['shortage_kg'] > 0) {
                     throw new RuntimeException(
-                        'موجودی «'.$material->name.'» کافی نیست. کمبود: '.$plan['shortage_kg'].' کیلو.'
+                        'موجودی «'.$material->name.'» کافی نیست. کمبود: '.$plan['shortage_kg'].' '.$this->unitLabel($material).'.'
                     );
                 }
                 $plans[] = [

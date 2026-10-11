@@ -48,7 +48,7 @@ class PosCatalogController extends Controller
                         'purchase_price' => (float) $good->cost_per_kg,
                         'profit_per_kg' => (float) $good->profit_per_kg,
                         'stock_kg' => (float) $good->stock_kg,
-                        'unit_type' => 'kg',
+                        'unit_type' => $good->unitType(),
                         'stock_sufficient' => (bool) $good->stock_sufficient,
                     ];
                 })
@@ -73,7 +73,7 @@ class PosCatalogController extends Controller
                         'sale_price' => (float) $material->sale_price,
                         'purchase_price' => $material->next_price_per_kg,
                         'stock_kg' => (float) $material->stock_kg,
-                        'unit_type' => 'kg',
+                        'unit_type' => $material->unitType(),
                     ];
                 })
                 ->values();
