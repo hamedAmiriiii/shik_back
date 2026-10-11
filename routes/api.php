@@ -378,6 +378,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     });
 
     Route::get('shop-access', [\App\Http\Controllers\ShopAccessController::class, 'show']);
+    Route::get('shop-contract', [\App\Http\Controllers\ShopContractController::class, 'show']);
+    Route::post('shop-contract/send-code', [\App\Http\Controllers\ShopContractController::class, 'sendCode'])
+        ->middleware('throttle:6,1');
+    Route::post('shop-contract/accept', [\App\Http\Controllers\ShopContractController::class, 'accept'])
+        ->middleware('throttle:15,1');
     Route::get('shop-permissions', [\App\Http\Controllers\ShopEmployeeController::class, 'permissionOptions']);
 
     // حسابرس: صاحب فروشگاه مدیریت می‌کند، حسابرس بین فروشگاه‌هایش جابه‌جا می‌شود

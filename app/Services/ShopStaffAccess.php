@@ -147,6 +147,7 @@ class ShopStaffAccess
             'shop_employee_id' => $employee ? (int) $employee->id : null,
             'shop_features' => ShopFeatureFlags::forAtelier($user->atelier_id ? (int) $user->atelier_id : null),
             'shop_is_auditor' => $auditor,
+            'shop_contract_required' => ShopContractService::isRequiredFor($user),
         ];
         if ($auditor) {
             $fields['auditor_shops'] = ShopAuditorAccess::shopsFor($user);
