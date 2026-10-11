@@ -4,11 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Console\Commands\AccountingFlowSelfTest;
 use App\Models\AccountingVoucher;
+use App\Models\DocumentPayment;
 use App\Services\AccountingOpeningService;
 use App\Services\AccountingPeriodCloseService;
 use App\Services\AccountingReportService;
 use App\Services\AccountingVoucherService;
 use App\Services\ChartOfAccountsSeeder;
+use App\Services\DocumentPaymentService;
 use Illuminate\Http\Request;
 use Morilog\Jalali\Jalalian;
 use RuntimeException;
@@ -303,6 +305,10 @@ class AccountingVoucherController extends Controller
             return response()->json(['message' => 'یافت نشد'], 404);
         }
 
+        if ($accountingVoucher->source_type === AccountingVoucher::SOURCE_DOCUMENT_PAYMENT) {
+            return $this->reverseSettlement($request, $accountingVoucher);
+        }
+
         try {
             $storno = AccountingVoucherService::reverse($accountingVoucher);
         } catch (RuntimeException $e) {
@@ -312,6 +318,50 @@ class AccountingVoucherController extends Controller
         return response([
             'message' => 'سند برگشت خورد.',
             'data' => $storno->toApiArray(),
+        ], 200);
+    }
+
+    /**
+     * برگشت تسویهٔ نسیهٔ فاکتور/هزینه از روی سند حسابداری آن.
+     * سند برگشت می‌خورد، تسویه از مدرک اصلی برداشته می‌شود و موجودی حساب اصلاح می‌شود.
+     * POST /api/accounting/vouchers/{accountingVoucher}/reverse-settlement
+     */
+    public function reverseSettlement(Request $request, AccountingVoucher $accountingVoucher)
+    {
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null || (int) $accountingVoucher->atelier_id !== $atelierId) {
+            return response()->json(['message' => 'یافت نشد'], 404);
+        }
+
+        if ($accountingVoucher->source_type !== AccountingVoucher::SOURCE_DOCUMENT_PAYMENT
+            || $accountingVoucher->status !== AccountingVoucher::STATUS_POSTED
+            || $accountingVoucher->reverses_voucher_id) {
+            return response()->json(['message' => 'این سند تسویهٔ قابل برگشت نیست.'], 422);
+        }
+
+        $payment = DocumentPayment::query()
+            ->where('id', (int) $accountingVoucher->source_id)
+            ->where('atelier_id', $atelierId)
+            ->first();
+        if (! $payment) {
+            return response()->json(['message' => 'پرداخت مربوط به این سند یافت نشد.'], 404);
+        }
+
+        try {
+            DocumentPaymentService::unsettle($payment);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $reversal = AccountingVoucher::query()
+            ->forAtelier($atelierId)
+            ->where('reverses_voucher_id', $accountingVoucher->id)
+            ->with(['lines.account'])
+            ->first();
+
+        return response([
+            'message' => 'تسویه برگشت خورد و مبلغ دوباره نسیه شد.',
+            'data' => $reversal ? $reversal->toApiArray() : null,
         ], 200);
     }
 

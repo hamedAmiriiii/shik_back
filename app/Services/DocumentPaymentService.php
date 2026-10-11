@@ -2,12 +2,14 @@
 
 namespace App\Services;
 
+use App\Models\AccountingVoucher;
 use App\Models\Cheque;
 use App\Models\DocumentPayment;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\ShopAccount;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Morilog\Jalali\Jalalian;
 use RuntimeException;
@@ -498,6 +500,80 @@ class DocumentPaymentService
         }
 
         return $fresh;
+    }
+
+    /**
+     * برگشت یک تسویه (نسیه → پرداخت از حساب) که اشتباه ثبت شده است.
+     * سند حسابداری تسویه برگشت می‌خورد، مبلغ به نسیهٔ باقی‌مانده سند برمی‌گردد
+     * و موجودی حساب فروشگاه (که از ردیف‌های تسویه‌شده محاسبه می‌شود) اصلاح می‌شود.
+     */
+    public static function unsettle(DocumentPayment $payment): Model
+    {
+        if (! self::supportsSplits()) {
+            throw new RuntimeException('برگشت تسویه در این نسخه فعال نیست.');
+        }
+
+        return DB::transaction(function () use ($payment) {
+            /** @var DocumentPayment|null $locked */
+            $locked = DocumentPayment::query()->where('id', $payment->id)->lockForUpdate()->first();
+            if (! $locked || ! $locked->settled) {
+                throw new RuntimeException('این پرداخت تسویه‌شده نیست و قابل برگشت نیست.');
+            }
+            if (! in_array($locked->method, [self::METHOD_CREDIT, self::METHOD_ACCOUNT], true)) {
+                throw new RuntimeException('فقط تسویهٔ نسیه از حساب قابل برگشت است.');
+            }
+
+            $document = $locked->invoice_id
+                ? Invoice::query()->find($locked->invoice_id)
+                : Expense::query()->find($locked->expense_id);
+            if (! $document) {
+                throw new RuntimeException('سند مربوط به این تسویه یافت نشد.');
+            }
+
+            $atelierId = (int) $locked->atelier_id;
+            $voucher = AccountingVoucherService::findPosted(
+                $atelierId,
+                AccountingVoucher::SOURCE_DOCUMENT_PAYMENT,
+                (int) $locked->id
+            );
+            if (! $voucher) {
+                throw new RuntimeException('برای این پرداخت سند تسویهٔ فعال ثبت نشده است؛ فقط تسویه‌های نسیه قابل برگشت‌اند.');
+            }
+
+            // اگر دورهٔ مالی بسته باشد همین‌جا خطا می‌دهد و چیزی تغییر نمی‌کند.
+            AccountingVoucherService::reverse($voucher, 'برگشت تسویه نسیه سند #'.(int) $document->id);
+
+            if ($locked->method === self::METHOD_CREDIT) {
+                $locked->update([
+                    'settled' => false,
+                    'shop_account_id' => null,
+                ]);
+            } else {
+                // ردیفی که هنگام تسویهٔ بخشی ساخته شده: مبلغ به نسیهٔ باز برمی‌گردد.
+                $open = $document->payments()
+                    ->where('method', self::METHOD_CREDIT)
+                    ->where('settled', false)
+                    ->where('id', '!=', $locked->id)
+                    ->orderBy('sort_order')
+                    ->orderBy('id')
+                    ->first();
+                if ($open) {
+                    $open->update(['amount' => round((float) $open->amount + (float) $locked->amount, 2)]);
+                    $locked->delete();
+                } else {
+                    $locked->update([
+                        'method' => self::METHOD_CREDIT,
+                        'settled' => false,
+                        'shop_account_id' => null,
+                    ]);
+                }
+            }
+
+            $document->unsetRelation('payments');
+            self::refreshDocumentSummary($document);
+
+            return $document->fresh();
+        });
     }
 
     /**

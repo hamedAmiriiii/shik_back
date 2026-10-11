@@ -451,6 +451,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::post('accounting/vouchers', [\App\Http\Controllers\AccountingVoucherController::class, 'store']);
     Route::get('accounting/vouchers/{accountingVoucher}', [\App\Http\Controllers\AccountingVoucherController::class, 'show']);
     Route::post('accounting/vouchers/{accountingVoucher}/reverse', [\App\Http\Controllers\AccountingVoucherController::class, 'reverse']);
+    Route::post('accounting/vouchers/{accountingVoucher}/reverse-settlement', [\App\Http\Controllers\AccountingVoucherController::class, 'reverseSettlement']);
     Route::post('accounting/opening', [\App\Http\Controllers\AccountingVoucherController::class, 'opening']);
     Route::get('accounting/period-close/preview', [\App\Http\Controllers\AccountingPeriodCloseController::class, 'preview']);
     Route::post('accounting/period-close/reopen', [\App\Http\Controllers\AccountingPeriodCloseController::class, 'reopen']);
