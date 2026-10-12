@@ -225,10 +225,14 @@ class CustomerController extends Controller
             'unpaid_expense_count' => 0,
         ];
 
+        $ledger = \App\Services\CustomerLedgerService::build($atelierId, $purchases, $userShiksho);
+
         return response([
             'stats' => $stats,
             'purchases' => $purchases,
             'as_beneficiary' => $asBeneficiary,
+            'ledger' => $ledger['entries'],
+            'ledger_summary' => $ledger['summary'],
         ], 200);
     }
 
