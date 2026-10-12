@@ -57,6 +57,12 @@ class TableOrderCheckoutService
 
         foreach ($order->items->values() as $i => $line) {
             $prepared[$i]['sale_price'] = (float) $line->sale_price;
+            // منوی سه‌بعدی: حذف/اضافه ماده روی نام قلم فاکتور هم بیاید
+            $custom = \App\Services\ThreedMenuService::customizationLabelFromItem($line);
+            if ($custom !== '') {
+                $baseName = trim((string) ($prepared[$i]['item_name'] ?? $line->displayName() ?? ''));
+                $prepared[$i]['item_name'] = $baseName !== '' ? $baseName.' ('.$custom.')' : $custom;
+            }
         }
 
         return $prepared;

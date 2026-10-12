@@ -75,6 +75,18 @@ class PriceTools
     }
 
     /**
+     * رند به دو صفر (نزدیک‌ترین صد تومان): ۱۸٬۵۴۳ → ۱۸٬۵۰۰.
+     */
+    public static function roundToHundred(float $amount): float
+    {
+        if ($amount <= 0) {
+            return 0.0;
+        }
+
+        return (float) (round($amount / 100) * 100);
+    }
+
+    /**
      * مبالغ پرداخت و اعتبار باید تومان کامل باشند (بدون ریال اعشاری).
      */
     public static function roundToman(float $amount): float

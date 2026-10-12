@@ -52,11 +52,37 @@ class ThreedMenuService
                 'name' => $material->name,
                 'image_url' => $path ? Storage::url($path) : null,
                 'is_removable' => $hasRemovable ? (bool) $line->is_removable : false,
-                'price' => (float) PriceTools::roundToman($salePrice * $share),
+                // نمایش منو: رند به دو صفر (مثلاً ۱۸۵۴۳ → ۱۸۵۰۰)
+                'price' => (float) PriceTools::roundToHundred($salePrice * $share),
             ];
         }
 
         return $rows;
+    }
+
+    /**
+     * برچسب فارسی حذف/اضافه برای فاکتور و فیش.
+     */
+    public static function customizationLabelFromItem($line): string
+    {
+        $removed = array_values(array_filter((array) ($line->removed_ingredients ?? []), 'is_array'));
+        $extra = array_values(array_filter((array) ($line->extra_ingredients ?? []), 'is_array'));
+        $removedNames = array_values(array_filter(array_map(function ($row) {
+            return trim((string) ($row['name'] ?? ''));
+        }, $removed)));
+        $extraNames = array_values(array_filter(array_map(function ($row) {
+            return trim((string) ($row['name'] ?? ''));
+        }, $extra)));
+
+        $parts = [];
+        if ($removedNames) {
+            $parts[] = 'بدون: '.implode('، ', $removedNames);
+        }
+        if ($extraNames) {
+            $parts[] = 'اضافه: '.implode('، ', $extraNames);
+        }
+
+        return $parts ? implode(' · ', $parts) : '';
     }
 
     /**
