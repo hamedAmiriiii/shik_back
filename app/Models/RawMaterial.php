@@ -18,11 +18,23 @@ class RawMaterial extends Model
         'unit_type',
         'sale_price',
         'note',
+        'layer_image_path',
     ];
 
     protected $appends = [
         'unit_type',
+        'layer_image_url',
     ];
+
+    public function getLayerImageUrlAttribute(): ?string
+    {
+        $path = $this->attributes['layer_image_path'] ?? null;
+        if (! $path) {
+            return null;
+        }
+
+        return \Illuminate\Support\Facades\Storage::url($path);
+    }
 
     public function getUnitTypeAttribute(): string
     {

@@ -208,6 +208,89 @@ class RawMaterialController extends Controller
         return response($fifo->attachStock($rawMaterial->load($this->lotRelations())), 200);
     }
 
+    /**
+     * عکس لایه (PNG شفاف، نمای کنار) برای منوی سه‌بعدی.
+     * POST /api/raw-materials/{rawMaterial}/layer-image
+     */
+    public function uploadLayerImage(Request $request, RawMaterial $rawMaterial, RawMaterialFifoService $fifo)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $rawMaterial);
+
+        if (! Schema::hasColumn('raw_materials', 'layer_image_path')) {
+            return response()->json([
+                'message' => 'ستون layer_image_path وجود ندارد. migration یا SQL منوی سه‌بعدی را اجرا کنید.',
+            ], 503);
+        }
+
+        $ext = 'png';
+        $content = null;
+
+        if ($request->hasFile('image')) {
+            $file = $request->file('image');
+            $mime = (string) $file->getMimeType();
+            if (! in_array($mime, ['image/png', 'image/webp'], true)) {
+                return response()->json(['message' => 'عکس لایه باید PNG یا WebP با پس‌زمینهٔ شفاف باشد.'], 422);
+            }
+            $ext = $mime === 'image/webp' ? 'webp' : 'png';
+            $content = file_get_contents($file->getRealPath());
+        } else {
+            $raw = (string) $request->input('image_base64', $request->input('image', ''));
+            if ($raw === '') {
+                return response()->json(['message' => 'فایل عکس را ارسال کنید.'], 422);
+            }
+            if (strpos($raw, ',') !== false) {
+                $header = strtolower(strstr($raw, ',', true) ?: '');
+                $raw = substr($raw, strpos($raw, ',') + 1);
+                if (strpos($header, 'webp') !== false) {
+                    $ext = 'webp';
+                } elseif (strpos($header, 'png') === false) {
+                    return response()->json(['message' => 'عکس لایه باید PNG یا WebP با پس‌زمینهٔ شفاف باشد.'], 422);
+                }
+            }
+            $content = base64_decode($raw, true);
+        }
+
+        if ($content === false || $content === null || $content === '') {
+            return response()->json(['message' => 'عکس نامعتبر است.'], 422);
+        }
+        if (strlen($content) > 3 * 1024 * 1024) {
+            return response()->json(['message' => 'حجم عکس لایه نباید بیشتر از ۳ مگابایت باشد.'], 422);
+        }
+
+        $this->removeLayerImageFile($rawMaterial);
+
+        $path = \App\Tools\ImageTools::saveFile(
+            "/raw-materials/{$rawMaterial->id}/layer_".time().".{$ext}",
+            $content
+        );
+        $rawMaterial->update(['layer_image_path' => $path]);
+
+        return response($fifo->attachStock($rawMaterial->fresh()->load($this->lotRelations())), 200);
+    }
+
+    /**
+     * DELETE /api/raw-materials/{rawMaterial}/layer-image
+     */
+    public function deleteLayerImage(Request $request, RawMaterial $rawMaterial, RawMaterialFifoService $fifo)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $rawMaterial);
+
+        if (Schema::hasColumn('raw_materials', 'layer_image_path')) {
+            $this->removeLayerImageFile($rawMaterial);
+            $rawMaterial->update(['layer_image_path' => null]);
+        }
+
+        return response($fifo->attachStock($rawMaterial->fresh()->load($this->lotRelations())), 200);
+    }
+
+    private function removeLayerImageFile(RawMaterial $rawMaterial): void
+    {
+        $path = $rawMaterial->getAttributes()['layer_image_path'] ?? null;
+        if ($path && \Illuminate\Support\Facades\Storage::exists('public/'.$path)) {
+            \Illuminate\Support\Facades\Storage::delete('public/'.$path);
+        }
+    }
+
     public function destroy(Request $request, RawMaterial $rawMaterial)
     {
         $this->assertModelBelongsToStaffAtelier($request, $rawMaterial);

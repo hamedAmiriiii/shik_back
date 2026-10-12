@@ -21,7 +21,7 @@ class ReservMenuTheme
 
     public const DEFAULT_THEME = 'classic';
 
-    public const THEMES = ['classic', 'list', 'showcase', 'grid', 'cover', 'motion', 'video'];
+    public const THEMES = ['classic', 'list', 'showcase', 'grid', 'cover', 'motion', 'video', 'threed'];
 
     public const MANAGED_KEYS = [self::BG_MEDIA_KEY, self::BG_MEDIA_TYPE_KEY, self::ICON_MEDIA_KEY];
 

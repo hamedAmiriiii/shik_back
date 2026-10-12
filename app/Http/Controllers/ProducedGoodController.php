@@ -109,6 +109,9 @@ class ProducedGoodController extends Controller
             }
             $good = ProducedGood::create($payload);
             $this->syncIngredients($good, $fields['ingredients'] ?? []);
+            if (array_key_exists('layer_order', $fields)) {
+                $this->syncLayerOrder($good, $fields['layer_order']);
+            }
             $this->syncCategories($good, $fields['category_ids'] ?? [], $atelierId);
 
             return $good;
@@ -184,6 +187,13 @@ class ProducedGoodController extends Controller
 
             if (array_key_exists('ingredients', $fields)) {
                 $this->syncIngredients($producedGood, $fields['ingredients']);
+            }
+            if (array_key_exists('layer_order', $fields) || array_key_exists('ingredients', $fields)) {
+                // با تغییر فرمول، لایه‌های موادِ حذف‌شده هم پاک می‌شوند.
+                $this->syncLayerOrder(
+                    $producedGood,
+                    array_key_exists('layer_order', $fields) ? $fields['layer_order'] : ($producedGood->layer_order ?? [])
+                );
             }
             if (array_key_exists('category_ids', $fields)) {
                 $this->syncCategories($producedGood, $fields['category_ids'] ?? [], (int) $producedGood->atelier_id);
@@ -349,6 +359,9 @@ class ProducedGoodController extends Controller
             'ingredients' => $ingredientsRule,
             'ingredients.*.raw_material_id' => 'required|integer',
             'ingredients.*.grams_per_kg' => 'required|numeric|min:0.001',
+            'ingredients.*.is_removable' => 'sometimes|boolean',
+            'layer_order' => 'sometimes|nullable|array|max:40',
+            'layer_order.*' => 'integer',
             'category_ids' => 'nullable|array',
             'category_ids.*' => 'integer|exists:categories,id',
         ]);
@@ -466,12 +479,45 @@ class ProducedGoodController extends Controller
     {
         $good->ingredients()->delete();
 
+        $hasRemovable = Schema::hasColumn('produced_good_ingredients', 'is_removable');
+
         foreach ($ingredients as $row) {
-            $good->ingredients()->create([
+            $payload = [
                 'raw_material_id' => $row['raw_material_id'],
                 'grams_per_kg' => $row['grams_per_kg'],
-            ]);
+            ];
+            if ($hasRemovable) {
+                $payload['is_removable'] = ! empty($row['is_removable']);
+            }
+            $good->ingredients()->create($payload);
         }
+    }
+
+    /**
+     * ترتیب لایه‌های عکس (بالا به پایین). هر ماده می‌تواند چند بار بیاید؛ فقط مواد فرمول مجازند.
+     *
+     * @param  array<int, int|string>|null  $layerOrder
+     */
+    private function syncLayerOrder(ProducedGood $good, ?array $layerOrder): void
+    {
+        if (! Schema::hasColumn('produced_goods', 'layer_order')) {
+            return;
+        }
+
+        $allowed = $good->ingredients()->pluck('raw_material_id')->map(function ($id) {
+            return (int) $id;
+        })->all();
+
+        $clean = [];
+        foreach ((array) $layerOrder as $id) {
+            $id = (int) $id;
+            if (in_array($id, $allowed, true)) {
+                $clean[] = $id;
+            }
+        }
+
+        $good->layer_order = $clean === [] ? null : $clean;
+        $good->save();
     }
 
     private function syncCategories(ProducedGood $good, array $categoryIds, int $atelierId): void

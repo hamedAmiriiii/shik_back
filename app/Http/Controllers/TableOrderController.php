@@ -16,6 +16,7 @@ use App\Tools\ImageTools;
 use App\Tools\PhoneTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
@@ -61,6 +62,8 @@ class TableOrderController extends Controller
             'products.*.quantity' => 'required|numeric|min:0.001',
             'products.*.size' => 'nullable|string|max:100',
             'products.*.color' => 'nullable|string|max:100',
+            'products.*.removed_ingredient_ids' => 'nullable|array|max:40',
+            'products.*.removed_ingredient_ids.*' => 'integer',
             'note' => 'nullable|string|max:500',
             'kind' => 'nullable|string|in:table,room,میز,اتاق',
         ]);
@@ -82,6 +85,7 @@ class TableOrderController extends Controller
         foreach ($request->input('products', []) as $item) {
             $row = array_intersect_key((array) $item, array_flip([
                 'product_id', 'produced_good_id', 'raw_material_id', 'item_type', 'quantity', 'size', 'color',
+                'removed_ingredient_ids',
             ]));
             $isCatalogLine = ! empty($row['produced_good_id']) || ! empty($row['raw_material_id'])
                 || in_array($row['item_type'] ?? null, ['produced_good', 'raw_material'], true);
@@ -96,6 +100,28 @@ class TableOrderController extends Controller
             $posSale->assertStock($prepared);
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        // منوی سه‌بعدی: مواد برداشته‌شده از کالای تولیدی؛ قیمت سمت سرور کم می‌شود.
+        $threed = app(\App\Services\ThreedMenuService::class);
+        $hasRemovedColumn = Schema::hasColumn('table_order_items', 'removed_ingredients');
+        foreach ($prepared as $i => $line) {
+            $removedIds = (array) ($guestRows[$i]['removed_ingredient_ids'] ?? []);
+            if ($removedIds === [] || ($line['kind'] ?? null) !== ShopPosSaleService::KIND_PRODUCED_GOOD) {
+                continue;
+            }
+            if (! $hasRemovedColumn) {
+                return response()->json(['message' => 'حذف مواد از سفارش هنوز فعال نیست.'], 422);
+            }
+            $result = $threed->resolveRemoval($line['model'], $removedIds);
+            if ($result['removed'] === []) {
+                continue;
+            }
+            $prepared[$i]['sale_price'] = \App\Tools\PriceTools::roundSalePrice(
+                max(0, (float) $line['sale_price'] - $result['discount']),
+                $atelierId
+            );
+            $prepared[$i]['removed_ingredients'] = $result['removed'];
         }
 
         $shopTable = ShopTable::resolveFor(
@@ -161,6 +187,9 @@ class TableOrderController extends Controller
                     $attrs['produced_good_id'] = $line['produced_good_id'];
                     $attrs['raw_material_id'] = $line['raw_material_id'];
                     $attrs['item_name'] = $line['item_name'];
+                }
+                if (! empty($line['removed_ingredients'])) {
+                    $attrs['removed_ingredients'] = $line['removed_ingredients'];
                 }
                 TableOrderItem::create($attrs);
             }

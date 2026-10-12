@@ -1636,7 +1636,7 @@ class ProductController extends Controller
         $purchasePrice = (float) ($good->cost_per_kg ?? 0);
         $unitProfit = $salePrice - $purchasePrice;
 
-        return [
+        return array_merge($this->threedMenuFields($good), [
             'id' => $good->id,
             'item_type' => 'produced_good',
             'produced_good_id' => $good->id,
@@ -1664,7 +1664,21 @@ class ProductController extends Controller
             'categories' => Schema::hasTable('category_produced_good') ? ($good->categories ?? []) : [],
             'atelier_id' => $good->atelier_id,
             'note' => $good->note,
-        ];
+        ]);
+    }
+
+    /**
+     * مواد و لایه‌های عکس برای تم «منو سه‌بعدی».
+     *
+     * @return array<string, mixed>
+     */
+    private function threedMenuFields(ProducedGood $good): array
+    {
+        try {
+            return app(\App\Services\ThreedMenuService::class)->catalogFields($good);
+        } catch (\Throwable $e) {
+            return ['ingredients' => [], 'layers' => []];
+        }
     }
 
     private function resolveShopProducedGood(Request $request, $id): ?ProducedGood

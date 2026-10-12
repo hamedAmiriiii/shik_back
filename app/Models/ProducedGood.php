@@ -25,9 +25,11 @@ class ProducedGood extends Model
         'markup_percent',
         'round_sale_price',
         'note',
+        'layer_order',
     ];
 
     protected $casts = [
+        'layer_order' => 'array',
         'sale_price' => 'decimal:2',
         'original_sale_price' => 'decimal:2',
         'markup_percent' => 'decimal:2',
