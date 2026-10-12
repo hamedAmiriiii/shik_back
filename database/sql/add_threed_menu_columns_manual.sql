@@ -8,3 +8,5 @@ ALTER TABLE `produced_goods` ADD COLUMN `layer_order` TEXT NULL;
 ALTER TABLE `produced_good_ingredients` ADD COLUMN `is_removable` TINYINT(1) NOT NULL DEFAULT 0;
 
 ALTER TABLE `table_order_items` ADD COLUMN `removed_ingredients` TEXT NULL;
+
+ALTER TABLE `table_order_items` ADD COLUMN `extra_ingredients` TEXT NULL;

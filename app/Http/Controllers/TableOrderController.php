@@ -64,6 +64,8 @@ class TableOrderController extends Controller
             'products.*.color' => 'nullable|string|max:100',
             'products.*.removed_ingredient_ids' => 'nullable|array|max:40',
             'products.*.removed_ingredient_ids.*' => 'integer',
+            'products.*.extra_ingredient_ids' => 'nullable|array|max:40',
+            'products.*.extra_ingredient_ids.*' => 'integer',
             'note' => 'nullable|string|max:500',
             'kind' => 'nullable|string|in:table,room,میز,اتاق',
         ]);
@@ -85,7 +87,7 @@ class TableOrderController extends Controller
         foreach ($request->input('products', []) as $item) {
             $row = array_intersect_key((array) $item, array_flip([
                 'product_id', 'produced_good_id', 'raw_material_id', 'item_type', 'quantity', 'size', 'color',
-                'removed_ingredient_ids',
+                'removed_ingredient_ids', 'extra_ingredient_ids',
             ]));
             $isCatalogLine = ! empty($row['produced_good_id']) || ! empty($row['raw_material_id'])
                 || in_array($row['item_type'] ?? null, ['produced_good', 'raw_material'], true);
@@ -102,26 +104,33 @@ class TableOrderController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        // منوی سه‌بعدی: مواد برداشته‌شده از کالای تولیدی؛ قیمت سمت سرور کم می‌شود.
+        // منوی سه‌بعدی: حذف/اضافه ماده؛ قیمت سمت سرور محاسبه می‌شود.
         $threed = app(\App\Services\ThreedMenuService::class);
         $hasRemovedColumn = Schema::hasColumn('table_order_items', 'removed_ingredients');
+        $hasExtraColumn = Schema::hasColumn('table_order_items', 'extra_ingredients');
         foreach ($prepared as $i => $line) {
             $removedIds = (array) ($guestRows[$i]['removed_ingredient_ids'] ?? []);
-            if ($removedIds === [] || ($line['kind'] ?? null) !== ShopPosSaleService::KIND_PRODUCED_GOOD) {
+            $extraIds = (array) ($guestRows[$i]['extra_ingredient_ids'] ?? []);
+            if (($removedIds === [] && $extraIds === []) || ($line['kind'] ?? null) !== ShopPosSaleService::KIND_PRODUCED_GOOD) {
                 continue;
             }
-            if (! $hasRemovedColumn) {
-                return response()->json(['message' => 'حذف مواد از سفارش هنوز فعال نیست.'], 422);
+            if (($removedIds !== [] && ! $hasRemovedColumn) || ($extraIds !== [] && ! $hasExtraColumn)) {
+                return response()->json(['message' => 'سفارشی‌سازی مواد هنوز فعال نیست.'], 422);
             }
-            $result = $threed->resolveRemoval($line['model'], $removedIds);
-            if ($result['removed'] === []) {
+            $result = $threed->resolveCustomization($line['model'], $removedIds, $extraIds);
+            if ($result['removed'] === [] && $result['extra'] === []) {
                 continue;
             }
             $prepared[$i]['sale_price'] = \App\Tools\PriceTools::roundSalePrice(
-                max(0, (float) $line['sale_price'] - $result['discount']),
+                max(0, (float) $line['sale_price'] - $result['discount'] + $result['surcharge']),
                 $atelierId
             );
-            $prepared[$i]['removed_ingredients'] = $result['removed'];
+            if ($result['removed'] !== []) {
+                $prepared[$i]['removed_ingredients'] = $result['removed'];
+            }
+            if ($result['extra'] !== []) {
+                $prepared[$i]['extra_ingredients'] = $result['extra'];
+            }
         }
 
         $shopTable = ShopTable::resolveFor(
@@ -190,6 +199,9 @@ class TableOrderController extends Controller
                 }
                 if (! empty($line['removed_ingredients'])) {
                     $attrs['removed_ingredients'] = $line['removed_ingredients'];
+                }
+                if (! empty($line['extra_ingredients'])) {
+                    $attrs['extra_ingredients'] = $line['extra_ingredients'];
                 }
                 TableOrderItem::create($attrs);
             }

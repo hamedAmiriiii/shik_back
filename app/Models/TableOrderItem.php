@@ -20,10 +20,12 @@ class TableOrderItem extends Model
         'size',
         'color',
         'removed_ingredients',
+        'extra_ingredients',
     ];
 
     protected $casts = [
         'removed_ingredients' => 'array',
+        'extra_ingredients' => 'array',
         'quantity' => 'decimal:3',
         'purchase_price' => 'decimal:2',
         'sale_price' => 'decimal:2',

@@ -35,6 +35,12 @@ class AddThreedMenuColumns extends Migration
                 $table->text('removed_ingredients')->nullable();
             });
         }
+
+        if (Schema::hasTable('table_order_items') && ! Schema::hasColumn('table_order_items', 'extra_ingredients')) {
+            Schema::table('table_order_items', function (Blueprint $table) {
+                $table->text('extra_ingredients')->nullable();
+            });
+        }
     }
 
     public function down()
@@ -57,6 +63,11 @@ class AddThreedMenuColumns extends Migration
         if (Schema::hasColumn('table_order_items', 'removed_ingredients')) {
             Schema::table('table_order_items', function (Blueprint $table) {
                 $table->dropColumn('removed_ingredients');
+            });
+        }
+        if (Schema::hasColumn('table_order_items', 'extra_ingredients')) {
+            Schema::table('table_order_items', function (Blueprint $table) {
+                $table->dropColumn('extra_ingredients');
             });
         }
     }

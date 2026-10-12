@@ -278,14 +278,26 @@ class TableOrder extends Model
 
         $items = $this->items->map(function (TableOrderItem $line) {
             $removed = array_values(array_filter((array) ($line->removed_ingredients ?? []), 'is_array'));
+            $extra = array_values(array_filter((array) ($line->extra_ingredients ?? []), 'is_array'));
             $removedNames = array_values(array_filter(array_map(function ($row) {
                 return trim((string) ($row['name'] ?? ''));
             }, $removed)));
+            $extraNames = array_values(array_filter(array_map(function ($row) {
+                return trim((string) ($row['name'] ?? ''));
+            }, $extra)));
+            $noteParts = [];
+            if ($removedNames) {
+                $noteParts[] = 'بدون: '.implode('، ', $removedNames);
+            }
+            if ($extraNames) {
+                $noteParts[] = 'اضافه: '.implode('، ', $extraNames);
+            }
 
             return [
                 'removed_ingredients' => $removed,
+                'extra_ingredients' => $extra,
                 // چاپ رسید و نمایش‌های قدیمی از note قلم استفاده می‌کنند.
-                'note' => $removedNames ? 'بدون: '.implode('، ', $removedNames) : null,
+                'note' => $noteParts ? implode(' · ', $noteParts) : null,
                 'id' => $line->id,
                 'product_id' => $line->product_id,
                 'produced_good_id' => $line->produced_good_id ?? null,

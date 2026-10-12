@@ -112,36 +112,72 @@ class ThreedMenuService
     }
 
     /**
-     * مواد حذف‌شدهٔ معتبر و مبلغ کسر شده (سمت سرور، بدون اعتماد به قیمت مشتری).
+     * مواد حذف‌شده / اضافه‌شده و تغییر قیمت (سمت سرور، بدون اعتماد به قیمت مشتری).
+     * هر ماده حداکثر یک واحد اضافه می‌شود؛ مادهٔ حذف‌شده نمی‌تواند همزمان اضافه باشد.
+     *
+     * @param  array<int, int|string>  $removedIds
+     * @param  array<int, int|string>  $extraIds
+     * @return array{
+     *   removed: array<int, array<string, mixed>>,
+     *   extra: array<int, array<string, mixed>>,
+     *   discount: float,
+     *   surcharge: float
+     * }
+     */
+    public function resolveCustomization(ProducedGood $good, array $removedIds = [], array $extraIds = []): array
+    {
+        $wantedRemoved = array_values(array_unique(array_map('intval', $removedIds)));
+        $wantedExtra = array_values(array_unique(array_map('intval', $extraIds)));
+        // حذف و اضافه هم‌زمان برای یک ماده بی‌معناست
+        $wantedExtra = array_values(array_diff($wantedExtra, $wantedRemoved));
+
+        if ($wantedRemoved === [] && $wantedExtra === []) {
+            return ['removed' => [], 'extra' => [], 'discount' => 0.0, 'surcharge' => 0.0];
+        }
+
+        app(ProducedGoodCostService::class)->attachCost($good, 1.0, true);
+
+        $removed = [];
+        $extra = [];
+        $discount = 0.0;
+        $surcharge = 0.0;
+
+        foreach ($this->ingredients($good) as $row) {
+            $id = (int) $row['raw_material_id'];
+            $payload = [
+                'raw_material_id' => $id,
+                'name' => $row['name'],
+                'price' => $row['price'],
+            ];
+            if ($row['is_removable'] && in_array($id, $wantedRemoved, true)) {
+                $removed[] = $payload;
+                $discount += (float) $row['price'];
+            } elseif (in_array($id, $wantedExtra, true)) {
+                $extra[] = $payload;
+                $surcharge += (float) $row['price'];
+            }
+        }
+
+        $discount = min($discount, max(0, (float) $good->sale_price));
+
+        return [
+            'removed' => $removed,
+            'extra' => $extra,
+            'discount' => $discount,
+            'surcharge' => $surcharge,
+        ];
+    }
+
+    /**
+     * @deprecated از resolveCustomization استفاده کنید.
      *
      * @param  array<int, int|string>  $removedIds
      * @return array{removed: array<int, array<string, mixed>>, discount: float}
      */
     public function resolveRemoval(ProducedGood $good, array $removedIds): array
     {
-        $wanted = array_values(array_unique(array_map('intval', $removedIds)));
-        if ($wanted === []) {
-            return ['removed' => [], 'discount' => 0.0];
-        }
+        $result = $this->resolveCustomization($good, $removedIds, []);
 
-        app(ProducedGoodCostService::class)->attachCost($good, 1.0, true);
-
-        $removed = [];
-        $discount = 0.0;
-        foreach ($this->ingredients($good) as $row) {
-            if (! $row['is_removable'] || ! in_array($row['raw_material_id'], $wanted, true)) {
-                continue;
-            }
-            $removed[] = [
-                'raw_material_id' => $row['raw_material_id'],
-                'name' => $row['name'],
-                'price' => $row['price'],
-            ];
-            $discount += (float) $row['price'];
-        }
-
-        $discount = min($discount, max(0, (float) $good->sale_price));
-
-        return ['removed' => $removed, 'discount' => $discount];
+        return ['removed' => $result['removed'], 'discount' => $result['discount']];
     }
 }
