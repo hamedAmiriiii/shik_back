@@ -15,6 +15,12 @@ class ProducedGood extends Model
 
     public const UNIT_PIECE = 'piece';
 
+    /** لایه‌ها مثل ساندویچ از نمای کنار روی هم می‌نشینند */
+    public const LAYER_COMPOSE_SIDE = 'side';
+
+    /** لایه‌ها مثل پیتزا از نمای بالا دقیقاً روی هم می‌افتند */
+    public const LAYER_COMPOSE_OVERLAY = 'overlay';
+
     protected $fillable = [
         'atelier_id',
         'name',
@@ -26,6 +32,7 @@ class ProducedGood extends Model
         'round_sale_price',
         'note',
         'layer_order',
+        'layer_compose',
     ];
 
     protected $casts = [
@@ -36,6 +43,20 @@ class ProducedGood extends Model
         'round_sale_price' => 'boolean',
         'display_order' => 'integer',
     ];
+
+    public static function layerComposeModes(): array
+    {
+        return [self::LAYER_COMPOSE_SIDE, self::LAYER_COMPOSE_OVERLAY];
+    }
+
+    public function layerCompose(): string
+    {
+        $mode = (string) ($this->getAttributes()['layer_compose'] ?? self::LAYER_COMPOSE_SIDE);
+
+        return in_array($mode, self::layerComposeModes(), true)
+            ? $mode
+            : self::LAYER_COMPOSE_SIDE;
+    }
 
     protected $appends = [
         'sale_price_mode',

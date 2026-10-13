@@ -107,6 +107,9 @@ class ProducedGoodController extends Controller
             if ($hasUnitColumn) {
                 $payload['unit_type'] = $unitType;
             }
+            if (Schema::hasColumn('produced_goods', 'layer_compose')) {
+                $payload['layer_compose'] = $this->normalizedLayerCompose($fields['layer_compose'] ?? null);
+            }
             $good = ProducedGood::create($payload);
             $this->syncIngredients($good, $fields['ingredients'] ?? []);
             if (array_key_exists('layer_order', $fields)) {
@@ -175,6 +178,9 @@ class ProducedGoodController extends Controller
             }
             if (array_key_exists('round_sale_price', $fields)) {
                 $payload['round_sale_price'] = $this->boolField($fields, 'round_sale_price', false);
+            }
+            if (array_key_exists('layer_compose', $fields) && Schema::hasColumn('produced_goods', 'layer_compose')) {
+                $payload['layer_compose'] = $this->normalizedLayerCompose($fields['layer_compose']);
             }
             if (array_key_exists('markup_percent', $fields) || array_key_exists('sale_price', $fields)) {
                 $pricing = $this->pricingFromFields($fields, $producedGood, (int) $producedGood->atelier_id);
@@ -362,9 +368,22 @@ class ProducedGoodController extends Controller
             'ingredients.*.is_removable' => 'sometimes|boolean',
             'layer_order' => 'sometimes|nullable|array|max:40',
             'layer_order.*' => 'integer',
+            'layer_compose' => ['sometimes', 'nullable', Rule::in(ProducedGood::layerComposeModes())],
             'category_ids' => 'nullable|array',
             'category_ids.*' => 'integer|exists:categories,id',
         ]);
+    }
+
+    /**
+     * @param  mixed  $value
+     */
+    private function normalizedLayerCompose($value): string
+    {
+        $mode = is_string($value) ? trim($value) : '';
+
+        return in_array($mode, ProducedGood::layerComposeModes(), true)
+            ? $mode
+            : ProducedGood::LAYER_COMPOSE_SIDE;
     }
 
     /**

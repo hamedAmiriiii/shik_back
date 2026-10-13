@@ -134,6 +134,9 @@ class ThreedMenuService
         return [
             'ingredients' => $ingredients,
             'layers' => $this->layers($good, $ingredients),
+            'layer_compose' => Schema::hasColumn('produced_goods', 'layer_compose')
+                ? $good->layerCompose()
+                : ProducedGood::LAYER_COMPOSE_SIDE,
         ];
     }
 

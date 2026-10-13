@@ -1677,7 +1677,11 @@ class ProductController extends Controller
         try {
             return app(\App\Services\ThreedMenuService::class)->catalogFields($good);
         } catch (\Throwable $e) {
-            return ['ingredients' => [], 'layers' => []];
+            return [
+                'ingredients' => [],
+                'layers' => [],
+                'layer_compose' => \App\Models\ProducedGood::LAYER_COMPOSE_SIDE,
+            ];
         }
     }
 
