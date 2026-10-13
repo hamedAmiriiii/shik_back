@@ -24,6 +24,8 @@ class AccountingVoucher extends Model
 
     public const SOURCE_CHEQUE_CLEAR = 'cheque_clear';
 
+    public const SOURCE_CHEQUE_TRANSFER = 'cheque_transfer';
+
     public const SOURCE_RECON_DEPOSIT = 'recon_deposit';
 
     public const SOURCE_ACCOUNT_TRANSFER = 'account_transfer';

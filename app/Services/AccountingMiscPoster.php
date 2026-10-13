@@ -140,6 +140,68 @@ class AccountingMiscPoster
         );
     }
 
+    /**
+     * ظهرنویسی چک دریافتی بابت بدهی: بدهکار حساب پرداختنی / بستانکار چک دریافتنی — بدون حرکت نقد.
+     */
+    public static function postChequeTransfer(Cheque $cheque, string $documentLabel): ?AccountingVoucher
+    {
+        $atelierId = (int) $cheque->atelier_id;
+        $amount = round((float) $cheque->amount, 2);
+        if (
+            $atelierId <= 0
+            || $amount < 0.01
+            || $cheque->type !== Cheque::TYPE_RECEIVED
+            || $cheque->status !== Cheque::STATUS_TRANSFERRED
+            || ! AccountingLedger::ready()
+        ) {
+            return null;
+        }
+
+        try {
+            return AccountingVoucherService::post(
+                $atelierId,
+                AccountingLedger::eventDate($cheque->transferred_at ?: now()),
+                'ظهرنویسی چک #'.$cheque->id.' — '.$documentLabel,
+                AccountingVoucher::SOURCE_CHEQUE_TRANSFER,
+                (int) $cheque->id,
+                [
+                    [
+                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AP),
+                        'debit' => $amount,
+                        'credit' => 0,
+                        'description' => 'بستن بدهی با ظهرنویسی چک',
+                    ],
+                    [
+                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_CHEQUE_RECEIVABLE),
+                        'debit' => 0,
+                        'credit' => $amount,
+                        'description' => 'خروج چک دریافتنی (ظهرنویسی)',
+                    ],
+                ]
+            );
+        } catch (RuntimeException $e) {
+            Log::error('سند ظهرنویسی چک ثبت نشد', [
+                'cheque_id' => $cheque->id,
+                'message' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    public static function reverseChequeTransfer(Cheque $cheque): void
+    {
+        $atelierId = (int) $cheque->atelier_id;
+        if ($atelierId <= 0 || ! AccountingLedger::ready()) {
+            return;
+        }
+
+        AccountingVoucherService::reversePostedIfAny(
+            $atelierId,
+            AccountingVoucher::SOURCE_CHEQUE_TRANSFER,
+            (int) $cheque->id
+        );
+    }
+
     public static function postManualTrade(ManualTrade $trade): ?AccountingVoucher
     {
         $atelierId = (int) $trade->atelier_id;

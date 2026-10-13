@@ -328,10 +328,12 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::post('proforma-invoices', [\App\Http\Controllers\ProformaInvoiceController::class, 'store']);
     Route::delete('proforma-invoices/{proformaInvoice}', [\App\Http\Controllers\ProformaInvoiceController::class, 'destroy']);
 
-    // چک‌ها (صادره / دریافتی) — وصول دستی: هزینه یا درآمد
+    // چک‌ها (صادره / دریافتی) — وصول دستی / ظهرنویسی بابت بدهی
     Route::get('cheques/upcoming', [\App\Http\Controllers\ChequeController::class, 'upcoming']);
     Route::post('cheques/{cheque}/clear', [\App\Http\Controllers\ChequeController::class, 'clear']);
     Route::post('cheques/{cheque}/unclear', [\App\Http\Controllers\ChequeController::class, 'unclear']);
+    Route::post('cheques/{cheque}/transfer', [\App\Http\Controllers\ChequeController::class, 'transfer']);
+    Route::post('cheques/{cheque}/untransfer', [\App\Http\Controllers\ChequeController::class, 'untransfer']);
     Route::resource('cheques', \App\Http\Controllers\ChequeController::class)->except(['create', 'edit']);
     Route::get('pos-catalog', [\App\Http\Controllers\PosCatalogController::class, 'index']);
     Route::resource('raw-materials', \App\Http\Controllers\RawMaterialController::class)->except(['create', 'edit']);

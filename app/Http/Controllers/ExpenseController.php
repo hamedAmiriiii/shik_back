@@ -171,6 +171,15 @@ class ExpenseController extends Controller
         }
 
         $expenses = $query->paginate();
+
+        $needBreakdown = $request->boolean('with_payment_breakdown')
+            || in_array($request->input('payment_status'), ['unpaid', 'partial'], true);
+        if ($needBreakdown && DocumentPaymentService::supportsSplits()) {
+            $expenses->getCollection()->transform(function (Expense $expense) {
+                return $this->withAccount($expense);
+            });
+        }
+
         return response($expenses, 200);
     }
 

@@ -27,6 +27,7 @@ class AccountingOperationReversalService
             AccountingVoucher::SOURCE_DEBT_PAYMENT => 'برگشت پرداخت نسیه',
             AccountingVoucher::SOURCE_DEBT_SETTLE => 'برگشت تسویه نسیه',
             AccountingVoucher::SOURCE_CHEQUE_CLEAR => 'برگشت وصول چک',
+            AccountingVoucher::SOURCE_CHEQUE_TRANSFER => 'برگشت ظهرنویسی چک',
         ];
     }
 
@@ -94,6 +95,15 @@ class AccountingOperationReversalService
                 return $reverted->type === Cheque::TYPE_RECEIVED
                     ? 'وصول چک دریافتی برگشت خورد و چک به «در انتظار وصول» برگشت.'
                     : 'وصول چک صادره برگشت خورد و چک به «در انتظار وصول» برگشت.';
+
+            case AccountingVoucher::SOURCE_CHEQUE_TRANSFER:
+                $cheque = Cheque::query()->where('id', $sourceId)->where('atelier_id', $atelierId)->first();
+                if (! $cheque) {
+                    throw new RuntimeException('چک مربوط به این سند یافت نشد.');
+                }
+                $cheque->untransfer();
+
+                return 'ظهرنویسی چک برگشت خورد؛ بدهی سند دوباره باز و چک به «در انتظار وصول» برگشت.';
         }
 
         throw new RuntimeException('این سند قابل برگشت نیست.');

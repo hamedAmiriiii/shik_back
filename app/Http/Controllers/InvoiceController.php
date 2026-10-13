@@ -149,6 +149,14 @@ class InvoiceController extends Controller
         $invoices = $query->paginate($perPage, ['*'], 'page', $page);
         $invoices->appends($request->except('page'));
 
+        $needBreakdown = $request->boolean('with_payment_breakdown')
+            || in_array($request->input('payment_status'), ['unpaid', 'partial'], true);
+        if ($needBreakdown && DocumentPaymentService::supportsSplits()) {
+            $invoices->getCollection()->transform(function (Invoice $invoice) {
+                return $this->withDetails($invoice);
+            });
+        }
+
         $invoicesArray = $invoices->toArray();
         $invoicesArray['total_amount'] = (float) $totalAmount;
 

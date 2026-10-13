@@ -33,6 +33,7 @@ class ChequeController extends Controller
             Cheque::STATUS_PENDING,
             Cheque::STATUS_CLEARED,
             Cheque::STATUS_CANCELLED,
+            Cheque::STATUS_TRANSFERRED,
         ], true)) {
             $query->where('status', $request->input('status'));
         }
@@ -41,6 +42,17 @@ class ChequeController extends Controller
             $query->where('type', Cheque::TYPE_RECEIVED)
                 ->where('status', Cheque::STATUS_PENDING)
                 ->whereNull('purchase_id');
+        }
+
+        if ($request->boolean('available_for_transfer')) {
+            $query->where('type', Cheque::TYPE_RECEIVED)
+                ->where('status', Cheque::STATUS_PENDING);
+            if ($request->filled('max_amount')) {
+                $maxAmount = (float) $request->input('max_amount');
+                if ($maxAmount > 0) {
+                    $query->where('amount', '<=', $maxAmount);
+                }
+            }
         }
 
         if ($request->filled('cheque_number')) {
@@ -304,6 +316,54 @@ class ChequeController extends Controller
         ], 200);
     }
 
+    /**
+     * ظهرنویسی چک دریافتی بابت بدهی فاکتور خرید یا هزینه — بدون حرکت صندوق.
+     * POST /api/cheques/{cheque}/transfer
+     * body: invoice_id یا expense_id (یکی)، beneficiary_id و note اختیاری
+     */
+    public function transfer(Request $request, Cheque $cheque)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $cheque);
+
+        $fields = $request->validate([
+            'invoice_id' => 'nullable|integer|exists:invoices,id',
+            'expense_id' => 'nullable|integer|exists:expenses,id',
+            'beneficiary_id' => 'nullable|integer|exists:user_shiksho,id',
+            'note' => 'nullable|string|max:1000',
+        ]);
+
+        try {
+            $transferred = $cheque->transfer($fields);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'message' => 'چک ظهرنویسی شد و بدهی سند بدون برداشت از صندوق تسویه شد.',
+            'cheque' => $transferred,
+        ], 200);
+    }
+
+    /**
+     * برگشت ظهرنویسی چک
+     * POST /api/cheques/{cheque}/untransfer
+     */
+    public function untransfer(Request $request, Cheque $cheque)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $cheque);
+
+        try {
+            $reverted = $cheque->untransfer();
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'message' => 'ظهرنویسی برگشت خورد؛ بدهی سند دوباره باز و چک در انتظار وصول است.',
+            'cheque' => $reverted,
+        ], 200);
+    }
+
     public function update(Request $request, Cheque $cheque)
     {
         $this->assertModelBelongsToStaffAtelier($request, $cheque);
@@ -374,6 +434,12 @@ class ChequeController extends Controller
         if ($cheque->status === Cheque::STATUS_CLEARED) {
             return response()->json([
                 'message' => 'چک وصول‌شده قابل حذف نیست.',
+            ], 422);
+        }
+
+        if ($cheque->status === Cheque::STATUS_TRANSFERRED) {
+            return response()->json([
+                'message' => 'چک ظهرنویسی‌شده قابل حذف نیست؛ ابتدا ظهرنویسی را برگشت دهید.',
             ], 422);
         }
 

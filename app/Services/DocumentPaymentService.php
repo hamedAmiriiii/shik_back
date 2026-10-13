@@ -775,6 +775,139 @@ class DocumentPaymentService
         return 0.0;
     }
 
+    /**
+     * تسویه نسیه با ظهرنویسی چک دریافتی — بدون برداشت از حساب نقد.
+     * مبلغ چک باید ≤ مانده نسیه باشد؛ کل مبلغ چک تسویه می‌شود.
+     *
+     * @return DocumentPayment ردیف پرداخت ایجادشده
+     */
+    public static function settleCreditWithReceivedCheque(Model $model, Cheque $cheque): DocumentPayment
+    {
+        if (! $model instanceof Expense && ! $model instanceof Invoice) {
+            throw new RuntimeException('این سند قابل تسویه با ظهرنویسی چک نیست.');
+        }
+        if ((int) $model->atelier_id !== (int) $cheque->atelier_id) {
+            throw new RuntimeException('چک و سند متعلق به یک فروشگاه نیستند.');
+        }
+        if ($cheque->type !== Cheque::TYPE_RECEIVED) {
+            throw new RuntimeException('فقط چک دریافتی قابل ظهرنویسی است.');
+        }
+        if ($cheque->status !== Cheque::STATUS_PENDING) {
+            throw new RuntimeException('فقط چک در انتظار وصول قابل ظهرنویسی است.');
+        }
+
+        $pay = round((float) $cheque->amount, 2);
+        if ($pay < 0.01) {
+            throw new RuntimeException('مبلغ چک نامعتبر است.');
+        }
+
+        if (! self::supportsSplits()) {
+            throw new RuntimeException('ظهرنویسی چک در این نسخه فعال نیست.');
+        }
+
+        // سند نسیهٔ قدیمی بدون ردیف document_payments
+        if (! $model->payments()->exists()
+            && ($model->payment_method ?? '') === self::METHOD_CREDIT
+            && ($model->payment_status ?? '') === self::STATUS_UNPAID
+        ) {
+            DocumentPayment::create([
+                'atelier_id' => (int) $model->atelier_id,
+                'invoice_id' => $model instanceof Invoice ? $model->id : null,
+                'expense_id' => $model instanceof Expense ? $model->id : null,
+                'method' => self::METHOD_CREDIT,
+                'amount' => round((float) $model->amount, 2),
+                'shop_account_id' => null,
+                'cheque_id' => null,
+                'settled' => false,
+                'sort_order' => 0,
+            ]);
+            $model->unsetRelation('payments');
+        }
+
+        $remaining = self::remainingCredit($model);
+        if ($remaining <= 0.001) {
+            throw new RuntimeException('بدهی نسیه برای این سند باقی نمانده است.');
+        }
+        if ($pay - $remaining > 0.001) {
+            throw new RuntimeException(
+                'مبلغ چک ('.number_format($pay).') بیشتر از مانده نسیه سند ('.number_format($remaining).') است.'
+            );
+        }
+
+        $left = $pay;
+        $creditQuery = $model->payments()->where('method', self::METHOD_CREDIT)->where('settled', false);
+        foreach ($creditQuery->orderBy('sort_order')->orderBy('id')->get() as $row) {
+            if ($left <= 0.001) {
+                break;
+            }
+            $rowAmount = round((float) $row->amount, 2);
+            if ($rowAmount - $left <= 0.001) {
+                $row->update(['settled' => true]);
+                $left = round($left - $rowAmount, 2);
+            } else {
+                $row->update(['amount' => round($rowAmount - $left, 2)]);
+                $left = 0;
+            }
+        }
+
+        $payment = DocumentPayment::create([
+            'atelier_id' => (int) $model->atelier_id,
+            'invoice_id' => $model instanceof Invoice ? $model->id : null,
+            'expense_id' => $model instanceof Expense ? $model->id : null,
+            'method' => self::METHOD_CHEQUE,
+            'amount' => $pay,
+            'shop_account_id' => null,
+            'cheque_id' => $cheque->id,
+            'settled' => true,
+            'sort_order' => (int) $model->payments()->max('sort_order') + 1,
+        ]);
+
+        self::refreshDocumentSummary($model);
+
+        return $payment;
+    }
+
+    /**
+     * برگشت تسویه ظهرنویسی: حذف ردیف پرداخت چک و بازگرداندن مبلغ به نسیه.
+     */
+    public static function untransferReceivedChequePayment(Model $model, DocumentPayment $payment): void
+    {
+        if (! self::supportsSplits()) {
+            return;
+        }
+        if ((int) $payment->cheque_id <= 0 || $payment->method !== self::METHOD_CHEQUE || ! $payment->settled) {
+            throw new RuntimeException('پرداخت ظهرنویسی معتبر نیست.');
+        }
+
+        $amount = round((float) $payment->amount, 2);
+        $payment->delete();
+
+        $open = $model->payments()
+            ->where('method', self::METHOD_CREDIT)
+            ->where('settled', false)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->first();
+        if ($open) {
+            $open->update(['amount' => round((float) $open->amount + $amount, 2)]);
+        } else {
+            DocumentPayment::create([
+                'atelier_id' => (int) $model->atelier_id,
+                'invoice_id' => $model instanceof Invoice ? $model->id : null,
+                'expense_id' => $model instanceof Expense ? $model->id : null,
+                'method' => self::METHOD_CREDIT,
+                'amount' => $amount,
+                'shop_account_id' => null,
+                'cheque_id' => null,
+                'settled' => false,
+                'sort_order' => (int) $model->payments()->max('sort_order') + 1,
+            ]);
+        }
+
+        $model->unsetRelation('payments');
+        self::refreshDocumentSummary($model);
+    }
+
     public static function assertCanDebit(int $atelierId, int $shopAccountId, float $amount, ?Model $ignorePaidDocument = null): void
     {
         $account = ShopAccount::find($shopAccountId);

@@ -28,6 +28,7 @@ class Cheque extends Model
     public const STATUS_PENDING = 'pending';
     public const STATUS_CLEARED = 'cleared';
     public const STATUS_CANCELLED = 'cancelled';
+    public const STATUS_TRANSFERRED = 'transferred';
 
     protected $fillable = [
         'atelier_id',
@@ -49,6 +50,12 @@ class Cheque extends Model
         'user_name',
         'note',
         'cleared_at',
+        'transferred_at',
+        'transferred_to_beneficiary_id',
+        'transferred_to_invoice_id',
+        'transferred_to_expense_id',
+        'transfer_document_payment_id',
+        'transfer_note',
     ];
 
     protected $casts = [
@@ -56,6 +63,7 @@ class Cheque extends Model
         'issue_date' => 'date',
         'due_date' => 'date',
         'cleared_at' => 'datetime',
+        'transferred_at' => 'datetime',
     ];
 
     protected $appends = [
@@ -90,6 +98,26 @@ class Cheque extends Model
         return $this->belongsTo(Purchase::class);
     }
 
+    public function transferredToBeneficiary(): BelongsTo
+    {
+        return $this->belongsTo(UserShiksho::class, 'transferred_to_beneficiary_id');
+    }
+
+    public function transferredToInvoice(): BelongsTo
+    {
+        return $this->belongsTo(Invoice::class, 'transferred_to_invoice_id');
+    }
+
+    public function transferredToExpense(): BelongsTo
+    {
+        return $this->belongsTo(Expense::class, 'transferred_to_expense_id');
+    }
+
+    public function transferDocumentPayment(): BelongsTo
+    {
+        return $this->belongsTo(DocumentPayment::class, 'transfer_document_payment_id');
+    }
+
     public function getTypeLabelAttribute(): ?string
     {
         return match ($this->type) {
@@ -105,6 +133,7 @@ class Cheque extends Model
             self::STATUS_PENDING => 'در انتظار وصول',
             self::STATUS_CLEARED => 'وصول‌شده',
             self::STATUS_CANCELLED => 'باطل‌شده',
+            self::STATUS_TRANSFERRED => 'منتقل‌شده (ظهرنویسی)',
             default => $this->status,
         };
     }
@@ -163,6 +192,147 @@ class Cheque extends Model
     }
 
     /**
+     * ظهرنویسی چک دریافتی بابت بدهی فاکتور خرید یا هزینه نسیه — بدون حرکت صندوق.
+     *
+     * @param  array{invoice_id?: int|null, expense_id?: int|null, beneficiary_id?: int|null, note?: string|null}  $options
+     */
+    public function transfer(array $options = []): self
+    {
+        if ($this->type !== self::TYPE_RECEIVED) {
+            throw new RuntimeException('فقط چک دریافتی قابل ظهرنویسی است.');
+        }
+        if ($this->status !== self::STATUS_PENDING) {
+            throw new RuntimeException('فقط چک در انتظار وصول قابل ظهرنویسی است.');
+        }
+
+        $invoiceId = isset($options['invoice_id']) ? (int) $options['invoice_id'] : 0;
+        $expenseId = isset($options['expense_id']) ? (int) $options['expense_id'] : 0;
+        if (($invoiceId > 0) === ($expenseId > 0)) {
+            throw new RuntimeException('یکی از فاکتور خرید یا هزینه را برای ظهرنویسی انتخاب کنید.');
+        }
+
+        return DB::transaction(function () use ($options, $invoiceId, $expenseId) {
+            $locked = static::where('id', $this->id)
+                ->where('status', self::STATUS_PENDING)
+                ->lockForUpdate()
+                ->first();
+            if (! $locked) {
+                throw new RuntimeException('چک برای ظهرنویسی در دسترس نیست.');
+            }
+
+            if ($invoiceId > 0) {
+                $document = Invoice::where('id', $invoiceId)
+                    ->where('atelier_id', $locked->atelier_id)
+                    ->lockForUpdate()
+                    ->first();
+                if (! $document) {
+                    throw new RuntimeException('فاکتور خرید یافت نشد.');
+                }
+            } else {
+                $document = Expense::where('id', $expenseId)
+                    ->where('atelier_id', $locked->atelier_id)
+                    ->lockForUpdate()
+                    ->first();
+                if (! $document) {
+                    throw new RuntimeException('هزینه یافت نشد.');
+                }
+            }
+
+            $payment = DocumentPaymentService::settleCreditWithReceivedCheque($document, $locked);
+
+            $beneficiaryId = isset($options['beneficiary_id']) ? (int) $options['beneficiary_id'] : 0;
+            if ($beneficiaryId <= 0 && Schema::hasColumn($document->getTable(), 'beneficiary_id')) {
+                $beneficiaryId = (int) ($document->beneficiary_id ?? 0);
+            }
+
+            $locked->update([
+                'status' => self::STATUS_TRANSFERRED,
+                'transferred_at' => now(),
+                'transferred_to_invoice_id' => $document instanceof Invoice ? $document->id : null,
+                'transferred_to_expense_id' => $document instanceof Expense ? $document->id : null,
+                'transferred_to_beneficiary_id' => $beneficiaryId > 0 ? $beneficiaryId : null,
+                'transfer_document_payment_id' => $payment->id,
+                'transfer_note' => isset($options['note']) ? (string) $options['note'] : null,
+            ]);
+
+            $fresh = $locked->fresh([
+                'transferredToInvoice',
+                'transferredToExpense',
+                'transferredToBeneficiary',
+                'transferDocumentPayment',
+            ]);
+            $label = $document instanceof Invoice
+                ? ('فاکتور خرید #'.$document->id)
+                : ('هزینه #'.$document->id);
+            \App\Services\AccountingMiscPoster::postChequeTransfer($fresh, $label);
+
+            return $fresh;
+        });
+    }
+
+    /**
+     * برگشت ظهرنویسی: بدهی سند دوباره باز می‌شود و چک به در انتظار وصول برمی‌گردد.
+     */
+    public function untransfer(): self
+    {
+        if ($this->status !== self::STATUS_TRANSFERRED) {
+            throw new RuntimeException('فقط چک‌های منتقل‌شده (ظهرنویسی) قابل برگشت هستند.');
+        }
+
+        return DB::transaction(function () {
+            $locked = static::where('id', $this->id)
+                ->where('status', self::STATUS_TRANSFERRED)
+                ->lockForUpdate()
+                ->first();
+            if (! $locked) {
+                throw new RuntimeException('چک برای برگشت ظهرنویسی در دسترس نیست.');
+            }
+
+            \App\Services\AccountingMiscPoster::reverseChequeTransfer($locked);
+
+            $document = null;
+            if ($locked->transferred_to_invoice_id) {
+                $document = Invoice::where('id', $locked->transferred_to_invoice_id)->lockForUpdate()->first();
+            } elseif ($locked->transferred_to_expense_id) {
+                $document = Expense::where('id', $locked->transferred_to_expense_id)->lockForUpdate()->first();
+            }
+            if (! $document) {
+                throw new RuntimeException('سند بدهی مربوط به ظهرنویسی یافت نشد.');
+            }
+
+            $paymentId = (int) ($locked->transfer_document_payment_id ?? 0);
+            $payment = $paymentId > 0
+                ? DocumentPayment::where('id', $paymentId)->lockForUpdate()->first()
+                : null;
+            if (! $payment) {
+                $payment = DocumentPayment::where('cheque_id', $locked->id)
+                    ->where('settled', true)
+                    ->where('method', DocumentPayment::METHOD_CHEQUE)
+                    ->orderByDesc('id')
+                    ->lockForUpdate()
+                    ->first();
+            }
+            if (! $payment) {
+                throw new RuntimeException('پرداخت ظهرنویسی مربوط به این چک یافت نشد.');
+            }
+
+            DocumentPaymentService::untransferReceivedChequePayment($document, $payment);
+
+            $locked->update([
+                'status' => self::STATUS_PENDING,
+                'transferred_at' => null,
+                'transferred_to_beneficiary_id' => null,
+                'transferred_to_invoice_id' => null,
+                'transferred_to_expense_id' => null,
+                'transfer_document_payment_id' => null,
+                'transfer_note' => null,
+            ]);
+
+            return $locked->fresh(['expense', 'income', 'purchase', 'invoice']);
+        });
+    }
+
+    /**
      * وصول چک: صادره → هزینه | دریافتی → درآمد
      *
      * @param  string|null  $clearDate  Y-m-d
@@ -170,6 +340,9 @@ class Cheque extends Model
      */
     public function clear(?string $clearDate = null, ?int $shopAccountId = null): self
     {
+        if ($this->status === self::STATUS_TRANSFERRED) {
+            throw new RuntimeException('چک ظهرنویسی‌شده قابل وصول بانکی نیست؛ ابتدا ظهرنویسی را برگشت دهید.');
+        }
         if ($this->status !== self::STATUS_PENDING) {
             throw new RuntimeException('فقط چک‌های در انتظار وصول قابل وصول هستند.');
         }
