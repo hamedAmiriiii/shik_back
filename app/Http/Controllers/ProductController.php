@@ -1636,7 +1636,10 @@ class ProductController extends Controller
         $purchasePrice = (float) ($good->cost_per_kg ?? 0);
         $unitProfit = $salePrice - $purchasePrice;
 
-        return array_merge($this->threedMenuFields($good), [
+        $threed = $this->threedMenuFields($good);
+        $thumb = $this->producedGoodThumbUrl($threed);
+
+        return array_merge($threed, [
             'id' => $good->id,
             'item_type' => 'produced_good',
             'produced_good_id' => $good->id,
@@ -1660,11 +1663,39 @@ class ProductController extends Controller
             'unit_label' => ProductQuantityTools::unitLabel(Product::UNIT_KG),
             'price_unit_label' => ProductQuantityTools::priceUnitLabel(Product::UNIT_KG),
             'barcode' => null,
-            'images' => [],
+            'image' => $thumb,
+            'images' => $thumb ? [['image_url' => $thumb]] : [],
             'categories' => Schema::hasTable('category_produced_good') ? ($good->categories ?? []) : [],
             'atelier_id' => $good->atelier_id,
             'note' => $good->note,
         ]);
+    }
+
+    /**
+     * تصویر بندانگشتی کالای تولیدی برای سبد/لیست: لایهٔ پایه یا اولین مادهٔ دارای عکس.
+     *
+     * @param  array<string, mixed>  $threed
+     */
+    private function producedGoodThumbUrl(array $threed): ?string
+    {
+        $layers = array_values(array_filter((array) ($threed['layers'] ?? []), 'is_array'));
+        for ($i = count($layers) - 1; $i >= 0; $i--) {
+            $url = trim((string) ($layers[$i]['image_url'] ?? ''));
+            if ($url !== '') {
+                return $url;
+            }
+        }
+        foreach ((array) ($threed['ingredients'] ?? []) as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $url = trim((string) ($row['image_url'] ?? ''));
+            if ($url !== '') {
+                return $url;
+            }
+        }
+
+        return null;
     }
 
     /**

@@ -12,11 +12,13 @@ class ProducedGoodIngredient extends Model
         'raw_material_id',
         'grams_per_kg',
         'is_removable',
+        'is_addable',
     ];
 
     protected $casts = [
         'grams_per_kg' => 'decimal:3',
         'is_removable' => 'boolean',
+        'is_addable' => 'boolean',
     ];
 
     public function producedGood(): BelongsTo

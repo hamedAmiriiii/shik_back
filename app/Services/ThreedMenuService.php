@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Storage;
  * منوی سه‌بعدی: ترکیب لایه‌ای عکس کالای تولیدی و قیمت هر ماده.
  *
  * قیمت هر ماده = سهم هزینهٔ آن ماده از کل هزینهٔ فرمول × قیمت فروش کالا (sale_share).
- * فقط موادی که در فرمول «قابل حذف» علامت خورده‌اند قابل برداشتن هستند.
+ * فقط موادی که «قابل حذف» / «قابل اضافه» علامت خورده‌اند در منو قابل برداشتن یا دوبل شدن هستند.
  */
 class ThreedMenuService
 {
@@ -33,6 +33,7 @@ class ThreedMenuService
         $salePrice = (float) $good->sale_price;
 
         $hasRemovable = Schema::hasColumn('produced_good_ingredients', 'is_removable');
+        $hasAddable = Schema::hasColumn('produced_good_ingredients', 'is_addable');
         $count = max(1, $good->ingredients->count());
 
         $rows = [];
@@ -52,6 +53,7 @@ class ThreedMenuService
                 'name' => $material->name,
                 'image_url' => $path ? Storage::url($path) : null,
                 'is_removable' => $hasRemovable ? (bool) $line->is_removable : false,
+                'is_addable' => $hasAddable ? (bool) $line->is_addable : false,
                 // نمایش منو: رند به دو صفر (مثلاً ۱۸۵۴۳ → ۱۸۵۰۰)
                 'price' => (float) PriceTools::roundToHundred($salePrice * $share),
             ];
@@ -192,10 +194,10 @@ class ThreedMenuService
                 'name' => $row['name'],
                 'price' => $row['price'],
             ];
-            if ($row['is_removable'] && in_array($id, $wantedRemoved, true)) {
+            if (! empty($row['is_removable']) && in_array($id, $wantedRemoved, true)) {
                 $removed[] = $payload;
                 $discount += (float) $row['price'];
-            } elseif (in_array($id, $wantedExtra, true)) {
+            } elseif (! empty($row['is_addable']) && in_array($id, $wantedExtra, true)) {
                 $extra[] = $payload;
                 $surcharge += (float) $row['price'];
             }

@@ -366,6 +366,7 @@ class ProducedGoodController extends Controller
             'ingredients.*.raw_material_id' => 'required|integer',
             'ingredients.*.grams_per_kg' => 'required|numeric|min:0.001',
             'ingredients.*.is_removable' => 'sometimes|boolean',
+            'ingredients.*.is_addable' => 'sometimes|boolean',
             'layer_order' => 'sometimes|nullable|array|max:40',
             // عدد ساده (قدیمی) یا { raw_material_id, scale }
             'layer_order.*' => 'nullable',
@@ -502,6 +503,7 @@ class ProducedGoodController extends Controller
         $good->ingredients()->delete();
 
         $hasRemovable = Schema::hasColumn('produced_good_ingredients', 'is_removable');
+        $hasAddable = Schema::hasColumn('produced_good_ingredients', 'is_addable');
 
         foreach ($ingredients as $row) {
             $payload = [
@@ -510,6 +512,9 @@ class ProducedGoodController extends Controller
             ];
             if ($hasRemovable) {
                 $payload['is_removable'] = ! empty($row['is_removable']);
+            }
+            if ($hasAddable) {
+                $payload['is_addable'] = ! empty($row['is_addable']);
             }
             $good->ingredients()->create($payload);
         }

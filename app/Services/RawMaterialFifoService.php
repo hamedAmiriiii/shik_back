@@ -235,6 +235,7 @@ class RawMaterialFifoService
                 'unit_type' => $material ? $material->unitType() : RawMaterial::UNIT_KG,
                 'grams_per_kg' => $grams,
                 'is_removable' => (bool) ($line->is_removable ?? false),
+                'is_addable' => (bool) ($line->is_addable ?? false),
                 'needed_kg' => $needKg,
                 'cost' => $cost,
                 'lots' => $slicePayload,
