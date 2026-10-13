@@ -102,20 +102,34 @@ class ThreedMenuService
             ? (array) ($good->layer_order ?? [])
             : [];
         if ($order === []) {
-            $order = array_keys($byId);
+            $order = array_map(function ($id) {
+                return ['raw_material_id' => (int) $id, 'scale' => 1.0];
+            }, array_keys($byId));
         }
 
         $layers = [];
-        foreach ($order as $index => $materialId) {
-            $materialId = (int) $materialId;
-            if (! isset($byId[$materialId]) || empty($byId[$materialId]['image_url'])) {
+        foreach ($order as $index => $row) {
+            $materialId = 0;
+            $scale = 1.0;
+            if (is_array($row)) {
+                $materialId = (int) ($row['raw_material_id'] ?? $row['id'] ?? 0);
+                $scale = isset($row['scale']) ? (float) $row['scale'] : 1.0;
+            } else {
+                $materialId = (int) $row;
+            }
+            if ($materialId <= 0 || ! isset($byId[$materialId]) || empty($byId[$materialId]['image_url'])) {
                 continue;
             }
+            if (! is_finite($scale)) {
+                $scale = 1.0;
+            }
+            $scale = max(0.2, min(3.0, round($scale, 2)));
             $layers[] = [
                 'key' => $materialId.'-'.$index,
                 'raw_material_id' => $materialId,
                 'name' => $byId[$materialId]['name'],
                 'image_url' => $byId[$materialId]['image_url'],
+                'scale' => $scale,
             ];
         }
 

@@ -367,7 +367,10 @@ class ProducedGoodController extends Controller
             'ingredients.*.grams_per_kg' => 'required|numeric|min:0.001',
             'ingredients.*.is_removable' => 'sometimes|boolean',
             'layer_order' => 'sometimes|nullable|array|max:40',
-            'layer_order.*' => 'integer',
+            // عدد ساده (قدیمی) یا { raw_material_id, scale }
+            'layer_order.*' => 'nullable',
+            'layer_order.*.raw_material_id' => 'sometimes|integer',
+            'layer_order.*.scale' => 'sometimes|nullable|numeric|min:0.2|max:3',
             'layer_compose' => ['sometimes', 'nullable', Rule::in(ProducedGood::layerComposeModes())],
             'category_ids' => 'nullable|array',
             'category_ids.*' => 'integer|exists:categories,id',
@@ -514,8 +517,9 @@ class ProducedGoodController extends Controller
 
     /**
      * ترتیب لایه‌های عکس (بالا به پایین). هر ماده می‌تواند چند بار بیاید؛ فقط مواد فرمول مجازند.
+     * هر آیتم: شناسه ماده یا { raw_material_id, scale }.
      *
-     * @param  array<int, int|string>|null  $layerOrder
+     * @param  array<int, mixed>|null  $layerOrder
      */
     private function syncLayerOrder(ProducedGood $good, ?array $layerOrder): void
     {
@@ -528,11 +532,26 @@ class ProducedGoodController extends Controller
         })->all();
 
         $clean = [];
-        foreach ((array) $layerOrder as $id) {
-            $id = (int) $id;
-            if (in_array($id, $allowed, true)) {
-                $clean[] = $id;
+        foreach ((array) $layerOrder as $row) {
+            $id = 0;
+            $scale = 1.0;
+            if (is_array($row)) {
+                $id = (int) ($row['raw_material_id'] ?? $row['id'] ?? 0);
+                $scale = isset($row['scale']) ? (float) $row['scale'] : 1.0;
+            } else {
+                $id = (int) $row;
             }
+            if ($id <= 0 || ! in_array($id, $allowed, true)) {
+                continue;
+            }
+            if (! is_finite($scale)) {
+                $scale = 1.0;
+            }
+            $scale = max(0.2, min(3.0, round($scale, 2)));
+            $clean[] = [
+                'raw_material_id' => $id,
+                'scale' => $scale,
+            ];
         }
 
         $good->layer_order = $clean === [] ? null : $clean;
