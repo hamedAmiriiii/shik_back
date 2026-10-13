@@ -203,6 +203,9 @@ class BeneficiaryAdvanceService
                 $advance->remaining = round((float) $advance->remaining - $slice, 2);
                 $advance->refreshStatus();
 
+                // مثل تسویه نقد: سند اصلی فاکتور دست نخورده می‌ماند؛ سند جدا برای مصرف اعتبار
+                AccountingMiscPoster::postBeneficiaryAdvanceApply($app, $model);
+
                 $applications[] = $app;
                 $left = round($left - $slice, 2);
             }
@@ -212,12 +215,6 @@ class BeneficiaryAdvanceService
             }
 
             DocumentPaymentService::refreshDocumentSummary($model);
-            $fresh = $model->fresh(['payments']);
-            if ($fresh instanceof Invoice) {
-                AccountingDocumentPoster::syncInvoice($fresh);
-            } elseif ($fresh instanceof Expense) {
-                AccountingDocumentPoster::syncExpense($fresh);
-            }
 
             return [
                 'applied' => $pay,

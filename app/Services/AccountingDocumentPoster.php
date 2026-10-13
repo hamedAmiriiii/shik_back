@@ -283,9 +283,41 @@ class AccountingDocumentPoster
     {
         $credited = 0.0;
         if (Schema::hasTable('document_payments') && $model->relationLoaded('payments') && $model->payments->isNotEmpty()) {
+            $model->loadMissing('payments.cheque');
             foreach ($model->payments as $payment) {
                 $part = round((float) $payment->amount, 2);
-                self::pushCreditForSplit($lines, $atelierId, (string) $payment->method, $part, $payment->shop_account_id);
+                if ($part < 0.01) {
+                    continue;
+                }
+                $method = DocumentPaymentService::normalizeMethod((string) $payment->method) ?: (string) $payment->method;
+
+                // نسیهٔ تسویه‌شده با ظهرنویسی/اعتبار جداگانه سند خورده؛ دوباره در فاکتور ننویس
+                if ($method === DocumentPaymentService::METHOD_ADVANCE) {
+                    continue;
+                }
+                // چک دریافتی ظهرنویسی‌شده در SOURCE_CHEQUE_TRANSFER ثبت شده
+                if ($method === DocumentPaymentService::METHOD_CHEQUE) {
+                    $cheque = $payment->cheque;
+                    if ($cheque && $cheque->type === \App\Models\Cheque::TYPE_RECEIVED) {
+                        continue;
+                    }
+                }
+                // نسیهٔ تسویه‌شده بدون حساب = جایگزین شده با چک/اعتبار
+                if ($method === DocumentPaymentService::METHOD_CREDIT && $payment->settled) {
+                    if ($payment->shop_account_id) {
+                        self::pushCreditForSplit(
+                            $lines,
+                            $atelierId,
+                            DocumentPaymentService::METHOD_ACCOUNT,
+                            $part,
+                            $payment->shop_account_id
+                        );
+                        $credited += $part;
+                    }
+                    continue;
+                }
+
+                self::pushCreditForSplit($lines, $atelierId, $method, $part, $payment->shop_account_id);
                 $credited += $part;
             }
             $gap = round($amount - $credited, 2);
@@ -338,17 +370,6 @@ class AccountingDocumentPoster
                 0,
                 $amount,
                 'چک پرداختنی'
-            );
-
-            return;
-        }
-        if ($method === DocumentPaymentService::METHOD_ADVANCE) {
-            AccountingLedger::push(
-                $lines,
-                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_SUPPLIER_ADVANCE),
-                0,
-                $amount,
-                'مصرف پیش‌پرداخت ذینفع'
             );
 
             return;
