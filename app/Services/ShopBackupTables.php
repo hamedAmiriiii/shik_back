@@ -657,6 +657,7 @@ class ShopBackupTables
             \App\Models\AccountingVoucher::SOURCE_DEBT_PAYMENT => 'purchase_debt_payments',
             \App\Models\AccountingVoucher::SOURCE_CHEQUE_CLEAR => 'cheques',
             \App\Models\AccountingVoucher::SOURCE_CHEQUE_TRANSFER => 'cheques',
+            \App\Models\AccountingVoucher::SOURCE_BENEFICIARY_ADVANCE => 'beneficiary_advance_applications',
             \App\Models\AccountingVoucher::SOURCE_RECON_DEPOSIT => 'daily_shop_reconciliation_account_deposits',
             \App\Models\AccountingVoucher::SOURCE_ACCOUNT_TRANSFER => 'shop_account_transfers',
             \App\Models\AccountingVoucher::SOURCE_BALANCE_ADJUST => 'shop_account_balance_adjustments',

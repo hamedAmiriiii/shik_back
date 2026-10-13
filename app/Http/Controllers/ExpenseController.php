@@ -421,6 +421,34 @@ class ExpenseController extends Controller
         return response($this->withAccount($expense), 200);
     }
 
+    /**
+     * مصرف اعتبار ظهرنویسی / پیش‌پرداخت ذینفع روی نسیهٔ هزینه.
+     * POST /api/expenses/{expense}/apply-advance
+     */
+    public function applyAdvance(Request $request, Expense $expense)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $expense);
+
+        $fields = $request->validate([
+            'amount' => 'nullable|numeric|min:0.01',
+        ]);
+
+        try {
+            $result = \App\Services\BeneficiaryAdvanceService::applyToDocument(
+                $expense,
+                isset($fields['amount']) ? (float) $fields['amount'] : null
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'message' => 'اعتبار ظهرنویسی به مبلغ '.number_format($result['applied']).' تومان روی هزینه مصرف شد.',
+            'applied' => $result['applied'],
+            'expense' => $this->withAccount($expense->fresh()),
+        ], 200);
+    }
+
     protected function withAccount(Expense $expense): Expense
     {
         $expense->loadMissing(['shopAccount', 'cheque']);
@@ -428,8 +456,20 @@ class ExpenseController extends Controller
             $expense->loadMissing(['payments.cheque', 'payments.shopAccount']);
         }
 
+        DocumentPaymentService::alignSplitsToDocumentAmount($expense);
+        $expense->loadMissing(['payments.cheque', 'payments.shopAccount']);
+
         $expense = ShopBeneficiaryService::attachTo($this->attachPaymentAccount($expense));
         $expense->setAttribute('payment_breakdown', DocumentPaymentService::breakdown($expense));
+        if ($expense->beneficiary_id) {
+            $expense->setAttribute(
+                'beneficiary_advance_available',
+                \App\Services\BeneficiaryAdvanceService::availableBalance(
+                    (int) $expense->atelier_id,
+                    (int) $expense->beneficiary_id
+                )
+            );
+        }
 
         return $expense;
     }

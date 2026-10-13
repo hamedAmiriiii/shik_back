@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AccountingVoucher;
 use App\Models\Cheque;
 use App\Models\ManualTrade;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
@@ -141,21 +142,58 @@ class AccountingMiscPoster
     }
 
     /**
-     * ظهرنویسی چک دریافتی بابت بدهی: بدهکار حساب پرداختنی / بستانکار چک دریافتنی — بدون حرکت نقد.
+     * ظهرنویسی چک دریافتی بابت بدهی (+ اختیاری پیش‌پرداخت مابقی) — بدون حرکت نقد.
+     *
+     * @param  float  $settledAmount  مبلغ بسته‌شده از بدهی
+     * @param  float  $advanceAmount  مابقی چک → پیش‌پرداخت ذینفع
      */
-    public static function postChequeTransfer(Cheque $cheque, string $documentLabel): ?AccountingVoucher
-    {
+    public static function postChequeTransfer(
+        Cheque $cheque,
+        string $documentLabel,
+        float $settledAmount,
+        float $advanceAmount = 0.0
+    ): ?AccountingVoucher {
         $atelierId = (int) $cheque->atelier_id;
-        $amount = round((float) $cheque->amount, 2);
+        $chequeAmount = round((float) $cheque->amount, 2);
+        $settledAmount = round($settledAmount, 2);
+        $advanceAmount = round($advanceAmount, 2);
         if (
             $atelierId <= 0
-            || $amount < 0.01
+            || $chequeAmount < 0.01
             || $cheque->type !== Cheque::TYPE_RECEIVED
             || $cheque->status !== Cheque::STATUS_TRANSFERRED
             || ! AccountingLedger::ready()
         ) {
             return null;
         }
+        if (abs(($settledAmount + $advanceAmount) - $chequeAmount) > 0.02) {
+            $settledAmount = min($settledAmount, $chequeAmount);
+            $advanceAmount = round($chequeAmount - $settledAmount, 2);
+        }
+
+        $lines = [];
+        if ($settledAmount >= 0.01) {
+            $lines[] = [
+                'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AP),
+                'debit' => $settledAmount,
+                'credit' => 0,
+                'description' => 'بستن بدهی با ظهرنویسی چک',
+            ];
+        }
+        if ($advanceAmount >= 0.01) {
+            $lines[] = [
+                'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_SUPPLIER_ADVANCE),
+                'debit' => $advanceAmount,
+                'credit' => 0,
+                'description' => 'پیش‌پرداخت ذینفع از مابقی چک',
+            ];
+        }
+        $lines[] = [
+            'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_CHEQUE_RECEIVABLE),
+            'debit' => 0,
+            'credit' => $chequeAmount,
+            'description' => 'خروج چک دریافتنی (ظهرنویسی)',
+        ];
 
         try {
             return AccountingVoucherService::post(
@@ -164,20 +202,7 @@ class AccountingMiscPoster
                 'ظهرنویسی چک #'.$cheque->id.' — '.$documentLabel,
                 AccountingVoucher::SOURCE_CHEQUE_TRANSFER,
                 (int) $cheque->id,
-                [
-                    [
-                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AP),
-                        'debit' => $amount,
-                        'credit' => 0,
-                        'description' => 'بستن بدهی با ظهرنویسی چک',
-                    ],
-                    [
-                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_CHEQUE_RECEIVABLE),
-                        'debit' => 0,
-                        'credit' => $amount,
-                        'description' => 'خروج چک دریافتنی (ظهرنویسی)',
-                    ],
-                ]
+                $lines
             );
         } catch (RuntimeException $e) {
             Log::error('سند ظهرنویسی چک ثبت نشد', [
@@ -200,6 +225,54 @@ class AccountingMiscPoster
             AccountingVoucher::SOURCE_CHEQUE_TRANSFER,
             (int) $cheque->id
         );
+    }
+
+    /**
+     * مصرف پیش‌پرداخت ذینفع روی بدهی سند: بدهکار پرداختنی / بستانکار پیش‌پرداخت.
+     */
+    public static function postBeneficiaryAdvanceApply(
+        \App\Models\BeneficiaryAdvanceApplication $application,
+        Model $document
+    ): ?AccountingVoucher {
+        $atelierId = (int) $application->atelier_id;
+        $amount = round((float) $application->amount, 2);
+        if ($atelierId <= 0 || $amount < 0.01 || ! AccountingLedger::ready()) {
+            return null;
+        }
+
+        $label = $document instanceof \App\Models\Invoice
+            ? 'فاکتور خرید #'.$document->id
+            : 'هزینه #'.$document->id;
+
+        try {
+            return AccountingVoucherService::post(
+                $atelierId,
+                AccountingLedger::eventDate(now()),
+                'مصرف اعتبار ظهرنویسی — '.$label,
+                AccountingVoucher::SOURCE_BENEFICIARY_ADVANCE,
+                (int) $application->id,
+                [
+                    [
+                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AP),
+                        'debit' => $amount,
+                        'credit' => 0,
+                        'description' => 'بستن بدهی با اعتبار ظهرنویسی',
+                    ],
+                    [
+                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_SUPPLIER_ADVANCE),
+                        'debit' => 0,
+                        'credit' => $amount,
+                        'description' => 'کاهش پیش‌پرداخت ذینفع',
+                    ],
+                ]
+            );
+        } catch (RuntimeException $e) {
+            Log::error('سند مصرف اعتبار ظهرنویسی ثبت نشد', [
+                'application_id' => $application->id,
+                'message' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
     }
 
     public static function postManualTrade(ManualTrade $trade): ?AccountingVoucher

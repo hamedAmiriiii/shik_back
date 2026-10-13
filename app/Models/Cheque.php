@@ -238,11 +238,24 @@ class Cheque extends Model
                 }
             }
 
-            $payment = DocumentPaymentService::settleCreditWithReceivedCheque($document, $locked);
+            $settled = DocumentPaymentService::settleCreditWithReceivedCheque($document, $locked);
+            $payment = $settled['payment'];
+            $settledAmount = (float) $settled['settled_amount'];
+            $advanceAmount = (float) $settled['advance_amount'];
 
             $beneficiaryId = isset($options['beneficiary_id']) ? (int) $options['beneficiary_id'] : 0;
             if ($beneficiaryId <= 0 && Schema::hasColumn($document->getTable(), 'beneficiary_id')) {
                 $beneficiaryId = (int) ($document->beneficiary_id ?? 0);
+            }
+
+            if ($advanceAmount >= 0.01) {
+                \App\Services\BeneficiaryAdvanceService::createFromChequeTransfer(
+                    $locked,
+                    $document,
+                    $beneficiaryId,
+                    $advanceAmount,
+                    isset($options['note']) ? (string) $options['note'] : null
+                );
             }
 
             $locked->update([
@@ -264,7 +277,7 @@ class Cheque extends Model
             $label = $document instanceof Invoice
                 ? ('فاکتور خرید #'.$document->id)
                 : ('هزینه #'.$document->id);
-            \App\Services\AccountingMiscPoster::postChequeTransfer($fresh, $label);
+            \App\Services\AccountingMiscPoster::postChequeTransfer($fresh, $label, $settledAmount, $advanceAmount);
 
             return $fresh;
         });
@@ -288,6 +301,7 @@ class Cheque extends Model
                 throw new RuntimeException('چک برای برگشت ظهرنویسی در دسترس نیست.');
             }
 
+            \App\Services\BeneficiaryAdvanceService::reverseForCheque($locked);
             \App\Services\AccountingMiscPoster::reverseChequeTransfer($locked);
 
             $document = null;

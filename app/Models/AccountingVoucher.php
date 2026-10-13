@@ -26,6 +26,8 @@ class AccountingVoucher extends Model
 
     public const SOURCE_CHEQUE_TRANSFER = 'cheque_transfer';
 
+    public const SOURCE_BENEFICIARY_ADVANCE = 'beneficiary_advance';
+
     public const SOURCE_RECON_DEPOSIT = 'recon_deposit';
 
     public const SOURCE_ACCOUNT_TRANSFER = 'account_transfer';

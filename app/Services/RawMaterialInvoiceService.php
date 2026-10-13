@@ -189,6 +189,8 @@ class RawMaterialInvoiceService
             );
         }
         $invoice->update(['amount' => $newAmount]);
+        // ردیف نسیه را با مبلغ جدید فاکتور هم‌تراز کن (در غیر این صورت فقط amount عوض می‌شود)
+        DocumentPaymentService::alignSplitsToDocumentAmount($invoice->fresh(['payments']));
 
         return $item;
     }

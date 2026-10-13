@@ -374,9 +374,15 @@ class InvoiceController extends Controller
                 $invoice->update($fields);
                 if ($itemsSent) {
                     $this->syncInvoiceItems($invoice, $itemRows);
+                    if (! array_key_exists('amount', $fields) && $invoice->hasLineItems()) {
+                        $invoice->update(['amount' => $invoice->itemsSum()]);
+                    }
                 }
                 if ($paymentSource) {
                     DocumentPaymentService::replaceSplits($invoice->fresh(), $paymentSource, (string) $invoice->user_name);
+                } else {
+                    // مبلغ عوض شده ولی پرداخت‌ها دوباره ارسال نشده → اختلاف را به نسیهٔ باز بده
+                    DocumentPaymentService::alignSplitsToDocumentAmount($invoice->fresh(['payments']));
                 }
                 if ($request->boolean('remove_image') && ! $this->requestHasImage($request)) {
                     $this->deleteInvoiceImage($invoice);
@@ -478,6 +484,34 @@ class InvoiceController extends Controller
     }
 
     /**
+     * مصرف اعتبار ظهرنویسی / پیش‌پرداخت ذینفع روی نسیهٔ فاکتور.
+     * POST /api/invoices/{invoice}/apply-advance  { "amount": optional }
+     */
+    public function applyAdvance(Request $request, Invoice $invoice)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $invoice);
+
+        $fields = $request->validate([
+            'amount' => 'nullable|numeric|min:0.01',
+        ]);
+
+        try {
+            $result = \App\Services\BeneficiaryAdvanceService::applyToDocument(
+                $invoice,
+                isset($fields['amount']) ? (float) $fields['amount'] : null
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'message' => 'اعتبار ظهرنویسی به مبلغ '.number_format($result['applied']).' تومان روی فاکتور مصرف شد.',
+            'applied' => $result['applied'],
+            'invoice' => $this->withDetails($invoice->fresh()),
+        ], 200);
+    }
+
+    /**
      * آپلود یا جایگزینی عکس فاکتور
      * POST /api/invoices/{invoice}/image
      */
@@ -540,8 +574,20 @@ class InvoiceController extends Controller
             $invoice->loadMissing($relations);
         }
 
+        DocumentPaymentService::alignSplitsToDocumentAmount($invoice);
+        $invoice->loadMissing(['payments.cheque', 'payments.shopAccount']);
+
         $invoice = ShopBeneficiaryService::attachTo($this->attachPaymentAccount($invoice));
         $invoice->setAttribute('payment_breakdown', DocumentPaymentService::breakdown($invoice));
+        if ($invoice->beneficiary_id) {
+            $invoice->setAttribute(
+                'beneficiary_advance_available',
+                \App\Services\BeneficiaryAdvanceService::availableBalance(
+                    (int) $invoice->atelier_id,
+                    (int) $invoice->beneficiary_id
+                )
+            );
+        }
 
         return $invoice;
     }

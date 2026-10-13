@@ -17,13 +17,16 @@ class AccountingDocumentPoster
     public static function syncInvoice(Invoice $invoice): ?AccountingVoucher
     {
         $invoice->loadMissing(['payments', 'rawMaterialLots']);
+        // اگر ردیف به فاکتور نسیه اضافه شده و amount عوض شده، سهم نسیه را هم‌تراز کن
+        DocumentPaymentService::alignSplitsToDocumentAmount($invoice);
+        $invoice->loadMissing(['payments', 'rawMaterialLots']);
 
         return self::syncDocument(
             (int) $invoice->atelier_id,
             AccountingVoucher::SOURCE_INVOICE,
             (int) $invoice->id,
             function () use ($invoice) {
-                return self::postInvoice($invoice);
+                return self::postInvoice($invoice->fresh(['payments', 'rawMaterialLots']));
             },
             $invoice
         );
@@ -335,6 +338,17 @@ class AccountingDocumentPoster
                 0,
                 $amount,
                 'چک پرداختنی'
+            );
+
+            return;
+        }
+        if ($method === DocumentPaymentService::METHOD_ADVANCE) {
+            AccountingLedger::push(
+                $lines,
+                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_SUPPLIER_ADVANCE),
+                0,
+                $amount,
+                'مصرف پیش‌پرداخت ذینفع'
             );
 
             return;

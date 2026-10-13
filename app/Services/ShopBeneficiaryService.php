@@ -141,11 +141,13 @@ class ShopBeneficiaryService
 
         $purchased = round($invoices['total'] + $expenses['total'], 2);
         $unpaid = round($invoices['unpaid'] + $expenses['unpaid'], 2);
+        $advanceAvailable = BeneficiaryAdvanceService::availableBalance($atelierId, $id);
 
         return [
             'purchased_total' => $purchased,
             'paid_total' => round($purchased - $unpaid, 2),
             'unpaid_total' => $unpaid,
+            'advance_available' => $advanceAvailable,
             'invoice_total' => $invoices['total'],
             'expense_total' => $expenses['total'],
             'unpaid_invoice_total' => $invoices['unpaid'],

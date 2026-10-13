@@ -338,9 +338,22 @@ class ChequeController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
+        $advance = null;
+        if (\App\Services\BeneficiaryAdvanceService::supports()) {
+            $advance = \App\Models\BeneficiaryAdvance::query()
+                ->where('cheque_id', $transferred->id)
+                ->where('status', '!=', \App\Models\BeneficiaryAdvance::STATUS_REVERSED)
+                ->first();
+        }
+        $message = 'چک ظهرنویسی شد و بدهی سند بدون برداشت از صندوق تسویه شد.';
+        if ($advance && (float) $advance->amount >= 0.01) {
+            $message .= ' مابقی '.number_format((float) $advance->amount).' تومان به‌عنوان اعتبار ذینفع ثبت شد.';
+        }
+
         return response([
-            'message' => 'چک ظهرنویسی شد و بدهی سند بدون برداشت از صندوق تسویه شد.',
+            'message' => $message,
             'cheque' => $transferred,
+            'advance' => $advance,
         ], 200);
     }
 

@@ -77,7 +77,7 @@ class BeneficiaryController extends Controller
         $perPage = max(1, min(100, (int) $request->input('per_page', 20)));
         $page = $query->paginate($perPage);
 
-        $page->getCollection()->transform(function (UserShiksho $user) {
+        $page->getCollection()->transform(function (UserShiksho $user) use ($atelierId) {
             ShopBeneficiaryService::hideSensitive($user);
             $user->purchased_total = round((float) $user->purchased_total, 2);
             $user->unpaid_total = round((float) $user->unpaid_total, 2);
@@ -86,6 +86,10 @@ class BeneficiaryController extends Controller
             $user->expense_total = round((float) $user->expense_total, 2);
             $user->invoice_count = (int) $user->invoice_count;
             $user->expense_count = (int) $user->expense_count;
+            $user->advance_available = \App\Services\BeneficiaryAdvanceService::availableBalance(
+                $atelierId,
+                (int) $user->id
+            );
 
             return $user;
         });

@@ -323,6 +323,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Store/Shop related routes - require authentication
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
     Route::post('expenses/{expense}/settle', [\App\Http\Controllers\ExpenseController::class, 'settle']);
+    Route::post('expenses/{expense}/apply-advance', [\App\Http\Controllers\ExpenseController::class, 'applyAdvance']);
     Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);
     Route::get('proforma-invoices', [\App\Http\Controllers\ProformaInvoiceController::class, 'index']);
     Route::post('proforma-invoices', [\App\Http\Controllers\ProformaInvoiceController::class, 'store']);
@@ -364,6 +365,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('beneficiaries/{id}', [\App\Http\Controllers\BeneficiaryController::class, 'show']);
     Route::resource('invoices', \App\Http\Controllers\InvoiceController::class);
     Route::post('invoices/{invoice}/settle', [\App\Http\Controllers\InvoiceController::class, 'settle']);
+    Route::post('invoices/{invoice}/apply-advance', [\App\Http\Controllers\InvoiceController::class, 'applyAdvance']);
     Route::post('invoices/{invoice}/image', [\App\Http\Controllers\InvoiceController::class, 'uploadImage']);
     Route::delete('invoices/{invoice}/image', [\App\Http\Controllers\InvoiceController::class, 'deleteImage']);
     Route::resource('manual-trades', \App\Http\Controllers\ManualTradeController::class)->except(['create', 'edit']);

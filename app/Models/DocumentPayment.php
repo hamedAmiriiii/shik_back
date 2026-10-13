@@ -16,6 +16,8 @@ class DocumentPayment extends Model
 
     public const METHOD_CREDIT = 'credit';
 
+    public const METHOD_ADVANCE = 'advance';
+
     protected $fillable = [
         'atelier_id',
         'invoice_id',
@@ -69,6 +71,9 @@ class DocumentPayment extends Model
         }
         if ($method === self::METHOD_CREDIT) {
             return 'نسیه';
+        }
+        if ($method === self::METHOD_ADVANCE) {
+            return 'اعتبار ظهرنویسی';
         }
         if ($method === 'mixed') {
             return 'ترکیبی';

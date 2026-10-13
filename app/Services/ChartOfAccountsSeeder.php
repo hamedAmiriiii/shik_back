@@ -29,6 +29,9 @@ class ChartOfAccountsSeeder
 
     public const CODE_AR = '11201';
 
+    /** پیش‌پرداخت به تأمین‌کننده / ذینفع (از بیش‌پرداخت ظهرنویسی و مشابه) */
+    public const CODE_SUPPLIER_ADVANCE = '11202';
+
     public const CODE_CHEQUE_RECEIVABLE = '11401';
 
     public const CODE_INV_CATALOG = '11301';
@@ -87,6 +90,7 @@ class ChartOfAccountsSeeder
             ['code' => '11120', 'parent' => '111', 'name' => 'تنخواه', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '112', 'parent' => '11', 'name' => 'حساب‌های دریافتنی', 'level' => $m, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '11201', 'parent' => '112', 'name' => 'مشتریان', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
+            ['code' => '11202', 'parent' => '112', 'name' => 'پیش‌پرداخت به تأمین‌کنندگان', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '113', 'parent' => '11', 'name' => 'موجودی کالا', 'level' => $m, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '11301', 'parent' => '113', 'name' => 'کالای کاتالوگ', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '11302', 'parent' => '113', 'name' => 'مواد اولیه', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],

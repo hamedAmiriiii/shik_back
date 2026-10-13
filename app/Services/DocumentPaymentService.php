@@ -22,6 +22,8 @@ class DocumentPaymentService
 
     public const METHOD_CREDIT = 'credit';
 
+    public const METHOD_ADVANCE = 'advance';
+
     public const METHOD_MIXED = 'mixed';
 
     public const STATUS_PAID = 'paid';
@@ -32,7 +34,7 @@ class DocumentPaymentService
 
     public static function methods(): array
     {
-        return [self::METHOD_ACCOUNT, self::METHOD_CHEQUE, self::METHOD_CREDIT, self::METHOD_MIXED];
+        return [self::METHOD_ACCOUNT, self::METHOD_CHEQUE, self::METHOD_CREDIT, self::METHOD_ADVANCE, self::METHOD_MIXED];
     }
 
     public static function supportsSplits(): bool
@@ -153,6 +155,9 @@ class DocumentPaymentService
         }
         if (in_array($value, ['credit', 'نسیه', 'نسيه'], true)) {
             return self::METHOD_CREDIT;
+        }
+        if (in_array($value, ['advance', 'پیش‌پرداخت', 'پيش پرداخت', 'اعتبار ظهرنویسی'], true)) {
+            return self::METHOD_ADVANCE;
         }
         if (in_array($value, ['mixed', 'ترکیبی', 'تركيبي'], true)) {
             return self::METHOD_MIXED;
@@ -417,6 +422,8 @@ class DocumentPaymentService
             throw new RuntimeException('این سند قابل تسویه از حساب نیست.');
         }
 
+        self::alignSplitsToDocumentAmount($model);
+
         $atelierId = (int) $model->atelier_id;
         $toPost = [];
 
@@ -667,6 +674,7 @@ class DocumentPaymentService
             'cash_amount' => 0.0,
             'cheque_amount' => 0.0,
             'credit_amount' => 0.0,
+            'advance_amount' => 0.0,
             'remaining_credit' => 0.0,
             'methods' => [],
             'method_labels' => [],
@@ -690,7 +698,7 @@ class DocumentPaymentService
         }
 
         $model->loadMissing('payments.cheque', 'payments.shopAccount');
-        $cash = $cheque = $credit = $remaining = 0.0;
+        $cash = $cheque = $credit = $advance = $remaining = 0.0;
         $methods = [];
         foreach ($model->payments as $row) {
             $methods[] = $row->method;
@@ -698,6 +706,8 @@ class DocumentPaymentService
                 $cash += (float) $row->amount;
             } elseif ($row->method === self::METHOD_CHEQUE) {
                 $cheque += (float) $row->amount;
+            } elseif ($row->method === self::METHOD_ADVANCE) {
+                $advance += (float) $row->amount;
             } else {
                 $credit += (float) $row->amount;
                 if (! $row->settled) {
@@ -710,6 +720,7 @@ class DocumentPaymentService
             'cash_amount' => round($cash, 2),
             'cheque_amount' => round($cheque, 2),
             'credit_amount' => round($credit, 2),
+            'advance_amount' => round($advance, 2),
             'remaining_credit' => round($remaining, 2),
             'methods' => array_values(array_unique($methods)),
             'method_labels' => array_map([self::class, 'methodLabel'], array_values(array_unique($methods))),
@@ -776,12 +787,85 @@ class DocumentPaymentService
     }
 
     /**
-     * تسویه نسیه با ظهرنویسی چک دریافتی — بدون برداشت از حساب نقد.
-     * مبلغ چک باید ≤ مانده نسیه باشد؛ کل مبلغ چک تسویه می‌شود.
-     *
-     * @return DocumentPayment ردیف پرداخت ایجادشده
+     * وقتی مبلغ سند (مثلاً با افزودن ردیف/مواد) عوض می‌شود ولی سهم پرداخت‌ها همان مانده،
+     * اختلاف را روی نسیهٔ باز می‌گذارد تا مانده نسیه با مبلغ فاکتور یکی شود.
+     * حسابداری از قبل gap را به AP می‌زد؛ این متد ردیف document_payments را هم‌تراز می‌کند.
      */
-    public static function settleCreditWithReceivedCheque(Model $model, Cheque $cheque): DocumentPayment
+    public static function alignSplitsToDocumentAmount(Model $model): void
+    {
+        if (! self::supportsSplits() || ! ($model instanceof Invoice || $model instanceof Expense)) {
+            return;
+        }
+        if (! self::supports($model)) {
+            return;
+        }
+        if (! $model->payments()->exists()) {
+            return;
+        }
+
+        $amount = round((float) $model->amount, 2);
+        $sum = round((float) $model->payments()->sum('amount'), 2);
+        $delta = round($amount - $sum, 2);
+        if (abs($delta) < 0.01) {
+            return;
+        }
+
+        if ($delta > 0) {
+            $open = $model->payments()
+                ->where('method', self::METHOD_CREDIT)
+                ->where('settled', false)
+                ->orderBy('sort_order')
+                ->orderBy('id')
+                ->first();
+            if ($open) {
+                $open->update(['amount' => round((float) $open->amount + $delta, 2)]);
+            } else {
+                DocumentPayment::create([
+                    'atelier_id' => (int) $model->atelier_id,
+                    'invoice_id' => $model instanceof Invoice ? $model->id : null,
+                    'expense_id' => $model instanceof Expense ? $model->id : null,
+                    'method' => self::METHOD_CREDIT,
+                    'amount' => $delta,
+                    'shop_account_id' => null,
+                    'cheque_id' => null,
+                    'settled' => false,
+                    'sort_order' => (int) $model->payments()->max('sort_order') + 1,
+                ]);
+            }
+        } else {
+            $need = -$delta;
+            $credits = $model->payments()
+                ->where('method', self::METHOD_CREDIT)
+                ->where('settled', false)
+                ->orderByDesc('sort_order')
+                ->orderByDesc('id')
+                ->get();
+            foreach ($credits as $row) {
+                if ($need <= 0.001) {
+                    break;
+                }
+                $rowAmount = round((float) $row->amount, 2);
+                if ($rowAmount - $need <= 0.001) {
+                    $need = round($need - $rowAmount, 2);
+                    $row->delete();
+                } else {
+                    $row->update(['amount' => round($rowAmount - $need, 2)]);
+                    $need = 0;
+                }
+            }
+        }
+
+        $model->unsetRelation('payments');
+        self::refreshDocumentSummary($model);
+    }
+
+    /**
+     * تسویه نسیه با ظهرنویسی چک دریافتی — بدون برداشت از حساب نقد.
+     * اگر مبلغ چک بیشتر از مانده نسیه باشد، فقط بدهی سند تسویه می‌شود و مابقی به پیش‌پرداخت ذینفع می‌رود.
+     *
+     * @return array{payment: DocumentPayment, settled_amount: float, advance_amount: float}
+     */
+    public static function settleCreditWithReceivedCheque(Model $model, Cheque $cheque): array
     {
         if (! $model instanceof Expense && ! $model instanceof Invoice) {
             throw new RuntimeException('این سند قابل تسویه با ظهرنویسی چک نیست.');
@@ -796,14 +880,16 @@ class DocumentPaymentService
             throw new RuntimeException('فقط چک در انتظار وصول قابل ظهرنویسی است.');
         }
 
-        $pay = round((float) $cheque->amount, 2);
-        if ($pay < 0.01) {
+        $chequeAmount = round((float) $cheque->amount, 2);
+        if ($chequeAmount < 0.01) {
             throw new RuntimeException('مبلغ چک نامعتبر است.');
         }
 
         if (! self::supportsSplits()) {
             throw new RuntimeException('ظهرنویسی چک در این نسخه فعال نیست.');
         }
+
+        self::alignSplitsToDocumentAmount($model);
 
         // سند نسیهٔ قدیمی بدون ردیف document_payments
         if (! $model->payments()->exists()
@@ -828,13 +914,11 @@ class DocumentPaymentService
         if ($remaining <= 0.001) {
             throw new RuntimeException('بدهی نسیه برای این سند باقی نمانده است.');
         }
-        if ($pay - $remaining > 0.001) {
-            throw new RuntimeException(
-                'مبلغ چک ('.number_format($pay).') بیشتر از مانده نسیه سند ('.number_format($remaining).') است.'
-            );
-        }
 
-        $left = $pay;
+        $settledAmount = min($chequeAmount, $remaining);
+        $advanceAmount = round($chequeAmount - $settledAmount, 2);
+
+        $left = $settledAmount;
         $creditQuery = $model->payments()->where('method', self::METHOD_CREDIT)->where('settled', false);
         foreach ($creditQuery->orderBy('sort_order')->orderBy('id')->get() as $row) {
             if ($left <= 0.001) {
@@ -855,7 +939,7 @@ class DocumentPaymentService
             'invoice_id' => $model instanceof Invoice ? $model->id : null,
             'expense_id' => $model instanceof Expense ? $model->id : null,
             'method' => self::METHOD_CHEQUE,
-            'amount' => $pay,
+            'amount' => $settledAmount,
             'shop_account_id' => null,
             'cheque_id' => $cheque->id,
             'settled' => true,
@@ -864,7 +948,11 @@ class DocumentPaymentService
 
         self::refreshDocumentSummary($model);
 
-        return $payment;
+        return [
+            'payment' => $payment,
+            'settled_amount' => $settledAmount,
+            'advance_amount' => $advanceAmount,
+        ];
     }
 
     /**
