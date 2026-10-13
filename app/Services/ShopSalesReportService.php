@@ -418,7 +418,8 @@ class ShopSalesReportService
     }
 
     /**
-     * آیا چکِ متصل به فروش تا پایان بازه وصول شده است؟
+     * آیا چکِ متصل به فروش تا پایان بازه تسویه شده است؟
+     * وصول بانکی یا ظهرنویسی (انتقال به بستانکار) هر دو طلب فروش را می‌بندند.
      */
     public static function isChequeClearedAsOf(Purchase $purchase, string $endString): bool
     {
@@ -432,12 +433,21 @@ class ShopSalesReportService
         }
 
         $status = $cheque->getRawOriginal('status');
+        $end = Carbon::parse($endString);
+
         $clearedAt = $cheque->getRawOriginal('cleared_at');
-        if ($status !== \App\Models\Cheque::STATUS_CLEARED || ! $clearedAt) {
-            return false;
+        if ($status === \App\Models\Cheque::STATUS_CLEARED && $clearedAt
+            && Carbon::parse($clearedAt)->lte($end)) {
+            return true;
         }
 
-        return Carbon::parse($clearedAt)->lte(Carbon::parse($endString));
+        $transferredAt = $cheque->getRawOriginal('transferred_at');
+        if ($status === \App\Models\Cheque::STATUS_TRANSFERRED && $transferredAt
+            && Carbon::parse($transferredAt)->lte($end)) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -492,7 +502,7 @@ class ShopSalesReportService
     }
 
     /**
-     * مبلغ چک‌های متصل به فروش که در بازه وصول شده‌اند.
+     * مبلغ چک‌های متصل به فروش که در بازه وصول بانکی یا ظهرنویسی شده‌اند.
      */
     public static function chequesCollectedInRange(int $atelierId, string $start, string $end): float
     {
@@ -507,9 +517,17 @@ class ShopSalesReportService
             })
             ->whereNotNull('cheque_id')
             ->whereHas('cheque', function ($q) use ($start, $end) {
-                $q->where('status', \App\Models\Cheque::STATUS_CLEARED)
-                    ->whereNotNull('cleared_at')
-                    ->whereBetween('cleared_at', [$start, $end]);
+                $q->where(function ($inner) use ($start, $end) {
+                    $inner->where(function ($c) use ($start, $end) {
+                        $c->where('status', \App\Models\Cheque::STATUS_CLEARED)
+                            ->whereNotNull('cleared_at')
+                            ->whereBetween('cleared_at', [$start, $end]);
+                    })->orWhere(function ($c) use ($start, $end) {
+                        $c->where('status', \App\Models\Cheque::STATUS_TRANSFERRED)
+                            ->whereNotNull('transferred_at')
+                            ->whereBetween('transferred_at', [$start, $end]);
+                    });
+                });
             })
             ->with(['purchasedProducts', 'cheque'])
             ->get()
@@ -536,6 +554,7 @@ class ShopSalesReportService
 
     /**
      * مجموع فروش‌های چکی وصول‌نشده تا پایان یک روز (اثر منفی روی موجودی حساب).
+     * چک ظهرنویسی‌شده دیگر باز نیست (طلب فروش با انتقال بسته شده).
      */
     public static function openChequeSalesAsOf(int $atelierId, Carbon $asOfDate): float
     {
@@ -555,10 +574,15 @@ class ShopSalesReportService
             ->where('created_at', '<=', $endString)
             ->where(function ($q) use ($endString) {
                 $q->whereHas('cheque', function ($cq) use ($endString) {
-                    $cq->where(function ($c2) use ($endString) {
-                        $c2->where('status', '!=', \App\Models\Cheque::STATUS_CLEARED)
+                    // هنوز نه پاس شده و نه ظهرنویسی شده تا پایان بازه
+                    $cq->where(function ($notCleared) use ($endString) {
+                        $notCleared->where('status', '!=', \App\Models\Cheque::STATUS_CLEARED)
                             ->orWhereNull('cleared_at')
                             ->orWhere('cleared_at', '>', $endString);
+                    })->where(function ($notTransferred) use ($endString) {
+                        $notTransferred->where('status', '!=', \App\Models\Cheque::STATUS_TRANSFERRED)
+                            ->orWhereNull('transferred_at')
+                            ->orWhere('transferred_at', '>', $endString);
                     });
                 })->orWhereDoesntHave('cheque');
             })

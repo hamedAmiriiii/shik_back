@@ -1243,8 +1243,9 @@ class DocumentPaymentService
     }
 
     /**
-     * خروج نقد از حساب فروشگاه/تنخواه/صندوق در بازهٔ تاریخ.
-     * چک و نسیهٔ پرداخت‌نشده حساب نمی‌شوند؛ چک فقط در تاریخ پاس شدن کم می‌شود.
+     * خروج نقد / تسویهٔ فاکتور یا هزینه در بازهٔ تاریخ.
+     * نقد از حساب، چک صادرهٔ پاس‌شده، ظهرنویسی چک دریافتی، و مصرف پیش‌پرداخت ذینفع.
+     * نسیهٔ باز حساب نمی‌شود.
      *
      * @param  'invoices'|'expenses'  $kind
      */
@@ -1253,15 +1254,14 @@ class DocumentPaymentService
         $total = 0.0;
 
         if (self::supportsSplits()) {
-            $query = DocumentPayment::query()
+            $base = DocumentPayment::query()
                 ->where('atelier_id', $atelierId)
-                ->where('settled', true)
-                ->whereNotNull('shop_account_id');
+                ->where('settled', true);
 
             if ($kind === 'invoices') {
-                $query->whereNotNull('invoice_id');
+                $base->whereNotNull('invoice_id');
             } else {
-                $query->whereNotNull('expense_id')
+                $base->whereNotNull('expense_id')
                     ->whereHas('expense', function ($expense) {
                         $expense->where('type', 'جاری');
                         if (CustomerCreditExpenseService::supports()) {
@@ -1270,7 +1270,9 @@ class DocumentPaymentService
                     });
             }
 
-            $query->where(function ($outer) use ($from, $to) {
+            // نقد از حساب / تسویه نسیه از حساب / چک صادره پاس‌شده
+            $cashQuery = (clone $base)->whereNotNull('shop_account_id');
+            $cashQuery->where(function ($outer) use ($from, $to) {
                 $outer->where(function ($q) use ($from, $to) {
                     $q->where('method', self::METHOD_ACCOUNT)
                         ->whereDate('created_at', '>=', $from)
@@ -1288,8 +1290,25 @@ class DocumentPaymentService
                         });
                 });
             });
+            $total += (float) $cashQuery->sum('amount');
 
-            $total += (float) $query->sum('amount');
+            // ظهرنویسی چک دریافتی + مصرف پیش‌پرداخت (بدون برداشت از حساب نقد)
+            $nonCashQuery = (clone $base)->where(function ($outer) use ($from, $to) {
+                $outer->where(function ($q) use ($from, $to) {
+                    $q->where('method', self::METHOD_CHEQUE)
+                        ->whereHas('cheque', function ($cheque) use ($from, $to) {
+                            $cheque->where('status', Cheque::STATUS_TRANSFERRED)
+                                ->whereNotNull('transferred_at')
+                                ->whereDate('transferred_at', '>=', $from)
+                                ->whereDate('transferred_at', '<=', $to);
+                        });
+                })->orWhere(function ($q) use ($from, $to) {
+                    $q->where('method', self::METHOD_ADVANCE)
+                        ->whereDate('created_at', '>=', $from)
+                        ->whereDate('created_at', '<=', $to);
+                });
+            });
+            $total += (float) $nonCashQuery->sum('amount');
         }
 
         $total += self::legacyCashOutflowInRange($atelierId, $from, $to, $kind);

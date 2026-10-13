@@ -423,7 +423,7 @@ class FinancialReportController extends Controller
         // خالص سود = سود - هزینه‌های جاری
         $netProfit = $totalProfit - $totalExpenses;
 
-        // موجودی نقد عملیاتی: فروش تعهدی منهای نسیه/چک/قسط وصول‌نشده و پرداخت نقدی فاکتور و هزینه
+        // موجودی نقد عملیاتی: فروش تعهدی منهای نسیه/چک باز/قسط و پرداخت فاکتور (نقد+ظهرنویسی+پیش‌پرداخت) و هزینه
         $accountBalance = $netSales + $incomesForBalance - $expenseCashOut - $invoiceCashOut - $manualPurchases
             - $metrics['credit_used_total'] - $chequePayments - $uncollectedDebts - $uncollectedInstallments;
 
