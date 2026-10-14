@@ -105,33 +105,67 @@ class ThreedMenuService
             : [];
         if ($order === []) {
             $order = array_map(function ($id) {
-                return ['raw_material_id' => (int) $id, 'scale' => 1.0];
+                return [
+                    'raw_material_id' => (int) $id,
+                    'scale_x' => 1.0,
+                    'scale_y' => 1.0,
+                    'scale' => 1.0,
+                    'gap' => 0.0,
+                ];
             }, array_keys($byId));
         }
+
+        $clampScale = static function ($value): float {
+            $n = is_numeric($value) ? (float) $value : 1.0;
+            if (! is_finite($n)) {
+                $n = 1.0;
+            }
+
+            return max(0.2, min(3.0, round($n, 2)));
+        };
+        $clampGap = static function ($value): float {
+            $n = is_numeric($value) ? (float) $value : 0.0;
+            if (! is_finite($n)) {
+                $n = 0.0;
+            }
+
+            return max(-40.0, min(80.0, round($n, 1)));
+        };
 
         $layers = [];
         foreach ($order as $index => $row) {
             $materialId = 0;
-            $scale = 1.0;
+            $scaleX = 1.0;
+            $scaleY = 1.0;
+            $gap = 0.0;
             if (is_array($row)) {
                 $materialId = (int) ($row['raw_material_id'] ?? $row['id'] ?? 0);
-                $scale = isset($row['scale']) ? (float) $row['scale'] : 1.0;
+                $legacy = array_key_exists('scale', $row) ? (float) $row['scale'] : null;
+                $scaleX = array_key_exists('scale_x', $row)
+                    ? (float) $row['scale_x']
+                    : ($legacy ?? 1.0);
+                $scaleY = array_key_exists('scale_y', $row)
+                    ? (float) $row['scale_y']
+                    : ($legacy ?? 1.0);
+                $gap = array_key_exists('gap', $row) ? (float) $row['gap'] : 0.0;
             } else {
                 $materialId = (int) $row;
             }
             if ($materialId <= 0 || ! isset($byId[$materialId]) || empty($byId[$materialId]['image_url'])) {
                 continue;
             }
-            if (! is_finite($scale)) {
-                $scale = 1.0;
-            }
-            $scale = max(0.2, min(3.0, round($scale, 2)));
+            $scaleX = $clampScale($scaleX);
+            $scaleY = $clampScale($scaleY);
+            $gap = $clampGap($gap);
             $layers[] = [
                 'key' => $materialId.'-'.$index,
                 'raw_material_id' => $materialId,
                 'name' => $byId[$materialId]['name'],
                 'image_url' => $byId[$materialId]['image_url'],
-                'scale' => $scale,
+                'scale_x' => $scaleX,
+                'scale_y' => $scaleY,
+                'scale' => $scaleX === $scaleY ? $scaleX : round(($scaleX + $scaleY) / 2, 2),
+                'gap' => $gap,
             ];
         }
 

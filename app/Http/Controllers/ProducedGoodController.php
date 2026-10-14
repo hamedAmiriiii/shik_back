@@ -368,10 +368,13 @@ class ProducedGoodController extends Controller
             'ingredients.*.is_removable' => 'sometimes|boolean',
             'ingredients.*.is_addable' => 'sometimes|boolean',
             'layer_order' => 'sometimes|nullable|array|max:40',
-            // عدد ساده (قدیمی) یا { raw_material_id, scale }
+            // عدد ساده (قدیمی) یا { raw_material_id, scale_x, scale_y, gap }
             'layer_order.*' => 'nullable',
             'layer_order.*.raw_material_id' => 'sometimes|integer',
             'layer_order.*.scale' => 'sometimes|nullable|numeric|min:0.2|max:3',
+            'layer_order.*.scale_x' => 'sometimes|nullable|numeric|min:0.2|max:3',
+            'layer_order.*.scale_y' => 'sometimes|nullable|numeric|min:0.2|max:3',
+            'layer_order.*.gap' => 'sometimes|nullable|numeric|min:-40|max:80',
             'layer_compose' => ['sometimes', 'nullable', Rule::in(ProducedGood::layerComposeModes())],
             'category_ids' => 'nullable|array',
             'category_ids.*' => 'integer|exists:categories,id',
@@ -522,7 +525,7 @@ class ProducedGoodController extends Controller
 
     /**
      * ترتیب لایه‌های عکس (بالا به پایین). هر ماده می‌تواند چند بار بیاید؛ فقط مواد فرمول مجازند.
-     * هر آیتم: شناسه ماده یا { raw_material_id, scale }.
+     * هر آیتم: شناسه ماده یا { raw_material_id, scale_x, scale_y, gap }.
      *
      * @param  array<int, mixed>|null  $layerOrder
      */
@@ -536,26 +539,55 @@ class ProducedGoodController extends Controller
             return (int) $id;
         })->all();
 
+        $clampScale = static function ($value): float {
+            $n = is_numeric($value) ? (float) $value : 1.0;
+            if (! is_finite($n)) {
+                $n = 1.0;
+            }
+
+            return max(0.2, min(3.0, round($n, 2)));
+        };
+        $clampGap = static function ($value): float {
+            $n = is_numeric($value) ? (float) $value : 0.0;
+            if (! is_finite($n)) {
+                $n = 0.0;
+            }
+
+            return max(-40.0, min(80.0, round($n, 1)));
+        };
+
         $clean = [];
         foreach ((array) $layerOrder as $row) {
             $id = 0;
-            $scale = 1.0;
+            $scaleX = 1.0;
+            $scaleY = 1.0;
+            $gap = 0.0;
             if (is_array($row)) {
                 $id = (int) ($row['raw_material_id'] ?? $row['id'] ?? 0);
-                $scale = isset($row['scale']) ? (float) $row['scale'] : 1.0;
+                $legacy = array_key_exists('scale', $row) ? (float) $row['scale'] : null;
+                $scaleX = array_key_exists('scale_x', $row)
+                    ? (float) $row['scale_x']
+                    : ($legacy ?? 1.0);
+                $scaleY = array_key_exists('scale_y', $row)
+                    ? (float) $row['scale_y']
+                    : ($legacy ?? 1.0);
+                $gap = array_key_exists('gap', $row) ? (float) $row['gap'] : 0.0;
             } else {
                 $id = (int) $row;
             }
             if ($id <= 0 || ! in_array($id, $allowed, true)) {
                 continue;
             }
-            if (! is_finite($scale)) {
-                $scale = 1.0;
-            }
-            $scale = max(0.2, min(3.0, round($scale, 2)));
+            $scaleX = $clampScale($scaleX);
+            $scaleY = $clampScale($scaleY);
+            $gap = $clampGap($gap);
             $clean[] = [
                 'raw_material_id' => $id,
-                'scale' => $scale,
+                'scale_x' => $scaleX,
+                'scale_y' => $scaleY,
+                // سازگاری با کلاینت قدیمی
+                'scale' => $scaleX === $scaleY ? $scaleX : round(($scaleX + $scaleY) / 2, 2),
+                'gap' => $gap,
             ];
         }
 
