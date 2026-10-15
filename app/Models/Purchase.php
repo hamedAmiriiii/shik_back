@@ -31,6 +31,8 @@ class Purchase extends Model
         'installment_count',
         'installment_amount',
         'atelier_id',
+        'sold_by_user_id',
+        'sold_by_name',
         'client_id',
         'daily_ticket_number',
         'daily_ticket_date',

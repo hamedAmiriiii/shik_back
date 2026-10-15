@@ -229,6 +229,7 @@ class PurchasedProductController extends Controller
         $request->validate([
             'client_id' => 'nullable|string|max:64',
             'phone' => 'nullable|string|regex:/^09\d{9}$/',
+            'customer_name' => 'nullable|string|max:255',
             'products' => 'required|array|min:1',
             'products.*.product_id' => [
                 'nullable',
@@ -538,7 +539,7 @@ class PurchasedProductController extends Controller
             }
             $linkedCheque = $lockedCheques->first();
 
-            $purchasePayload = [
+            $purchasePayload = array_merge($this->saleActorFields($request), [
                 'phone' => $phone,
                 'total_amount' => $paymentType === 'installment' ? $finalTotalAmount : $grossTotal,
                 'discount_amount' => round((float) $discountAmount, 2),
@@ -552,7 +553,7 @@ class PurchasedProductController extends Controller
                 'installment_count' => $paymentType === 'installment' ? $installmentCount : null,
                 'installment_amount' => $installmentAmount,
                 'atelier_id' => $purchaseAtelierId,
-            ];
+            ]);
 
             $saleCreatedAt = null;
             if ($request->filled('sale_date')) {
@@ -645,6 +646,23 @@ class PurchasedProductController extends Controller
         }
         }
 
+        $customerNameInput = trim((string) $request->input('customer_name', ''));
+        if ($phone && $customerNameInput !== '' && Schema::hasColumn('user_shiksho', 'name')) {
+            $customerNameInput = mb_substr($customerNameInput, 0, 255);
+            $namedUser = UserShiksho::firstOrCreate(
+                ['phone' => $phone, 'atelier_id' => $purchaseAtelierId],
+                [
+                    'name' => $customerNameInput,
+                    'credit' => 0,
+                    'installment_credit' => 0,
+                    'credit_last_updated_at' => now(),
+                ]
+            );
+            if (! $namedUser->wasRecentlyCreated && trim((string) $namedUser->name) !== $customerNameInput) {
+                $namedUser->update(['name' => $customerNameInput]);
+            }
+        }
+
         // اگر شماره تلفن وجود دارد (ویرایش فاکتور پیامک جدید نمی‌فرستد)
         $smsMeta = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(false, false);
         if ($phone && ! $replacePurchase) {
@@ -681,6 +699,35 @@ class PurchasedProductController extends Controller
         }
 
         return $this->storePurchaseResponse($purchase, false, (bool) $replacePurchase, $smsMeta);
+    }
+
+    /** کاربری که این فروش را ثبت کرده. */
+    protected function saleActorFields(Request $request): array
+    {
+        if (! Schema::hasColumn('purchases', 'sold_by_name')) {
+            return [];
+        }
+
+        $actor = $this->shopRequestActor($request);
+        if (! $actor) {
+            return [];
+        }
+
+        $name = trim((string) ($actor->name ?? ''));
+        $last = trim((string) ($actor->last_name ?? ''));
+        $full = trim($name.' '.$last);
+        if ($full === '') {
+            $full = trim((string) ($actor->phone ?? ''));
+        }
+
+        $fields = [
+            'sold_by_name' => $full !== '' ? mb_substr($full, 0, 120) : null,
+        ];
+        if (Schema::hasColumn('purchases', 'sold_by_user_id')) {
+            $fields['sold_by_user_id'] = $actor instanceof \App\Models\User ? (int) $actor->id : null;
+        }
+
+        return $fields;
     }
 
     protected function normalizeClientId($clientId): ?string
