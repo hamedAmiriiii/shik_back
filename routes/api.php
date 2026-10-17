@@ -623,7 +623,13 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::delete('/reserv-menu-background', [\App\Http\Controllers\SettingController::class, 'deleteReservMenuBackground']);
         Route::post('/reserv-menu-icon', [\App\Http\Controllers\SettingController::class, 'uploadReservMenuIcon']);
         Route::delete('/reserv-menu-icon', [\App\Http\Controllers\SettingController::class, 'deleteReservMenuIcon']);
-        $reservedSettingKeys = 'loyalty-credit-tiers|loyalty-credit|credit-expiry-days|installment-interest-rate|payroll|sale-return-days|reserv-menu-theme|reserv-menu-background|reserv-menu-icon';
+        Route::get('/online-storefront', [\App\Http\Controllers\SettingController::class, 'getOnlineStorefront']);
+        Route::put('/online-storefront', [\App\Http\Controllers\SettingController::class, 'updateOnlineStorefront']);
+        Route::post('/online-storefront', [\App\Http\Controllers\SettingController::class, 'updateOnlineStorefront']);
+        Route::post('/online-storefront-logo', [\App\Http\Controllers\SettingController::class, 'uploadOnlineStorefrontLogo']);
+        Route::delete('/online-storefront-logo', [\App\Http\Controllers\SettingController::class, 'deleteOnlineStorefrontLogo']);
+        Route::post('/online-storefront-banner', [\App\Http\Controllers\SettingController::class, 'uploadOnlineStorefrontBanner']);
+        $reservedSettingKeys = 'loyalty-credit-tiers|loyalty-credit|credit-expiry-days|installment-interest-rate|payroll|sale-return-days|reserv-menu-theme|reserv-menu-background|reserv-menu-icon|online-storefront|online-storefront-logo|online-storefront-banner';
         Route::get('/{key}', [\App\Http\Controllers\SettingController::class, 'show'])
             ->where('key', '^(?!'.$reservedSettingKeys.').+');
         Route::put('/{key}', [\App\Http\Controllers\SettingController::class, 'update'])

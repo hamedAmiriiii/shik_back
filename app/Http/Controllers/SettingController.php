@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Setting;
 use App\Services\GoogleSheets\ShopGoogleOAuth;
+use App\Services\OnlineStorefrontSettings;
 use App\Services\ReservMenuTheme;
 use App\Services\ShopLoyaltyCreditTierService;
 use App\Tools\ImageTools;
@@ -74,7 +75,9 @@ class SettingController extends Controller
             ], 403);
         }
         if (in_array($key, ShopGoogleOAuth::PRIVATE_SETTING_KEYS, true)
-            || in_array($key, ReservMenuTheme::MANAGED_KEYS, true)) {
+            || in_array($key, ReservMenuTheme::MANAGED_KEYS, true)
+            || in_array($key, OnlineStorefrontSettings::MANAGED_KEYS, true)
+            || $key === OnlineStorefrontSettings::KEY) {
             return response()->json(['message' => 'این تنظیم از این مسیر قابل تغییر نیست.'], 403);
         }
 
@@ -245,6 +248,180 @@ class SettingController extends Controller
         return response([
             'message' => 'آیکون فروشگاه حذف شد',
             'menu_theme' => ReservMenuTheme::forApi(),
+        ], 200);
+    }
+
+    /**
+     * تنظیمات ظاهر ویترین فروشگاه آنلاین — فقط با دسترسی فعال فروشگاه.
+     */
+    private function ensureOnlineStorefrontAccess(Request $request): ?\Illuminate\Http\JsonResponse
+    {
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            return response()->json(['message' => 'این تنظیم فقط برای حساب متصل به فروشگاه است.'], 422);
+        }
+        $atelier = \App\Models\Atelier::find($atelierId);
+        if (! $atelier || ! $atelier->isShopAccessActive()) {
+            return response()->json([
+                'message' => 'دسترسی فروشگاه آنلاین فعال نیست.',
+                'shop_access_active' => false,
+            ], 403);
+        }
+
+        return null;
+    }
+
+    public function getOnlineStorefront(Request $request)
+    {
+        if ($denied = $this->ensureOnlineStorefrontAccess($request)) {
+            return $denied;
+        }
+        $this->bindShopSettingAtelierFromRequest($request);
+
+        return response([
+            'storefront' => OnlineStorefrontSettings::forApi(),
+            'blocks' => OnlineStorefrontSettings::BLOCKS,
+        ], 200);
+    }
+
+    public function updateOnlineStorefront(Request $request)
+    {
+        if ($denied = $this->ensureOnlineStorefrontAccess($request)) {
+            return $denied;
+        }
+        $this->bindShopSettingAtelierFromRequest($request);
+        $this->mergeRequestPayload($request, [
+            'logo_url',
+            'primary_color',
+            'banners',
+            'block_order',
+            'hidden_category_ids',
+            'trust_items',
+        ]);
+
+        $payload = $request->only([
+            'logo_url',
+            'primary_color',
+            'banners',
+            'block_order',
+            'hidden_category_ids',
+            'trust_items',
+        ]);
+
+        $storefront = OnlineStorefrontSettings::save($payload);
+
+        return response([
+            'message' => 'تنظیمات ویترین ذخیره شد',
+            'storefront' => $storefront,
+        ], 200);
+    }
+
+    public function uploadOnlineStorefrontLogo(Request $request)
+    {
+        if ($denied = $this->ensureOnlineStorefrontAccess($request)) {
+            return $denied;
+        }
+        $this->bindShopSettingAtelierFromRequest($request);
+
+        $maxKb = (int) (OnlineStorefrontSettings::LOGO_MAX_BYTES / 1024);
+        $request->validate([
+            'file' => "required|file|max:{$maxKb}|mimes:jpeg,jpg,png,webp,gif",
+        ], [
+            'file.max' => 'حجم لوگو نباید بیشتر از ۲ مگابایت باشد.',
+            'file.mimes' => 'فقط تصویر (jpg، png، webp، gif) مجاز است.',
+        ]);
+
+        $file = $request->file('file');
+        $mime = strtolower((string) $file->getMimeType());
+        $extName = strtolower((string) $file->getClientOriginalExtension());
+        if ($extName === 'webp' || $mime === 'image/webp') {
+            $ext = 'webp';
+        } elseif ($extName === 'png' || $mime === 'image/png') {
+            $ext = 'png';
+        } elseif ($extName === 'gif' || $mime === 'image/gif') {
+            $ext = 'gif';
+        } else {
+            $ext = 'jpg';
+        }
+
+        $atelierId = Setting::contextAtelierId();
+        $contents = file_get_contents($file->getRealPath());
+        if ($contents === false || $contents === '') {
+            return response()->json(['message' => 'خواندن فایل ناموفق بود.'], 422);
+        }
+        $oldPath = trim((string) Setting::get(OnlineStorefrontSettings::LOGO_MEDIA_KEY, ''));
+        $path = ImageTools::saveFile(
+            "/online-storefront/{$atelierId}/logo_".time().".{$ext}",
+            $contents
+        );
+
+        Setting::set(OnlineStorefrontSettings::LOGO_MEDIA_KEY, $path);
+        $this->deletePublicFile($oldPath);
+
+        return response([
+            'message' => 'لوگوی فروشگاه ذخیره شد',
+            'storefront' => OnlineStorefrontSettings::forApi(),
+        ], 200);
+    }
+
+    public function deleteOnlineStorefrontLogo(Request $request)
+    {
+        if ($denied = $this->ensureOnlineStorefrontAccess($request)) {
+            return $denied;
+        }
+        $this->bindShopSettingAtelierFromRequest($request);
+
+        $this->deletePublicFile(trim((string) Setting::get(OnlineStorefrontSettings::LOGO_MEDIA_KEY, '')));
+        Setting::set(OnlineStorefrontSettings::LOGO_MEDIA_KEY, '');
+
+        return response([
+            'message' => 'لوگوی فروشگاه حذف شد',
+            'storefront' => OnlineStorefrontSettings::forApi(),
+        ], 200);
+    }
+
+    public function uploadOnlineStorefrontBanner(Request $request)
+    {
+        if ($denied = $this->ensureOnlineStorefrontAccess($request)) {
+            return $denied;
+        }
+        $this->bindShopSettingAtelierFromRequest($request);
+
+        $maxKb = (int) (OnlineStorefrontSettings::BANNER_MAX_BYTES / 1024);
+        $request->validate([
+            'file' => "required|file|max:{$maxKb}|mimes:jpeg,jpg,png,webp,gif",
+        ], [
+            'file.max' => 'حجم بنر نباید بیشتر از ۴ مگابایت باشد.',
+            'file.mimes' => 'فقط تصویر (jpg، png، webp، gif) مجاز است.',
+        ]);
+
+        $file = $request->file('file');
+        $mime = strtolower((string) $file->getMimeType());
+        $extName = strtolower((string) $file->getClientOriginalExtension());
+        if ($extName === 'webp' || $mime === 'image/webp') {
+            $ext = 'webp';
+        } elseif ($extName === 'png' || $mime === 'image/png') {
+            $ext = 'png';
+        } elseif ($extName === 'gif' || $mime === 'image/gif') {
+            $ext = 'gif';
+        } else {
+            $ext = 'jpg';
+        }
+
+        $atelierId = Setting::contextAtelierId();
+        $contents = file_get_contents($file->getRealPath());
+        if ($contents === false || $contents === '') {
+            return response()->json(['message' => 'خواندن فایل ناموفق بود.'], 422);
+        }
+        $path = ImageTools::saveFile(
+            "/online-storefront/{$atelierId}/banner_".time().".{$ext}",
+            $contents
+        );
+
+        return response([
+            'message' => 'بنر آپلود شد',
+            'image_url' => Storage::url($path),
+            'path' => $path,
         ], 200);
     }
 
