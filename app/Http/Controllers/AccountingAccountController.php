@@ -40,6 +40,31 @@ class AccountingAccountController extends Controller
     }
 
     /**
+     * حساب‌های نهایی درخت که ثبت هزینه می‌تواند به آن‌ها وصل شود.
+     * GET /api/accounting/expense-accounts
+     */
+    public function expenseAccounts(Request $request)
+    {
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::ACCOUNTING, 'حسابداری برای این فروشگاه فعال نیست.');
+
+        if (! AccountingAccount::tableReady()) {
+            return response(['data' => []], 200);
+        }
+
+        $rows = \App\Services\ChartOfAccountsSeeder::expenseLinkableAccounts($atelierId);
+
+        return response([
+            'data' => $rows->map(fn (AccountingAccount $account) => [
+                'id' => $account->id,
+                'code' => $account->code,
+                'name' => $account->name,
+                'level' => $account->level,
+                'level_label' => $account->levelLabel(),
+            ])->values()->all(),
+        ], 200);
+    }
+
+    /**
      * کد پیشنهادی برای زیرحساب جدید یک حساب (و سطحی که زیرحساب خواهد داشت).
      * GET /api/accounting/accounts/{accountingAccount}/next-code
      */

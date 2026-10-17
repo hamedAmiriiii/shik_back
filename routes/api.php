@@ -453,6 +453,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::put('shop-partners/{shopPartner}', [\App\Http\Controllers\ShopPartnerController::class, 'update']);
     Route::delete('shop-partners/{shopPartner}', [\App\Http\Controllers\ShopPartnerController::class, 'destroy']);
 
+    Route::get('accounting/expense-accounts', [\App\Http\Controllers\AccountingAccountController::class, 'expenseAccounts']);
     Route::get('accounting/accounts', [\App\Http\Controllers\AccountingAccountController::class, 'index']);
     Route::post('accounting/accounts', [\App\Http\Controllers\AccountingAccountController::class, 'store']);
     Route::get('accounting/accounts/{accountingAccount}/next-code', [\App\Http\Controllers\AccountingAccountController::class, 'nextCode']);

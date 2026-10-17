@@ -126,6 +126,50 @@ class ChartOfAccountsSeeder
         ];
     }
 
+    /**
+     * حساب‌های نهایی که یک هزینه می‌تواند به آن‌ها وصل شود.
+     * خرید کالا (موجودی فاکتور) و هزینه خودکار اعتبار وفاداری در این فهرست نیستند.
+     *
+     * @return \Illuminate\Support\Collection<int, AccountingAccount>
+     */
+    public static function expenseLinkableAccounts(int $atelierId)
+    {
+        if ($atelierId <= 0 || ! AccountingAccount::tableReady()) {
+            return collect();
+        }
+
+        self::ensureForAtelier($atelierId);
+
+        $rows = AccountingAccount::query()
+            ->forAtelier($atelierId)
+            ->active()
+            ->orderBy('code')
+            ->get();
+
+        $parentIds = $rows->pluck('parent_id')->filter()->map(fn ($id) => (int) $id)->unique()->all();
+
+        return $rows
+            ->filter(function (AccountingAccount $account) use ($parentIds) {
+                if (in_array((int) $account->id, $parentIds, true)) {
+                    return false;
+                }
+
+                $name = trim((string) $account->name);
+                if ($name === 'خرید کالا' || $account->code === self::CODE_INV_CATALOG) {
+                    return false;
+                }
+                if ($account->code === self::CODE_LOYALTY) {
+                    return false;
+                }
+                if ($account->kind === AccountingAccount::KIND_EXPENSE) {
+                    return true;
+                }
+
+                return strpos((string) $account->code, '121') === 0;
+            })
+            ->values();
+    }
+
     public static function ensureForAtelier(int $atelierId): void
     {
         if ($atelierId <= 0 || ! AccountingAccount::tableReady()) {

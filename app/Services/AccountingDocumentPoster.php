@@ -194,7 +194,7 @@ class AccountingDocumentPoster
             } else {
                 AccountingLedger::push(
                     $lines,
-                    AccountingLedger::accountId($atelierId, self::expenseDebitCode($expense, $payrollType)),
+                    self::expenseDebitAccountId($expense, $payrollType),
                     $amount,
                     0,
                     $expense->title ?: 'هزینه'
@@ -382,6 +382,20 @@ class AccountingDocumentPoster
             $amount,
             'حساب پرداختنی'
         );
+    }
+
+    protected static function expenseDebitAccountId(Expense $expense, ?string $payrollType = null): int
+    {
+        $atelierId = (int) $expense->atelier_id;
+        $linkedId = (int) ($expense->accounting_account_id ?? 0);
+        if ($linkedId > 0 && \Illuminate\Support\Facades\Schema::hasColumn('expenses', 'accounting_account_id')) {
+            $allowed = ChartOfAccountsSeeder::expenseLinkableAccounts($atelierId)->pluck('id')->map(fn ($id) => (int) $id)->all();
+            if (in_array($linkedId, $allowed, true)) {
+                return $linkedId;
+            }
+        }
+
+        return AccountingLedger::accountId($atelierId, self::expenseDebitCode($expense, $payrollType));
     }
 
     protected static function expenseDebitCode(Expense $expense, ?string $payrollType = null): string

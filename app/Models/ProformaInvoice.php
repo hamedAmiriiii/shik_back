@@ -9,6 +9,7 @@ class ProformaInvoice extends Model
     protected $fillable = [
         'atelier_id',
         'phone',
+        'customer_name',
         'discount_amount',
         'total_amount',
         'items',

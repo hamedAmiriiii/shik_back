@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS `proforma_invoices` (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `atelier_id` BIGINT UNSIGNED NOT NULL,
     `phone` VARCHAR(20) NULL,
+    `customer_name` VARCHAR(255) NULL,
     `discount_amount` DECIMAL(15,2) NOT NULL DEFAULT 0,
     `total_amount` DECIMAL(15,2) NOT NULL DEFAULT 0,
     `items` JSON NOT NULL,

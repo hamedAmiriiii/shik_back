@@ -27,6 +27,10 @@ class ExpenseController extends Controller
             ->orderBy('date', 'desc')
             ->orderBy('id', 'desc');
 
+        if (\Illuminate\Support\Facades\Schema::hasColumn('expenses', 'accounting_account_id')) {
+            $query->with('accountingAccount:id,code,name');
+        }
+
         if ($this->supportsPaymentAccount('expenses')) {
             $query->with(['shopAccount', 'cheque']);
 
@@ -198,6 +202,7 @@ class ExpenseController extends Controller
         $this->mergeRequestPayload($request, [
             'amount', 'title', 'type', 'shop_account_id', 'payment_method', 'cheque', 'cheque_id',
             'payments', 'cash_amount', 'cheque_amount', 'credit_amount', 'beneficiary_id', 'user_shiksho_id',
+            'accounting_account_id',
         ]);
         $paymentsRaw = $request->input('payments');
         if (is_string($paymentsRaw) && $paymentsRaw !== '') {
@@ -211,7 +216,13 @@ class ExpenseController extends Controller
             'amount' => 'required|numeric|min:0',
             'title' => 'required|string|max:255',
             'type' => 'nullable|in:جاری,سرمایه',
+            'accounting_account_id' => 'nullable|integer',
         ], $this->paymentAccountRules('expenses'), DocumentPaymentService::requestRules(), ShopBeneficiaryService::requestRules('expenses')));
+
+        $accountLinkError = $this->applyExpenseAccount($atelierId, $fields);
+        if ($accountLinkError) {
+            return response()->json(['message' => $accountLinkError], 422);
+        }
 
         $beneficiaryError = ShopBeneficiaryService::applyToFields($atelierId, $fields, false, 'expenses');
         if ($beneficiaryError) {
@@ -280,6 +291,7 @@ class ExpenseController extends Controller
         $this->mergeRequestPayload($request, [
             'user_name', 'amount', 'title', 'type', 'shop_account_id', 'payment_method', 'cheque', 'cheque_id',
             'payments', 'cash_amount', 'cheque_amount', 'credit_amount', 'beneficiary_id', 'user_shiksho_id',
+            'accounting_account_id',
         ]);
         $paymentsRaw = $request->input('payments');
         if (is_string($paymentsRaw) && $paymentsRaw !== '') {
@@ -294,7 +306,13 @@ class ExpenseController extends Controller
             'amount' => 'sometimes|required|numeric|min:0',
             'title' => 'sometimes|required|string|max:255',
             'type' => 'sometimes|required|in:جاری,سرمایه',
+            'accounting_account_id' => 'nullable|integer',
         ], $this->paymentAccountRules('expenses'), ShopBeneficiaryService::requestRules('expenses'), DocumentPaymentService::requestRules()));
+
+        $accountLinkError = $this->applyExpenseAccount((int) $expense->atelier_id, $fields);
+        if ($accountLinkError) {
+            return response()->json(['message' => $accountLinkError], 422);
+        }
 
         $beneficiaryError = ShopBeneficiaryService::applyToFields((int) $expense->atelier_id, $fields, true, 'expenses');
         if ($beneficiaryError) {
@@ -452,6 +470,9 @@ class ExpenseController extends Controller
     protected function withAccount(Expense $expense): Expense
     {
         $expense->loadMissing(['shopAccount', 'cheque']);
+        if (\Illuminate\Support\Facades\Schema::hasColumn('expenses', 'accounting_account_id')) {
+            $expense->loadMissing('accountingAccount:id,code,name');
+        }
         if (DocumentPaymentService::supportsSplits()) {
             $expense->loadMissing(['payments.cheque', 'payments.shopAccount']);
         }
@@ -472,6 +493,43 @@ class ExpenseController extends Controller
         }
 
         return $expense;
+    }
+
+    /**
+     * وصل اختیاری هزینه به یک حساب نهایی درخت. خرید کالا پذیرفته نمی‌شود.
+     *
+     * @param  array<string, mixed>  $fields
+     */
+    protected function applyExpenseAccount(int $atelierId, array &$fields): ?string
+    {
+        if (! array_key_exists('accounting_account_id', $fields)) {
+            return null;
+        }
+        if (! \Illuminate\Support\Facades\Schema::hasColumn('expenses', 'accounting_account_id')) {
+            unset($fields['accounting_account_id']);
+
+            return null;
+        }
+
+        $raw = $fields['accounting_account_id'];
+        if ($raw === null || $raw === '') {
+            $fields['accounting_account_id'] = null;
+
+            return null;
+        }
+
+        $id = (int) $raw;
+        $allowed = \App\Services\ChartOfAccountsSeeder::expenseLinkableAccounts($atelierId)
+            ->pluck('id')
+            ->map(fn ($rowId) => (int) $rowId)
+            ->all();
+        if (! in_array($id, $allowed, true)) {
+            return 'این حساب برای ثبت هزینه قابل استفاده نیست.';
+        }
+
+        $fields['accounting_account_id'] = $id;
+
+        return null;
     }
 
     /**

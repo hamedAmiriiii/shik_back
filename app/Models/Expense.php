@@ -13,7 +13,7 @@ class Expense extends Model
 
     protected $fillable = [
         'user_name', 'date', 'amount', 'title', 'type', 'credit_source', 'credit_source_id',
-        'atelier_id', 'beneficiary_id', 'shop_account_id',
+        'atelier_id', 'accounting_account_id', 'beneficiary_id', 'shop_account_id',
         'payment_method', 'payment_status', 'paid_at', 'cheque_id',
     ];
 
@@ -35,6 +35,12 @@ class Expense extends Model
     public function shopAccount()
     {
         return $this->belongsTo(ShopAccount::class, 'shop_account_id');
+    }
+
+    /** حساب درخت که این هزینه به آن وصل شده. */
+    public function accountingAccount()
+    {
+        return $this->belongsTo(AccountingAccount::class, 'accounting_account_id');
     }
 
     /**
