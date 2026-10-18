@@ -433,22 +433,24 @@ class ProductController extends Controller
 
     /**
      * نمایش جزئیات یک محصول
-     * فقط در محدودهٔ فروشگاه مسیر (api/{shop}) جستجو می‌شود تا تداخل id بین فروشگاه‌ها/کالای تولیدی باعث ۴۰۴ نشود.
+     * شناسه از route('product') خوانده می‌شود تا با پارامتر {shop} مسیر api/{shop}/product/{id} جابه‌جا نشود.
+     * فقط در محدودهٔ همان فروشگاه جستجو می‌شود.
      */
-    public function show(Request $request, $product, string $shop = '')
+    public function show(Request $request, $product = null, $shop = null)
     {
+        $productId = $request->route('product') ?? $product;
         $atelierId = $this->shopAtelierIdOrAbort($request);
         $preferProduced = $request->input('item_type') === 'produced_good' || $request->boolean('produced_good');
 
         if ($preferProduced) {
-            $good = $this->resolveShopProducedGood($request, $product);
+            $good = $this->resolveShopProducedGood($request, $productId);
             if ($good) {
                 return response($this->formatProducedGoodCatalogItem($good));
             }
         }
 
         $model = Product::query()
-            ->where('id', $product)
+            ->where('id', $productId)
             ->where('atelier_id', $atelierId)
             ->first();
 
@@ -462,7 +464,7 @@ class ProductController extends Controller
         }
 
         // اگر id متعلق به محصول فروشگاه دیگری بود، هنوز ممکن است کالای تولیدی همین فروشگاه باشد
-        $good = $this->resolveShopProducedGood($request, $product);
+        $good = $this->resolveShopProducedGood($request, $productId);
         if ($good) {
             return response($this->formatProducedGoodCatalogItem($good));
         }
