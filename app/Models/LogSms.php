@@ -2,21 +2,32 @@
 
 namespace App\Models;
 
+use App\Tools\JalaliTools;
 use App\Tools\QueryTools;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class LogSms extends Model
 {
-    use HasFactory,QueryTools;
+    use HasFactory, QueryTools;
 
     protected $fillable = [
-        "text", "number", "receivers", "creator_id"
+        'text', 'number', 'receivers', 'creator_id',
     ];
 
-  
     public function creator()
     {
         return $this->belongsTo(User::class, 'creator_id');
+    }
+
+    /** تاریخ شمسی تهران — مثل ShopSmsLog */
+    public function getCreatedAtAttribute($value): ?string
+    {
+        return JalaliTools::format($value, 'Y-m-d H:i:s');
+    }
+
+    public function getUpdatedAtAttribute($value): ?string
+    {
+        return JalaliTools::format($value, 'Y-m-d H:i:s');
     }
 }
