@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AccountingAccount;
 use App\Models\Expense;
+use App\Models\Invoice;
 use App\Models\ManualTrade;
 use App\Services\AccountingDocumentPoster;
 use App\Services\ChartOfAccountsSeeder;
@@ -584,6 +585,10 @@ class ExpenseController extends Controller
 
         $expenses = $query->orderBy('date', 'desc')->orderBy('id', 'desc')->get();
 
+        $invoiceQuery = Invoice::where('atelier_id', $atelierId);
+        $this->applyExpenseDateFilter($invoiceQuery, $request);
+        $invoices = $invoiceQuery->orderBy('date', 'desc')->orderBy('id', 'desc')->get();
+
         $accounts = AccountingAccount::query()
             ->forAtelier($atelierId)
             ->active()
@@ -627,6 +632,18 @@ class ExpenseController extends Controller
             $directCount[$accountId] = ($directCount[$accountId] ?? 0) + 1;
         }
 
+        $purchaseAccount = $byCode->get(ChartOfAccountsSeeder::CODE_INV_CATALOG);
+        $purchaseAccountId = $purchaseAccount ? (int) $purchaseAccount->id : 0;
+        $resolvedByInvoiceId = [];
+        foreach ($invoices as $invoice) {
+            if ($purchaseAccountId <= 0) {
+                break;
+            }
+            $resolvedByInvoiceId[(int) $invoice->id] = $purchaseAccountId;
+            $directAmount[$purchaseAccountId] = ($directAmount[$purchaseAccountId] ?? 0) + (float) $invoice->amount;
+            $directCount[$purchaseAccountId] = ($directCount[$purchaseAccountId] ?? 0) + 1;
+        }
+
         $childrenMap = [];
         foreach ($accounts as $account) {
             $parentId = $account->parent_id ? (int) $account->parent_id : 0;
@@ -652,6 +669,7 @@ class ExpenseController extends Controller
             $account = $byId[$resolvedId] ?? null;
             $items[] = [
                 'id' => (int) $expense->id,
+                'source' => 'expense',
                 'title' => $expense->title,
                 'amount' => (float) $expense->amount,
                 'type' => $expense->type,
@@ -665,6 +683,44 @@ class ExpenseController extends Controller
                 ] : null,
             ];
         }
+        foreach ($invoices as $invoice) {
+            $resolvedId = $resolvedByInvoiceId[(int) $invoice->id] ?? 0;
+            if ($resolvedId <= 0) {
+                continue;
+            }
+            if ($selectedAccountId > 0 && ! isset($selectedDescendantIds[$resolvedId])) {
+                continue;
+            }
+            $account = $byId[$resolvedId] ?? null;
+            $items[] = [
+                'id' => (int) $invoice->id,
+                'source' => 'invoice',
+                'title' => $invoice->title ?: ('فاکتور #'.$invoice->id),
+                'amount' => (float) $invoice->amount,
+                'type' => 'فاکتور',
+                'date' => $invoice->date,
+                'user_name' => $invoice->user_name,
+                'accounting_account_id' => $resolvedId,
+                'accounting_account' => $account ? [
+                    'id' => (int) $account->id,
+                    'code' => $account->code,
+                    'name' => 'فاکتور خرید',
+                ] : [
+                    'id' => 0,
+                    'code' => ChartOfAccountsSeeder::CODE_INV_CATALOG,
+                    'name' => 'فاکتور خرید',
+                ],
+            ];
+        }
+
+        usort($items, function (array $a, array $b) {
+            $dateCmp = strcmp((string) ($b['date'] ?? ''), (string) ($a['date'] ?? ''));
+            if ($dateCmp !== 0) {
+                return $dateCmp;
+            }
+
+            return ((int) ($b['id'] ?? 0)) <=> ((int) ($a['id'] ?? 0));
+        });
 
         $tree = [];
         foreach ($accounts->filter(fn (AccountingAccount $row) => $row->parent_id === null) as $root) {
@@ -899,10 +955,12 @@ class ExpenseController extends Controller
     ): ?array {
         $id = (int) $account->id;
         $code = (string) $account->code;
+        $isPurchasePath = $code === '11' || $code === '113' || strpos($code, '113') === 0;
         $isExpenseBranch = $account->kind === AccountingAccount::KIND_EXPENSE
             || strpos($code, '121') === 0
             || $code === '12'
-            || $code === '1';
+            || $code === '1'
+            || $isPurchasePath;
 
         if (! $isExpenseBranch) {
             return null;
@@ -933,18 +991,23 @@ class ExpenseController extends Controller
         }
 
         $isAssetCapexPath = in_array($code, ['1', '12', '121'], true) || strpos($code, '121') === 0;
-        // شاخهٔ دارایی فقط وقتی هزینهٔ سرمایه‌ای وجود دارد؛ درخت هزینه‌ها همیشه کامل است
-        if ($isAssetCapexPath && $account->kind !== AccountingAccount::KIND_EXPENSE) {
+        // شاخهٔ دارایی / خرید کالا فقط وقتی مبلغ دارد؛ درخت هزینه‌ها همیشه کامل است
+        if (($isAssetCapexPath || $isPurchasePath) && $account->kind !== AccountingAccount::KIND_EXPENSE) {
             if ($rolledAmount <= 0 && empty($children)) {
                 return null;
             }
+        }
+
+        $displayName = $account->name;
+        if ($code === ChartOfAccountsSeeder::CODE_INV_CATALOG) {
+            $displayName = 'فاکتور خرید';
         }
 
         return [
             'id' => $id,
             'parent_id' => $account->parent_id ? (int) $account->parent_id : null,
             'code' => $account->code,
-            'name' => $account->name,
+            'name' => $displayName,
             'level' => $account->level,
             'kind' => $account->kind,
             'amount' => $rolledAmount,
