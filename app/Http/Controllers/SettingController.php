@@ -296,6 +296,9 @@ class SettingController extends Controller
             'banners',
             'block_order',
             'hidden_category_ids',
+            'show_header_categories',
+            'show_category_row',
+            'product_card_style',
             'trust_items',
         ]);
 
@@ -305,6 +308,9 @@ class SettingController extends Controller
             'banners',
             'block_order',
             'hidden_category_ids',
+            'show_header_categories',
+            'show_category_row',
+            'product_card_style',
             'trust_items',
         ]);
 

@@ -433,22 +433,26 @@ class ProductController extends Controller
 
     /**
      * نمایش جزئیات یک محصول
+     * فقط در محدودهٔ فروشگاه مسیر (api/{shop}) جستجو می‌شود تا تداخل id بین فروشگاه‌ها/کالای تولیدی باعث ۴۰۴ نشود.
      */
     public function show(Request $request, $product, string $shop = '')
     {
-        if ($request->input('item_type') === 'produced_good' || $request->boolean('produced_good')) {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $preferProduced = $request->input('item_type') === 'produced_good' || $request->boolean('produced_good');
+
+        if ($preferProduced) {
             $good = $this->resolveShopProducedGood($request, $product);
             if ($good) {
                 return response($this->formatProducedGoodCatalogItem($good));
             }
         }
 
-        $model = Product::query()->where('id', $product)->first();
+        $model = Product::query()
+            ->where('id', $product)
+            ->where('atelier_id', $atelierId)
+            ->first();
+
         if ($model) {
-            $atelierId = $this->shopAtelierIdOrAbort($request);
-            if ($model->atelier_id !== null && (int) $model->atelier_id !== $atelierId) {
-                abort(response()->json(['message' => 'محصول یافت نشد'], 404));
-            }
             $model->load(['images', 'categories', 'manufacturer']);
             $model->item_type = 'product';
             $model->product_id = $model->id;
@@ -457,6 +461,7 @@ class ProductController extends Controller
             return response($this->appendProductPricingMeta($model));
         }
 
+        // اگر id متعلق به محصول فروشگاه دیگری بود، هنوز ممکن است کالای تولیدی همین فروشگاه باشد
         $good = $this->resolveShopProducedGood($request, $product);
         if ($good) {
             return response($this->formatProducedGoodCatalogItem($good));

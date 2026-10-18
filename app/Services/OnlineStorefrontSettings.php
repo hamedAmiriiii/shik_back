@@ -31,6 +31,8 @@ class OnlineStorefrontSettings
 
     public const DEFAULT_PRIMARY = '#ef4056';
 
+    public const CARD_STYLES = ['digikala', 'soft'];
+
     /**
      * @return array<string, mixed>
      */
@@ -42,6 +44,9 @@ class OnlineStorefrontSettings
             'banners' => [],
             'block_order' => self::BLOCKS,
             'hidden_category_ids' => [],
+            'show_header_categories' => true,
+            'show_category_row' => true,
+            'product_card_style' => 'digikala',
             'trust_items' => [
                 ['title' => 'ارسال سریع', 'subtitle' => 'تحویل به‌موقع سفارش', 'icon' => 'shipping'],
                 ['title' => 'پرداخت امن', 'subtitle' => 'درگاه معتبر بانکی', 'icon' => 'payment'],
@@ -170,12 +175,41 @@ class OnlineStorefrontSettings
             }
         }
 
+        $cardStyle = trim((string) ($input['product_card_style'] ?? $defaults['product_card_style']));
+        if (! in_array($cardStyle, self::CARD_STYLES, true)) {
+            $cardStyle = 'digikala';
+        }
+
+        $asBool = static function ($value, bool $default): bool {
+            if ($value === null) {
+                return $default;
+            }
+            if (is_bool($value)) {
+                return $value;
+            }
+            if (is_numeric($value)) {
+                return (int) $value === 1;
+            }
+            $s = strtolower(trim((string) $value));
+
+            return in_array($s, ['1', 'true', 'yes', 'on'], true);
+        };
+
         return [
             'logo_url' => $logoUrl,
             'primary_color' => strtolower($color),
             'banners' => $banners,
             'block_order' => $blockOrder,
             'hidden_category_ids' => $hidden,
+            'show_header_categories' => $asBool(
+                $input['show_header_categories'] ?? null,
+                (bool) $defaults['show_header_categories']
+            ),
+            'show_category_row' => $asBool(
+                $input['show_category_row'] ?? null,
+                (bool) $defaults['show_category_row']
+            ),
+            'product_card_style' => $cardStyle,
             'trust_items' => $trust,
         ];
     }
