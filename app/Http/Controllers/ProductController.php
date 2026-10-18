@@ -1675,6 +1675,7 @@ class ProductController extends Controller
             'categories' => Schema::hasTable('category_produced_good') ? ($good->categories ?? []) : [],
             'atelier_id' => $good->atelier_id,
             'note' => $good->note,
+            'description' => $good->note,
         ]);
     }
 
