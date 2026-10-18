@@ -136,7 +136,8 @@ class PurchasedProductController extends Controller
         }
     }
 
-    $items = $query->paginate();
+    $perPage = max(1, min(100, (int) $request->input('per_page', 15)));
+    $items = $query->paginate($perPage);
 
     // محاسبه مجموع مبلغ واقعی پرداخت شده برای آیتم‌های این صفحه
     $total = 0;
