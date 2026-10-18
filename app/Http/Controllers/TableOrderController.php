@@ -51,8 +51,8 @@ class TableOrderController extends Controller
             ],
             'use_credit' => 'nullable|boolean',
             'payment_method' => ['required', 'string', Rule::in(TableOrder::paymentMethodKeys())],
-            'receipt' => 'nullable|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
-            'receipt_base64' => 'nullable|string',
+            'receipt' => 'nullable|file|mimes:jpg,jpeg,png,webp,pdf|max:2048',
+            'receipt_base64' => 'nullable|string|max:2800000',
             'return_url' => 'nullable|string|max:1000',
             'products' => 'required|array|min:1',
             'products.*.product_id' => 'nullable|integer',
@@ -748,8 +748,8 @@ class TableOrderController extends Controller
         }
 
         $request->validate([
-            'receipt' => 'nullable|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
-            'receipt_base64' => 'nullable|string',
+            'receipt' => 'nullable|file|mimes:jpg,jpeg,png,webp,pdf|max:2048',
+            'receipt_base64' => 'nullable|string|max:2800000',
         ]);
 
         if (! $this->requestHasReceipt($request)) {
@@ -896,8 +896,8 @@ class TableOrderController extends Controller
             abort(response()->json(['message' => 'رسید نامعتبر است.'], 422));
         }
 
-        if (strlen($content) > 5 * 1024 * 1024) {
-            abort(response()->json(['message' => 'حجم رسید نباید بیشتر از ۵ مگابایت باشد.'], 422));
+        if (strlen($content) > 2 * 1024 * 1024) {
+            abort(response()->json(['message' => 'حجم رسید نباید بیشتر از ۲ مگابایت باشد.'], 422));
         }
 
         $oldPath = $order->receipt_path;

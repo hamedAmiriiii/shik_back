@@ -25,13 +25,19 @@ Route::prefix('{shop}')
         Route::get('/', [ShopStorefrontController::class, 'show'])->name('show');
 
         Route::prefix('customer-register')->name('customer-register.')->group(function () {
-            Route::post('send-code', [CustomerRegisterController::class, 'sendVerificationCode']);
-            Route::post('verify', [CustomerRegisterController::class, 'verifyAndRegister']);
-            Route::post('check-phone', [CustomerRegisterController::class, 'checkPhone']);
-            Route::post('login', [CustomerRegisterController::class, 'verifyAndLogin']);
+            Route::post('send-code', [CustomerRegisterController::class, 'sendVerificationCode'])
+                ->middleware('throttle:sms');
+            Route::post('verify', [CustomerRegisterController::class, 'verifyAndRegister'])
+                ->middleware('throttle:login');
+            Route::post('check-phone', [CustomerRegisterController::class, 'checkPhone'])
+                ->middleware('throttle:login');
+            Route::post('login', [CustomerRegisterController::class, 'verifyAndLogin'])
+                ->middleware('throttle:login');
         });
 
-        Route::post('customer/login', [CustomerRegisterController::class, 'verifyAndLogin'])->name('customer.login');
+        Route::post('customer/login', [CustomerRegisterController::class, 'verifyAndLogin'])
+            ->middleware('throttle:login')
+            ->name('customer.login');
 
         Route::middleware('auth:sanctum')->post('customer-register/logout', [CustomerRegisterController::class, 'logout'])
             ->name('customer-register.logout');
@@ -48,40 +54,53 @@ Route::prefix('{shop}')
         // ===== سفارش پای میز (QR) — بدون نیاز به لاگین =====
         Route::get('tables/{tableNumber}', [\App\Http\Controllers\TableOrderController::class, 'tableInfo'])
             ->where('tableNumber', '[0-9]+')
+            ->middleware('throttle:60,1')
             ->name('table.info');
         Route::post('table-order', [\App\Http\Controllers\TableOrderController::class, 'store'])
+            ->middleware('throttle:storefront-write')
             ->name('table-order.store');
         Route::get('table-orders', [\App\Http\Controllers\TableOrderController::class, 'guestIndex'])
+            ->middleware('throttle:30,1')
             ->name('table-order.index');
         Route::get('table-order/{tableOrder}', [\App\Http\Controllers\TableOrderController::class, 'guestShow'])
+            ->middleware('throttle:30,1')
             ->name('table-order.show');
         Route::post('table-order/{tableOrder}/receipt', [\App\Http\Controllers\TableOrderController::class, 'uploadReceipt'])
+            ->middleware('throttle:storefront-write')
             ->name('table-order.receipt');
         Route::post('table-order/{tableOrder}/cancel', [\App\Http\Controllers\TableOrderController::class, 'guestCancel'])
+            ->middleware('throttle:storefront-write')
             ->name('table-order.cancel');
         Route::post('table-order/{tableOrder}/pay-online', [\App\Http\Controllers\TableOrderController::class, 'guestPayOnline'])
-            ->middleware('throttle:20,1')
+            ->middleware('throttle:storefront-write')
             ->name('table-order.pay-online');
 
         Route::get('shop-services', [\App\Http\Controllers\ShopServiceController::class, 'publicIndex'])
+            ->middleware('throttle:60,1')
             ->name('shop-services.index');
         Route::post('table-service-request', [\App\Http\Controllers\TableServiceRequestController::class, 'guestStore'])
+            ->middleware('throttle:storefront-write')
             ->name('table-service-request.store');
         Route::get('table-service-requests', [\App\Http\Controllers\TableServiceRequestController::class, 'guestIndex'])
+            ->middleware('throttle:30,1')
             ->name('table-service-request.index');
         Route::post('table-service-request/{tableServiceRequest}/cancel', [\App\Http\Controllers\TableServiceRequestController::class, 'guestCancel'])
+            ->middleware('throttle:storefront-write')
             ->name('table-service-request.cancel');
 
         Route::post('table-pager', [\App\Http\Controllers\TablePagerController::class, 'guestStore'])
-            ->middleware('throttle:20,1')
+            ->middleware('throttle:storefront-write')
             ->name('table-pager.store');
         Route::get('table-pagers', [\App\Http\Controllers\TablePagerController::class, 'guestIndex'])
+            ->middleware('throttle:30,1')
             ->name('table-pager.index');
         Route::post('table-pager/{tablePagerCall}/cancel', [\App\Http\Controllers\TablePagerController::class, 'guestCancel'])
+            ->middleware('throttle:storefront-write')
             ->name('table-pager.cancel');
 
         // اعتبار و سفارش‌های قبلی با شماره موبایل — بدون لاگین
         Route::match(['get', 'post'], 'guest/lookup', [\App\Http\Controllers\GuestCustomerController::class, 'lookup'])
+            ->middleware('throttle:storefront-write')
             ->name('guest.lookup');
 
         Route::middleware('auth:sanctum')->prefix('cart')->name('cart.')->group(function () {

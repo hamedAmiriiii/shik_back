@@ -230,17 +230,23 @@ class AccountingVoucherController extends Controller
 
     /**
      * تست زندهٔ مسیرهای مالی (فروش، برگشت، فاکتور، هزینه، حقوق، تولید).
+     * فقط با ACCOUNTING_FLOW_TEST_KEY در .env فعال است (بدون کلید پیش‌فرض).
      * GET/POST /api/accounting/flow-self-test?key=...&atelier_id=13
      */
     public function flowSelfTest(Request $request)
     {
-        $expected = (string) config('app.accounting_flow_test_key', 'flow-test-shop-13-zarrin');
+        $expected = trim((string) config('app.accounting_flow_test_key', ''));
         $given = (string) $request->query('key', $request->input('key', ''));
-        if ($expected === '' || ! hash_equals($expected, $given)) {
+        if ($expected === '' || strlen($expected) < 16 || ! hash_equals($expected, $given)) {
             return response()->json(['message' => 'کلید نامعتبر است.'], 403);
         }
 
-        @set_time_limit(180);
+        // فقط محیط غیرپروداکشن مگر صریحاً مجاز شده باشد
+        if (app()->environment('production') && ! filter_var(env('ACCOUNTING_FLOW_TEST_ALLOW_PRODUCTION', false), FILTER_VALIDATE_BOOLEAN)) {
+            return response()->json(['message' => 'این endpoint در پروداکشن غیرفعال است.'], 403);
+        }
+
+        @set_time_limit(120);
         $atelierId = (int) $request->query('atelier_id', $request->input('atelier_id', 13));
         $cleanup = $request->boolean('cleanup');
 

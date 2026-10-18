@@ -121,6 +121,12 @@ return [
 
     'key' => env('APP_KEY'),
 
+    /*
+    | کلید تست جریان حسابداری — فقط از .env؛ بدون مقدار پیش‌فرض.
+    | خالی = endpoint flow-self-test همیشه 403.
+    */
+    'accounting_flow_test_key' => env('ACCOUNTING_FLOW_TEST_KEY'),
+
     'cipher' => 'AES-256-CBC',
 
     /*

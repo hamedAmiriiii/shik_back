@@ -59,5 +59,25 @@ class RouteServiceProvider extends ServiceProvider
         RateLimiter::for('api', function (Request $request) {
             return Limit::perMinute(60)->by(optional($request->user())->id ?: $request->ip());
         });
+
+        // ارسال OTP / SMS — سخت‌گیرانه بر اساس IP
+        RateLimiter::for('sms', function (Request $request) {
+            return Limit::perMinute(5)->by($request->ip());
+        });
+
+        // لاگین — جلوگیری از brute-force
+        RateLimiter::for('login', function (Request $request) {
+            return Limit::perMinute(10)->by($request->ip());
+        });
+
+        // سفارش میز / آپلود رسید / مهمان
+        RateLimiter::for('storefront-write', function (Request $request) {
+            return Limit::perMinute(15)->by($request->ip());
+        });
+
+        // گزارش و لیست کامل کالا (authenticated ولی سنگین)
+        RateLimiter::for('heavy-read', function (Request $request) {
+            return Limit::perMinute(20)->by(optional($request->user())->id ?: $request->ip());
+        });
     }
 }

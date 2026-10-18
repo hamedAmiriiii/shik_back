@@ -444,7 +444,7 @@ class CategoryController extends Controller
             });
         }
         
-        $perPage = max(1, (int) $request->input('per_page', 10));
+        $perPage = max(1, min(100, (int) $request->input('per_page', 10)));
 
         $products = $query->with(['images', 'categories']);
         if (Schema::hasColumn('products', 'display_order')) {
@@ -452,7 +452,8 @@ class CategoryController extends Controller
         } else {
             $products->orderBy('id', 'desc');
         }
-        $products = $products->get()->map(function ($product) {
+        // سقف حافظه: بیش از این از DB نمی‌کشیم؛ صفحه‌بندی بعداً روی merge اعمال می‌شود
+        $products = $products->limit(500)->get()->map(function ($product) {
             $product->item_type = 'product';
             $product->product_id = $product->id;
             $product->produced_good_id = null;

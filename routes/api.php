@@ -17,7 +17,7 @@ use App\Http\Controllers\CategoryController;
 */
 
 Route::match(['get', 'post'], 'accounting/flow-self-test', [\App\Http\Controllers\AccountingVoucherController::class, 'flowSelfTest'])
-    ->middleware('throttle:3,1');
+    ->middleware('throttle:2,1');
 
 Route::prefix('referrals')->name('referrals.')->group(function () {
     Route::get('dashboard/{token}', [\App\Http\Controllers\PublicReferralController::class, 'dashboard'])
@@ -27,10 +27,14 @@ Route::prefix('referrals')->name('referrals.')->group(function () {
 });
 
 Route::name('auth.')->prefix('auth')->group(function () {
-    Route::post('register/send-phone-code', [\App\Http\Controllers\Auth\AuthController::class, 'sendRegistrationPhoneCode']);
-    Route::post('register', [\App\Http\Controllers\Auth\AuthController::class, 'register']);
-    Route::post('login', [\App\Http\Controllers\Auth\AuthController::class, 'login']);
-    Route::get('atelier', [\App\Http\Controllers\Auth\AtelierController::class, 'index']);
+    Route::post('register/send-phone-code', [\App\Http\Controllers\Auth\AuthController::class, 'sendRegistrationPhoneCode'])
+        ->middleware('throttle:sms');
+    Route::post('register', [\App\Http\Controllers\Auth\AuthController::class, 'register'])
+        ->middleware('throttle:login');
+    Route::post('login', [\App\Http\Controllers\Auth\AuthController::class, 'login'])
+        ->middleware('throttle:login');
+    Route::get('atelier', [\App\Http\Controllers\Auth\AtelierController::class, 'index'])
+        ->middleware('throttle:30,1');
 });
 
 Route::get('payments/zarinpal/callback', [\App\Http\Controllers\GatewayPaymentController::class, 'zarinpalCallback'])
@@ -53,9 +57,12 @@ Route::get('shop-packages', [\App\Http\Controllers\ShopPackageController::class,
     ->middleware('throttle:60,1');
 
 Route::prefix('oil')->name('oil.')->group(function () {
-    Route::post('login', [\App\Http\Controllers\Oil\OilAuthController::class, 'login']);
-    Route::post('register/send-code', [\App\Http\Controllers\Oil\OilAuthController::class, 'sendRegistrationPhoneCode']);
-    Route::post('register', [\App\Http\Controllers\Oil\OilAuthController::class, 'register']);
+    Route::post('login', [\App\Http\Controllers\Oil\OilAuthController::class, 'login'])
+        ->middleware('throttle:login');
+    Route::post('register/send-code', [\App\Http\Controllers\Oil\OilAuthController::class, 'sendRegistrationPhoneCode'])
+        ->middleware('throttle:sms');
+    Route::post('register', [\App\Http\Controllers\Oil\OilAuthController::class, 'register'])
+        ->middleware('throttle:login');
     Route::match(['get', 'post'], 'reminders/run', [\App\Http\Controllers\Oil\OilReminderController::class, 'run'])
         ->middleware('throttle:12,60');
     Route::get('public/history/{phone}', [\App\Http\Controllers\Oil\OilPublicHistoryController::class, 'show'])
@@ -209,76 +216,51 @@ Route::prefix('consultation-requests')->name('consultation-requests.')->group(fu
 });
 
 Route::name('resetPassword.')->prefix('reset-password')->group(function () {
-    Route::post('send-code', [\App\Http\Controllers\Auth\AuthController::class, 'sendForgotPasswordCode']);
-    Route::post('confirm', [\App\Http\Controllers\Auth\AuthController::class, 'confirmForgotPassword']);
-    Route::post('', [\App\Http\Controllers\Auth\AuthController::class, 'resetPassword']);
+    Route::post('send-code', [\App\Http\Controllers\Auth\AuthController::class, 'sendForgotPasswordCode'])
+        ->middleware('throttle:sms');
+    Route::post('confirm', [\App\Http\Controllers\Auth\AuthController::class, 'confirmForgotPassword'])
+        ->middleware('throttle:login');
+    Route::post('', [\App\Http\Controllers\Auth\AuthController::class, 'resetPassword'])
+        ->middleware('throttle:login');
 });
 
 Route::name('confirmationCode.')->prefix('confirmation-code')->group(function () {
-    Route::post('create', [\App\Http\Controllers\ConfirmationCode\ConfirmationCodeController::class, 'store']);
-    Route::post('check', [\App\Http\Controllers\ConfirmationCode\ConfirmationCodeController::class, 'check']);
+    Route::post('create', [\App\Http\Controllers\ConfirmationCode\ConfirmationCodeController::class, 'store'])
+        ->middleware('throttle:sms');
+    Route::post('check', [\App\Http\Controllers\ConfirmationCode\ConfirmationCodeController::class, 'check'])
+        ->middleware('throttle:login');
 });
 
-// Customer registration routes - no authentication required
+// Customer registration / OTP — عمومی ولی با throttle سخت
 Route::prefix('customer-register')->name('customer-register.')->group(function () {
-    Route::post('send-code', [\App\Http\Controllers\CustomerRegisterController::class, 'sendVerificationCode']);
-    Route::post('verify', [\App\Http\Controllers\CustomerRegisterController::class, 'verifyAndRegister']);
-    Route::post('check-phone', [\App\Http\Controllers\CustomerRegisterController::class, 'checkPhone']);
-    Route::post('login', [\App\Http\Controllers\CustomerRegisterController::class, 'verifyAndLogin']);
+    Route::post('send-code', [\App\Http\Controllers\CustomerRegisterController::class, 'sendVerificationCode'])
+        ->middleware('throttle:sms');
+    Route::post('verify', [\App\Http\Controllers\CustomerRegisterController::class, 'verifyAndRegister'])
+        ->middleware('throttle:login');
+    Route::post('check-phone', [\App\Http\Controllers\CustomerRegisterController::class, 'checkPhone'])
+        ->middleware('throttle:login');
+    Route::post('login', [\App\Http\Controllers\CustomerRegisterController::class, 'verifyAndLogin'])
+        ->middleware('throttle:login');
 });
 
-// Customer login route (shorter path)
-Route::post('customer/login', [\App\Http\Controllers\CustomerRegisterController::class, 'verifyAndLogin']);
+Route::post('customer/login', [\App\Http\Controllers\CustomerRegisterController::class, 'verifyAndLogin'])
+    ->middleware('throttle:login');
 
+// کاتالوگ عمومی (ویترین بدون پیشوند shop) — سبک؛ لیست کامل پشت auth است
+Route::get("product", [ProductController::class, 'index'])->middleware('throttle:60,1');
+Route::get("product/best-selling", [ProductController::class, 'bestSelling'])->middleware('throttle:60,1');
+Route::get("product/{product}", [ProductController::class, 'show'])->middleware('throttle:60,1');
 
-Route::prefix('reports')->name('reports.')->group(function () {
-    Route::get('/', [\App\Http\Controllers\ReportController::class, 'index']);
-});
+Route::get("category", [CategoryController::class, 'index'])->middleware('throttle:60,1');
+Route::get("category/{category}", [CategoryController::class, 'show'])->middleware('throttle:60,1');
+Route::get("category/{category}/children", [CategoryController::class, 'children'])->middleware('throttle:60,1');
+Route::get("category/{category}/products", [CategoryController::class, 'products'])->middleware('throttle:60,1');
 
-// Public routes - no authentication required
-Route::get("product-all", [ProductController::class, 'getAll']);
-Route::get("product", [ProductController::class, 'index']);
-Route::get("product/best-selling", [ProductController::class, 'bestSelling']);
-// این route باید بعد از route های خاص (مثل best-selling) و قبل از route های authenticated باشد
-Route::get("product/{product}", [ProductController::class, 'show']);
-
-// Category routes - public GET, authenticated POST/PUT/DELETE
-Route::get("category", [CategoryController::class, 'index']);
-Route::get("category-all", [CategoryController::class, 'getAll']);
-Route::get("category/{category}", [CategoryController::class, 'show']);
-Route::get("category/{category}/children", [CategoryController::class, 'children']);
-Route::get("category/{category}/products", [CategoryController::class, 'products']);
-
-Route::prefix('purchased-products')->name('purchased-products.')->group(function () {
-    Route::get('/', [\App\Http\Controllers\PurchasedProductController::class, 'index']);
-    Route::post('/', [\App\Http\Controllers\PurchasedProductController::class, 'store']);
-    Route::get('/credit', [\App\Http\Controllers\PurchasedProductController::class, 'getCreditByPhone']);
-    Route::get('/installment-credit', [\App\Http\Controllers\PurchasedProductController::class, 'getInstallmentCredit']);
-    Route::post('/calculate-installments', [\App\Http\Controllers\PurchasedProductController::class, 'calculateInstallments']);
-    Route::get('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'show']);
-    Route::put('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'update']);
-    Route::delete('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'destroy']);
-    Route::delete('/{purchase}/items/{purchasedProduct}', [\App\Http\Controllers\PurchasedProductController::class, 'returnItem']);
-    Route::post('/{purchase}/return', [\App\Http\Controllers\PurchasedProductController::class, 'returnPurchase']);
-    Route::get('/{purchase}/return-options', [\App\Http\Controllers\PurchasedProductController::class, 'returnOptions']);
-});
-
-Route::prefix('customers')->name('customers.')->group(function () {
-    Route::post('/register', [\App\Http\Controllers\CustomerController::class, 'registerUserShiksho']);
-    Route::get('/club-dashboard', [\App\Http\Controllers\CustomerController::class, 'clubDashboard']);
-    Route::get('/', [\App\Http\Controllers\CustomerController::class, 'index']);
-    Route::get('/{phone}', [\App\Http\Controllers\CustomerController::class, 'show']);
-});
-
-Route::prefix('returned-products')->name('returned-products.')->group(function () {
-    Route::post('/', [\App\Http\Controllers\ReturnedProductController::class, 'store']);
-    Route::get('/', [\App\Http\Controllers\ReturnedProductController::class, 'index']);
-});
-
-// Manufacturer routes - public GET, authenticated POST/PUT/DELETE
-Route::get('manufacturers', [\App\Http\Controllers\ManufacturerController::class, 'index']);
-Route::get('manufacturers/{manufacturer}', [\App\Http\Controllers\ManufacturerController::class, 'show']);
-Route::get('manufacturers/report/sales', [\App\Http\Controllers\ManufacturerController::class, 'salesReport']);
+// Manufacturer list/show عمومی؛ گزارش فروش فقط با auth
+Route::get('manufacturers', [\App\Http\Controllers\ManufacturerController::class, 'index'])->middleware('throttle:60,1');
+Route::get('manufacturers/{manufacturer}', [\App\Http\Controllers\ManufacturerController::class, 'show'])
+    ->where('manufacturer', '[0-9]+')
+    ->middleware('throttle:60,1');
 
 // ===== سفارش پای میز — فقط لیست و تسویه، نیاز به لاگین ادمین =====
 Route::middleware('auth:sanctum')->prefix('shop-tables')->name('shop-tables.')->group(function () {
@@ -320,6 +302,41 @@ Route::middleware('auth:sanctum')->prefix('table-pagers')->name('table-pagers.')
 });
 
 Route::group(['middleware' => ['auth:sanctum']], function () {
+    // گزارش و لیست‌های سنگین — فقط با توکن ادمین
+    Route::prefix('reports')->name('reports.')->middleware('throttle:heavy-read')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ReportController::class, 'index']);
+    });
+    Route::get('product-all', [ProductController::class, 'getAll'])->middleware('throttle:heavy-read');
+    Route::get('category-all', [CategoryController::class, 'getAll'])->middleware('throttle:heavy-read');
+    Route::get('manufacturers/report/sales', [\App\Http\Controllers\ManufacturerController::class, 'salesReport'])
+        ->middleware('throttle:heavy-read');
+
+    Route::prefix('purchased-products')->name('purchased-products.')->group(function () {
+        Route::get('/', [\App\Http\Controllers\PurchasedProductController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\PurchasedProductController::class, 'store']);
+        Route::get('/credit', [\App\Http\Controllers\PurchasedProductController::class, 'getCreditByPhone']);
+        Route::get('/installment-credit', [\App\Http\Controllers\PurchasedProductController::class, 'getInstallmentCredit']);
+        Route::post('/calculate-installments', [\App\Http\Controllers\PurchasedProductController::class, 'calculateInstallments']);
+        Route::get('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'show']);
+        Route::put('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'update']);
+        Route::delete('/{purchase}', [\App\Http\Controllers\PurchasedProductController::class, 'destroy']);
+        Route::delete('/{purchase}/items/{purchasedProduct}', [\App\Http\Controllers\PurchasedProductController::class, 'returnItem']);
+        Route::post('/{purchase}/return', [\App\Http\Controllers\PurchasedProductController::class, 'returnPurchase']);
+        Route::get('/{purchase}/return-options', [\App\Http\Controllers\PurchasedProductController::class, 'returnOptions']);
+    });
+
+    Route::prefix('customers')->name('customers.')->group(function () {
+        Route::post('/register', [\App\Http\Controllers\CustomerController::class, 'registerUserShiksho']);
+        Route::get('/club-dashboard', [\App\Http\Controllers\CustomerController::class, 'clubDashboard']);
+        Route::get('/', [\App\Http\Controllers\CustomerController::class, 'index']);
+        Route::get('/{phone}', [\App\Http\Controllers\CustomerController::class, 'show']);
+    });
+
+    Route::prefix('returned-products')->name('returned-products.')->group(function () {
+        Route::post('/', [\App\Http\Controllers\ReturnedProductController::class, 'store']);
+        Route::get('/', [\App\Http\Controllers\ReturnedProductController::class, 'index']);
+    });
+
     // Store/Shop related routes - require authentication
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
     Route::get('expenses-by-category', [\App\Http\Controllers\ExpenseController::class, 'byCategory']);
@@ -537,8 +554,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::delete('manufacturers/{manufacturer}', [\App\Http\Controllers\ManufacturerController::class, 'destroy']);
 
         // Broadcast message to selected customers
-    Route::get('customer-broadcast/list', [\App\Http\Controllers\CustomerController::class, 'getCustomersForBroadcast']);
-    Route::post('customer-broadcast/message', [\App\Http\Controllers\CustomerController::class, 'broadcastMessage']);
+    Route::get('customer-broadcast/list', [\App\Http\Controllers\CustomerController::class, 'getCustomersForBroadcast'])
+        ->middleware('throttle:heavy-read');
+    Route::post('customer-broadcast/message', [\App\Http\Controllers\CustomerController::class, 'broadcastMessage'])
+        ->middleware('throttle:sms');
 
     Route::get('shop-customer-groups', [\App\Http\Controllers\ShopCustomerGroupController::class, 'index']);
     Route::post('shop-customer-groups', [\App\Http\Controllers\ShopCustomerGroupController::class, 'store']);
@@ -574,7 +593,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('campaigns/{campaign}/preview', [\App\Http\Controllers\SmartCampaignController::class, 'preview'])
             ->where('campaign', '[0-9]+');
         Route::post('campaigns/{campaign}/run', [\App\Http\Controllers\SmartCampaignController::class, 'run'])
-            ->where('campaign', '[0-9]+');
+            ->where('campaign', '[0-9]+')
+            ->middleware('throttle:sms');
         Route::get('campaigns/{campaign}/runs', [\App\Http\Controllers\SmartCampaignController::class, 'runs'])
             ->where('campaign', '[0-9]+');
         Route::get('campaigns/{campaign}/logs', [\App\Http\Controllers\SmartCampaignController::class, 'logs'])

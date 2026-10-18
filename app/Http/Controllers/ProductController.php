@@ -395,9 +395,11 @@ class ProductController extends Controller
             });
         }
 
+        // سقف امنیتی برای جلوگیری از پاسخ‌های بی‌نهایت بزرگ (صندوق همچنان آرایه کامل می‌گیرد)
+        $hardCap = 5000;
         $products = $query->with(['images', 'categories', 'manufacturer']);
         $products->orderByDesc('id');
-        $products = $products->get();
+        $products = $products->limit($hardCap)->get();
 
         $products->transform(function ($product) {
             $product->item_type = 'product';
@@ -408,8 +410,16 @@ class ProductController extends Controller
         });
 
         $producedGoods = $this->producedGoodsForProductAll($request, $atelierId, $searchDataModel, $categoryId);
+        if ($producedGoods->count() > $hardCap) {
+            $producedGoods = $producedGoods->take($hardCap);
+        }
 
-        return response($this->sortMergedCatalogByLatest($producedGoods->concat($products)->values()));
+        $merged = $this->sortMergedCatalogByLatest($producedGoods->concat($products)->values());
+        if ($merged->count() > $hardCap) {
+            $merged = $merged->take($hardCap)->values();
+        }
+
+        return response($merged);
     }
 
     /**
