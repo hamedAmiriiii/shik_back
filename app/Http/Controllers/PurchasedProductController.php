@@ -38,7 +38,7 @@ class PurchasedProductController extends Controller
     // فقط Purchase هایی که:
     // 1. cart_id ندارند (فروش فیزیکی مستقیم)
     // 2. یا cart_id دارند و Cart status آن‌ها shipped است
-    // 3. مجموع مبلغشان بیشتر از 0 است
+    // 3. مبلغ باقی‌مانده > 0 یا حداقل یک برگشت ثبت شده (ردپای فاکتور برگشتی)
     $query = Purchase::with([
             'purchasedProducts.product',
             'purchasedProducts.producedGood',
@@ -47,11 +47,18 @@ class PurchasedProductController extends Controller
             'cheque',
             'receivedCheques',
         ]);
-    if (Schema::hasTable('purchase_item_returns')) {
+    $hasReturnTable = Schema::hasTable('purchase_item_returns');
+    if ($hasReturnTable) {
         $query->withCount('itemReturns');
+        $query->withSum('itemReturns as returned_sale_total', 'return_sale_total');
     }
     $query->where('atelier_id', $atelierId)
-        ->where('total_amount', '>', 0) // فقط خریدهایی که مجموع مبلغشان بیشتر از 0 است
+        ->where(function ($amountQuery) use ($hasReturnTable) {
+            $amountQuery->where('total_amount', '>', 0);
+            if ($hasReturnTable) {
+                $amountQuery->orWhereHas('itemReturns');
+            }
+        })
         ->where(function($q) {
             $q->whereNull('cart_id') // فروش فیزیکی
               ->orWhereHas('cart', function($cartQuery) {
@@ -175,6 +182,20 @@ class PurchasedProductController extends Controller
         }
     }
 
+    $latestReturnsByPurchase = [];
+    if ($hasReturnTable) {
+        $purchaseIds = collect($itemsArray['data'] ?? [])->pluck('id')->filter()->map(fn ($id) => (int) $id)->all();
+        if ($purchaseIds !== []) {
+            $latestReturnsByPurchase = \App\Models\PurchaseItemReturn::query()
+                ->whereIn('purchase_id', $purchaseIds)
+                ->orderByDesc('id')
+                ->get(['id', 'purchase_id', 'user_name', 'notes', 'return_sale_total', 'created_at'])
+                ->groupBy('purchase_id')
+                ->map(fn ($rows) => $rows->first())
+                ->all();
+        }
+    }
+
     foreach ($itemsArray['data'] as &$purchaseData) {
         $purchase = $items->firstWhere('id', $purchaseData['id']);
         if ($purchase && $purchase->isInstallment()) {
@@ -207,6 +228,22 @@ class PurchasedProductController extends Controller
         $phone = is_string($purchaseData['phone'] ?? null) ? $purchaseData['phone'] : '';
         $customerName = $phone !== '' ? trim((string) ($customerNames[$phone] ?? '')) : '';
         $purchaseData['customer_name'] = $customerName !== '' ? $customerName : null;
+
+        $returnsCount = (int) ($purchaseData['item_returns_count'] ?? 0);
+        $remainingTotal = (float) ($purchaseData['total_amount'] ?? 0);
+        $returnedSaleTotal = (float) ($purchaseData['returned_sale_total'] ?? 0);
+        $purchaseData['is_fully_returned'] = $returnsCount > 0 && $remainingTotal <= 0.02;
+        $purchaseData['returned_sale_total'] = $returnedSaleTotal;
+        $latestReturn = $latestReturnsByPurchase[(int) ($purchaseData['id'] ?? 0)] ?? null;
+        if ($latestReturn) {
+            $purchaseData['last_return_user_name'] = $latestReturn->user_name;
+            $purchaseData['last_return_at'] = $latestReturn->created_at;
+            $purchaseData['last_return_notes'] = $latestReturn->notes;
+        } else {
+            $purchaseData['last_return_user_name'] = null;
+            $purchaseData['last_return_at'] = null;
+            $purchaseData['last_return_notes'] = null;
+        }
     }
     unset($purchaseData);
 
@@ -816,7 +853,38 @@ class PurchasedProductController extends Controller
             'shopTable',
         ]);
         if (Schema::hasTable('purchase_item_returns')) {
+            $purchase->load([
+                'itemReturns' => fn ($q) => $q->orderByDesc('id')
+                    ->with(['product:id,name', 'producedGood:id,name', 'rawMaterial:id,name']),
+            ]);
             $purchase->loadCount('itemReturns');
+            $purchase->loadSum('itemReturns as returned_sale_total', 'return_sale_total');
+            $returnsCount = (int) ($purchase->item_returns_count ?? 0);
+            $remainingTotal = (float) $purchase->total_amount;
+            $purchase->setAttribute('is_fully_returned', $returnsCount > 0 && $remainingTotal <= 0.02);
+            $latestReturn = $purchase->itemReturns->first();
+            $purchase->setAttribute('last_return_user_name', $latestReturn?->user_name);
+            $purchase->setAttribute('last_return_at', $latestReturn?->created_at);
+            $purchase->setAttribute('last_return_notes', $latestReturn?->notes);
+            $returnHistory = $purchase->itemReturns->map(function (\App\Models\PurchaseItemReturn $row) {
+                return [
+                    'id' => (int) $row->id,
+                    'item_name' => $row->itemName(),
+                    'quantity' => (float) $row->quantity,
+                    'sale_price' => (float) $row->sale_price,
+                    'return_sale_total' => (float) $row->return_sale_total,
+                    'cash_refunded' => (float) ($row->cash_refunded ?? 0),
+                    'card_refunded' => (float) ($row->card_refunded ?? 0),
+                    'credit_used_refund' => (float) ($row->credit_used_refund ?? 0),
+                    'user_name' => $row->user_name,
+                    'notes' => $row->notes,
+                    'created_at' => $row->created_at,
+                    'size' => $row->size,
+                    'color' => $row->color,
+                ];
+            })->values()->all();
+            $purchase->unsetRelation('itemReturns');
+            $purchase->setAttribute('item_returns', $returnHistory);
         }
         if ($purchase->isInstallment()) {
             $purchase->load('installments');

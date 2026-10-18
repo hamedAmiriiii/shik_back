@@ -66,6 +66,31 @@ class PurchaseItemReturn extends Model
         return $this->belongsTo(Product::class)->withTrashed();
     }
 
+    public function producedGood(): BelongsTo
+    {
+        return $this->belongsTo(ProducedGood::class);
+    }
+
+    public function rawMaterial(): BelongsTo
+    {
+        return $this->belongsTo(RawMaterial::class);
+    }
+
+    public function itemName(): string
+    {
+        if ($this->relationLoaded('product') && $this->product) {
+            return (string) ($this->product->name ?? 'کالا');
+        }
+        if ($this->relationLoaded('producedGood') && $this->producedGood) {
+            return (string) ($this->producedGood->name ?? 'کالای تولیدی');
+        }
+        if ($this->relationLoaded('rawMaterial') && $this->rawMaterial) {
+            return (string) ($this->rawMaterial->name ?? 'مواد اولیه');
+        }
+
+        return 'قلم برگشتی';
+    }
+
     public function scopeForAtelier($query, int $atelierId)
     {
         return $query->where('atelier_id', $atelierId);

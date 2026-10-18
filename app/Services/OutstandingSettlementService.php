@@ -26,6 +26,66 @@ class OutstandingSettlementService
     public const KIND_INSTALLMENT = 'installment';
 
     /**
+     * یادآوری روزانه منو: چک‌های سررسید نزدیک + نسیه دریافتی/پرداختنی باز.
+     *
+     * @return array<string, mixed>
+     */
+    public static function reminders(int $atelierId, int $days = 5): array
+    {
+        $days = max(1, min(30, $days));
+        $today = Carbon::today('Asia/Tehran')->toDateString();
+        $until = Carbon::parse($today, 'Asia/Tehran')->addDays($days)->toDateString();
+        $dayKey = Jalalian::fromCarbon(Carbon::today('Asia/Tehran'))->format('Y-m-d');
+
+        $cheques = self::pendingCheques($atelierId, null)
+            ->filter(static function (array $row) use ($today, $until) {
+                $date = $row['due_date'] ?? null;
+
+                return $date !== null && $date >= $today && $date <= $until;
+            })
+            ->values();
+
+        $creditReceivable = self::openSaleDebts($atelierId)->values();
+
+        $creditPayable = self::openDocumentCredits($atelierId, Invoice::class, 'invoice')
+            ->concat(self::openDocumentCredits($atelierId, Expense::class, 'expense'))
+            ->sortBy(static function (array $row) {
+                return ($row['due_date'] ?? '9999-12-31').'-'.str_pad((string) $row['id'], 10, '0', STR_PAD_LEFT);
+            })
+            ->values();
+
+        $bucket = static function (Collection $items): array {
+            return [
+                'count' => $items->count(),
+                'total' => round((float) $items->sum('amount'), 2),
+                'items' => $items->values()->all(),
+            ];
+        };
+
+        $chequesBucket = $bucket($cheques);
+        $receivableBucket = $bucket($creditReceivable);
+        $payableBucket = $bucket($creditPayable);
+
+        return [
+            'day' => $dayKey,
+            'days' => $days,
+            'fetched_at' => Carbon::now('Asia/Tehran')->toIso8601String(),
+            'cheques' => $chequesBucket,
+            'credit_receivable' => $receivableBucket,
+            'credit_payable' => $payableBucket,
+            'total_count' => $chequesBucket['count'] + $receivableBucket['count'] + $payableBucket['count'],
+            'summary' => [
+                'cheques_count' => $chequesBucket['count'],
+                'cheques_total' => $chequesBucket['total'],
+                'credit_receivable_count' => $receivableBucket['count'],
+                'credit_receivable_total' => $receivableBucket['total'],
+                'credit_payable_count' => $payableBucket['count'],
+                'credit_payable_total' => $payableBucket['total'],
+            ],
+        ];
+    }
+
+    /**
      * @return array{items: Collection<int, array<string, mixed>>, summary: array<string, mixed>}
      */
     public static function collect(int $atelierId, Request $request): array

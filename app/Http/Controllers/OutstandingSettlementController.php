@@ -45,4 +45,19 @@ class OutstandingSettlementController extends Controller
             ],
         ], 200);
     }
+
+    /**
+     * یادآوری منوی ادمین: چک‌های ۵ روز آینده + نسیه دریافتی/پرداختنی باز.
+     *
+     * GET /api/financial-report/reminders?days=5
+     */
+    public function reminders(Request $request)
+    {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        $days = max(1, min(30, (int) $request->input('days', 5)));
+        $payload = OutstandingSettlementService::reminders($atelierId, $days);
+        $payload['atelier_id'] = $atelierId;
+
+        return response($payload, 200);
+    }
 }

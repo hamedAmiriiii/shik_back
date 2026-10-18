@@ -671,6 +671,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::prefix('financial-report')->name('financial-report.')->group(function () {
         Route::get('/monthly', [\App\Http\Controllers\FinancialReportController::class, 'monthlyReport']);
         Route::get('/outstanding', [\App\Http\Controllers\OutstandingSettlementController::class, 'index']);
+        Route::get('/reminders', [\App\Http\Controllers\OutstandingSettlementController::class, 'reminders']);
     });
 
     Route::get('shop-health', [\App\Http\Controllers\ShopDataHealthController::class, 'show']);
