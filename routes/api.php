@@ -322,6 +322,7 @@ Route::middleware('auth:sanctum')->prefix('table-pagers')->name('table-pagers.')
 Route::group(['middleware' => ['auth:sanctum']], function () {
     // Store/Shop related routes - require authentication
     Route::get('expenses-statistics', [\App\Http\Controllers\ExpenseController::class, 'statistics']);
+    Route::get('expenses-by-category', [\App\Http\Controllers\ExpenseController::class, 'byCategory']);
     Route::post('expenses/{expense}/settle', [\App\Http\Controllers\ExpenseController::class, 'settle']);
     Route::post('expenses/{expense}/apply-advance', [\App\Http\Controllers\ExpenseController::class, 'applyAdvance']);
     Route::resource('expenses', \App\Http\Controllers\ExpenseController::class);

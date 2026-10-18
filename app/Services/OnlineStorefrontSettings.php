@@ -25,7 +25,6 @@ class OnlineStorefrontSettings
         'categories',
         'trust',
         'best_selling',
-        'category_banners',
         'latest',
     ];
 

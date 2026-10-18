@@ -2,15 +2,18 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AccountingAccount;
 use App\Models\Expense;
 use App\Models\ManualTrade;
 use App\Services\AccountingDocumentPoster;
+use App\Services\ChartOfAccountsSeeder;
 use App\Services\CustomerCreditExpenseService;
 use App\Services\DocumentPaymentService;
 use App\Services\ShopBeneficiaryService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Morilog\Jalali\Jalalian;
 use RuntimeException;
 
@@ -533,6 +536,183 @@ class ExpenseController extends Controller
     }
 
     /**
+     * گزارش هزینه به تفکیک دسته‌بندی (درخت حساب).
+     * پیش‌فرض بازه: ماه جاری شمسی.
+     * با account_id هزینه‌های همان گره و زیرشاخه‌ها برمی‌گردد.
+     */
+    public function byCategory(Request $request)
+    {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        CustomerCreditExpenseService::alignLoyaltyExpenses($atelierId);
+
+        if (! AccountingAccount::tableReady()) {
+            return response([
+                'tree' => [],
+                'total_amount' => 0,
+                'total_count' => 0,
+                'items' => [],
+                'selected_account' => null,
+                'meta' => [
+                    'atelier_id' => $atelierId,
+                    'filter' => $request->input('filter', 'month'),
+                    'accounting_ready' => false,
+                ],
+            ], 200);
+        }
+
+        ChartOfAccountsSeeder::ensureForAtelier($atelierId);
+
+        $query = Expense::where('atelier_id', $atelierId)
+            ->where(function ($q) {
+                $q->whereNull('type')->orWhere('type', 'جاری');
+            });
+        $query = CustomerCreditExpenseService::excludeFromTotals($query);
+
+        if (! $request->has('filter')) {
+            $request->merge(['filter' => 'month']);
+        }
+        $this->applyExpenseDateFilter($query, $request);
+
+        if (Schema::hasColumn('expenses', 'accounting_account_id')) {
+            $query->with('accountingAccount:id,code,name');
+        }
+
+        $expenses = $query->orderBy('date', 'desc')->orderBy('id', 'desc')->get();
+
+        $accounts = AccountingAccount::query()
+            ->forAtelier($atelierId)
+            ->active()
+            ->orderBy('code')
+            ->get();
+        $byId = $accounts->keyBy(fn (AccountingAccount $row) => (int) $row->id);
+        $byCode = $accounts->keyBy('code');
+        $allowedIds = ChartOfAccountsSeeder::expenseLinkableAccounts($atelierId)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+        $allowedLookup = array_fill_keys($allowedIds, true);
+
+        $payrollExpenseIds = [];
+        if (Schema::hasTable('employee_payroll_payments') && $expenses->isNotEmpty()) {
+            $payrollExpenseIds = DB::table('employee_payroll_payments')
+                ->whereIn('expense_id', $expenses->pluck('id')->all())
+                ->whereIn('payment_type', ['salary', 'advance'])
+                ->pluck('expense_id')
+                ->map(fn ($id) => (int) $id)
+                ->flip()
+                ->all();
+        }
+
+        $directAmount = [];
+        $directCount = [];
+        $resolvedByExpenseId = [];
+
+        foreach ($expenses as $expense) {
+            $accountId = $this->resolveExpenseCategoryAccountId(
+                $expense,
+                $allowedLookup,
+                $byCode,
+                $payrollExpenseIds
+            );
+            if ($accountId <= 0) {
+                continue;
+            }
+            $resolvedByExpenseId[(int) $expense->id] = $accountId;
+            $directAmount[$accountId] = ($directAmount[$accountId] ?? 0) + (float) $expense->amount;
+            $directCount[$accountId] = ($directCount[$accountId] ?? 0) + 1;
+        }
+
+        $childrenMap = [];
+        foreach ($accounts as $account) {
+            $parentId = $account->parent_id ? (int) $account->parent_id : 0;
+            $childrenMap[$parentId][] = (int) $account->id;
+        }
+
+        $selectedAccountId = $request->filled('account_id') ? (int) $request->input('account_id') : 0;
+        $selectedDescendantIds = [];
+        if ($selectedAccountId > 0 && isset($byId[$selectedAccountId])) {
+            $selectedDescendantIds = $this->collectAccountDescendantIds($selectedAccountId, $childrenMap);
+            $selectedDescendantIds[$selectedAccountId] = true;
+        }
+
+        $items = [];
+        if ($selectedAccountId > 0) {
+            foreach ($expenses as $expense) {
+                $resolvedId = $resolvedByExpenseId[(int) $expense->id] ?? 0;
+                if ($resolvedId <= 0 || ! isset($selectedDescendantIds[$resolvedId])) {
+                    continue;
+                }
+                $account = $byId[$resolvedId] ?? null;
+                $items[] = [
+                    'id' => (int) $expense->id,
+                    'title' => $expense->title,
+                    'amount' => (float) $expense->amount,
+                    'type' => $expense->type,
+                    'date' => $expense->date,
+                    'user_name' => $expense->user_name,
+                    'accounting_account_id' => $resolvedId,
+                    'accounting_account' => $account ? [
+                        'id' => (int) $account->id,
+                        'code' => $account->code,
+                        'name' => $account->name,
+                    ] : null,
+                ];
+            }
+        }
+
+        $tree = [];
+        foreach ($accounts->filter(fn (AccountingAccount $row) => $row->parent_id === null) as $root) {
+            if (! $this->isExpenseCategoryRoot($root)) {
+                continue;
+            }
+            $node = $this->buildExpenseCategoryTreeNode(
+                $root,
+                $childrenMap,
+                $byId,
+                $directAmount,
+                $directCount
+            );
+            if ($node !== null) {
+                $tree[] = $node;
+            }
+        }
+
+        $totalAmount = array_sum($directAmount);
+        $totalCount = array_sum($directCount);
+        $selectedAccount = null;
+        if ($selectedAccountId > 0 && isset($byId[$selectedAccountId])) {
+            $acc = $byId[$selectedAccountId];
+            $selectedAccount = [
+                'id' => (int) $acc->id,
+                'code' => $acc->code,
+                'name' => $acc->name,
+                'amount' => array_sum(array_map(
+                    fn ($id) => $directAmount[$id] ?? 0,
+                    array_keys($selectedDescendantIds)
+                )),
+                'count' => array_sum(array_map(
+                    fn ($id) => $directCount[$id] ?? 0,
+                    array_keys($selectedDescendantIds)
+                )),
+            ];
+        }
+
+        return response([
+            'tree' => $tree,
+            'total_amount' => (float) $totalAmount,
+            'total_count' => (int) $totalCount,
+            'items' => $items,
+            'selected_account' => $selectedAccount,
+            'meta' => [
+                'atelier_id' => $atelierId,
+                'filter' => $request->input('filter', 'month'),
+                'type' => 'جاری',
+                'accounting_ready' => true,
+            ],
+        ], 200);
+    }
+
+    /**
      * آمار کلی هزینه‌ها
      */
     public function statistics(Request $request)
@@ -582,6 +762,191 @@ class ExpenseController extends Controller
             'expenses_by_user' => $expensesByUser,
             'meta' => ['atelier_id' => $atelierId],
         ], 200);
+    }
+
+    /**
+     * فیلتر تاریخ هزینه‌ها (شمسی). پیش‌فرض در byCategory ماه جاری است.
+     */
+    protected function applyExpenseDateFilter($query, Request $request): void
+    {
+        if (! $request->has('filter')) {
+            return;
+        }
+
+        if ($request->filter === 'today') {
+            $query->whereDate('date', Carbon::today());
+        } elseif ($request->filter === 'week') {
+            $now = Jalalian::now();
+            $dayOfWeek = $now->getDayOfWeek();
+            $startOfWeek = Jalalian::now()->subDays($dayOfWeek)->toCarbon()->startOfDay();
+            $endOfWeek = Jalalian::now()->addDays(6 - $dayOfWeek)->toCarbon()->endOfDay();
+            $query->whereBetween('date', [$startOfWeek, $endOfWeek]);
+        } elseif ($request->filter === 'month') {
+            $now = Jalalian::now();
+            $startOfMonth = (new Jalalian($now->getYear(), $now->getMonth(), 1))->toCarbon()->startOfDay();
+            $endOfMonth = (new Jalalian($now->getYear(), $now->getMonth(), 1))->addMonths(1)->subDays(1)->toCarbon()->endOfDay();
+            $query->whereBetween('date', [$startOfMonth, $endOfMonth]);
+        } elseif ($request->filter === 'year') {
+            $year = Jalalian::now()->getYear();
+            $startOfYear = (new Jalalian($year, 1, 1))->toCarbon()->startOfDay();
+            $endOfYear = (new Jalalian($year, 12, 29))->toCarbon()->endOfDay();
+            $query->whereBetween('date', [$startOfYear, $endOfYear]);
+        } elseif ($request->filter === 'range') {
+            if ($request->has('from_date')) {
+                $fromDate = json_decode($request->input('from_date'));
+                if (is_object($fromDate) && isset($fromDate->year, $fromDate->month, $fromDate->day)) {
+                    $fromCarbon = (new Jalalian($fromDate->year, $fromDate->month, $fromDate->day))->toCarbon()->startOfDay();
+                    $query->where('date', '>=', $fromCarbon);
+                }
+            }
+            if ($request->has('to_date')) {
+                $toDate = json_decode($request->input('to_date'));
+                if (is_object($toDate) && isset($toDate->year, $toDate->month, $toDate->day)) {
+                    $toCarbon = (new Jalalian($toDate->year, $toDate->month, $toDate->day))->toCarbon()->endOfDay();
+                    $query->where('date', '<=', $toCarbon);
+                }
+            }
+        }
+    }
+
+    /**
+     * حساب مؤثر دسته برای گزارش (لینک مستقیم یا fallback نوع/عنوان).
+     *
+     * @param  array<int, true>  $allowedLookup
+     * @param  \Illuminate\Support\Collection<string, AccountingAccount>  $byCode
+     * @param  array<int, mixed>  $payrollExpenseIds
+     */
+    protected function resolveExpenseCategoryAccountId(
+        Expense $expense,
+        array $allowedLookup,
+        $byCode,
+        array $payrollExpenseIds
+    ): int {
+        if (Schema::hasColumn('expenses', 'accounting_account_id')) {
+            $linkedId = (int) ($expense->accounting_account_id ?? 0);
+            if ($linkedId > 0 && isset($allowedLookup[$linkedId])) {
+                return $linkedId;
+            }
+        }
+
+        $code = ChartOfAccountsSeeder::CODE_EXPENSE;
+        if (($expense->type ?? '') === 'سرمایه') {
+            $code = ChartOfAccountsSeeder::CODE_CAPEX;
+        } elseif (isset($payrollExpenseIds[(int) $expense->id])) {
+            $code = ChartOfAccountsSeeder::CODE_PAYROLL;
+        } else {
+            $title = (string) ($expense->title ?? '');
+            if ($title !== '' && preg_match('/پرداخت حقوق|مساعده/u', $title)) {
+                $code = ChartOfAccountsSeeder::CODE_PAYROLL;
+            }
+        }
+
+        $account = $byCode->get($code);
+
+        return $account ? (int) $account->id : 0;
+    }
+
+    protected function isExpenseCategoryRoot(AccountingAccount $root): bool
+    {
+        if ($root->kind === AccountingAccount::KIND_EXPENSE) {
+            return true;
+        }
+
+        return strpos((string) $root->code, '1') === 0;
+    }
+
+    /**
+     * @param  array<int, array<int, int>>  $childrenMap
+     * @return array<int, true>
+     */
+    protected function collectAccountDescendantIds(int $accountId, array $childrenMap): array
+    {
+        $ids = [];
+        $stack = $childrenMap[$accountId] ?? [];
+        while (! empty($stack)) {
+            $childId = (int) array_pop($stack);
+            if (isset($ids[$childId])) {
+                continue;
+            }
+            $ids[$childId] = true;
+            foreach ($childrenMap[$childId] ?? [] as $grandChildId) {
+                $stack[] = (int) $grandChildId;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @param  array<int, array<int, int>>  $childrenMap
+     * @param  \Illuminate\Support\Collection<int, AccountingAccount>  $byId
+     * @param  array<int, float>  $directAmount
+     * @param  array<int, int>  $directCount
+     * @return array<string, mixed>|null
+     */
+    protected function buildExpenseCategoryTreeNode(
+        AccountingAccount $account,
+        array $childrenMap,
+        $byId,
+        array $directAmount,
+        array $directCount
+    ): ?array {
+        $id = (int) $account->id;
+        $code = (string) $account->code;
+        $isExpenseBranch = $account->kind === AccountingAccount::KIND_EXPENSE
+            || strpos($code, '121') === 0
+            || $code === '12'
+            || $code === '1';
+
+        if (! $isExpenseBranch) {
+            return null;
+        }
+
+        $children = [];
+        $rolledAmount = (float) ($directAmount[$id] ?? 0);
+        $rolledCount = (int) ($directCount[$id] ?? 0);
+
+        foreach ($childrenMap[$id] ?? [] as $childId) {
+            $child = $byId->get((int) $childId);
+            if (! $child) {
+                continue;
+            }
+            $childNode = $this->buildExpenseCategoryTreeNode(
+                $child,
+                $childrenMap,
+                $byId,
+                $directAmount,
+                $directCount
+            );
+            if ($childNode === null) {
+                continue;
+            }
+            $rolledAmount += (float) $childNode['amount'];
+            $rolledCount += (int) $childNode['count'];
+            $children[] = $childNode;
+        }
+
+        $isAssetCapexPath = in_array($code, ['1', '12', '121'], true) || strpos($code, '121') === 0;
+        // شاخهٔ دارایی فقط وقتی هزینهٔ سرمایه‌ای وجود دارد؛ درخت هزینه‌ها همیشه کامل است
+        if ($isAssetCapexPath && $account->kind !== AccountingAccount::KIND_EXPENSE) {
+            if ($rolledAmount <= 0 && empty($children)) {
+                return null;
+            }
+        }
+
+        return [
+            'id' => $id,
+            'parent_id' => $account->parent_id ? (int) $account->parent_id : null,
+            'code' => $account->code,
+            'name' => $account->name,
+            'level' => $account->level,
+            'kind' => $account->kind,
+            'amount' => $rolledAmount,
+            'count' => $rolledCount,
+            'direct_amount' => (float) ($directAmount[$id] ?? 0),
+            'direct_count' => (int) ($directCount[$id] ?? 0),
+            'children' => $children,
+        ];
     }
 }
 

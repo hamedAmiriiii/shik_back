@@ -55,7 +55,7 @@ class ShopPermissionCatalog
             ['key' => 'manufacturers', 'label' => 'تولیدکننده', 'prefixes' => ['manufacturers']],
             ['key' => 'customers', 'label' => 'مشتریان', 'prefixes' => ['customers', 'customer-broadcast', 'shop-customer-groups', 'smart-customer']],
             ['key' => 'invoices', 'label' => 'فاکتورها', 'prefixes' => ['invoices']],
-            ['key' => 'expenses', 'label' => 'هزینه‌ها', 'prefixes' => ['expenses-statistics', 'expenses']],
+            ['key' => 'expenses', 'label' => 'هزینه‌ها', 'prefixes' => ['expenses-statistics', 'expenses-by-category', 'expenses']],
             ['key' => 'cheques', 'label' => 'چک‌ها', 'prefixes' => ['cheques']],
             ['key' => 'manual_trades', 'label' => 'خرید و فروش دستی', 'prefixes' => ['manual-trades']],
             ['key' => 'raw_materials', 'label' => 'مواد اولیه', 'prefixes' => ['raw-materials']],
