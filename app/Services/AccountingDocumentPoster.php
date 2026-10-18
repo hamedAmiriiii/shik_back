@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AccountingAccount;
 use App\Models\AccountingVoucher;
 use App\Models\DocumentPayment;
 use App\Models\EmployeePayrollPayment;
@@ -388,10 +389,20 @@ class AccountingDocumentPoster
     {
         $atelierId = (int) $expense->atelier_id;
         $linkedId = (int) ($expense->accounting_account_id ?? 0);
-        if ($linkedId > 0 && \Illuminate\Support\Facades\Schema::hasColumn('expenses', 'accounting_account_id')) {
-            $allowed = ChartOfAccountsSeeder::expenseLinkableAccounts($atelierId)->pluck('id')->map(fn ($id) => (int) $id)->all();
-            if (in_array($linkedId, $allowed, true)) {
-                return $linkedId;
+        if ($linkedId > 0 && Schema::hasColumn('expenses', 'accounting_account_id')) {
+            $account = AccountingAccount::query()
+                ->forAtelier($atelierId)
+                ->where('id', $linkedId)
+                ->first();
+            if ($account && $account->is_active) {
+                $code = (string) $account->code;
+                if ($code === ChartOfAccountsSeeder::CODE_LOYALTY
+                    || $code === ChartOfAccountsSeeder::CODE_INV_CATALOG
+                    || trim((string) $account->name) === 'خرید کالا') {
+                    // fallback
+                } elseif ($account->kind === AccountingAccount::KIND_EXPENSE || strpos($code, '121') === 0) {
+                    return (int) $account->id;
+                }
             }
         }
 

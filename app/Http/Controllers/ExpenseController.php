@@ -263,7 +263,7 @@ class ExpenseController extends Controller
 
                 $expense = Expense::create($fields);
                 DocumentPaymentService::attachChequeFromRequest($expense, $paymentSource, $fields['user_name']);
-                AccountingDocumentPoster::syncExpense($expense->fresh(['payments']));
+                AccountingDocumentPoster::syncExpense($expense->fresh(['payments', 'accountingAccount']));
 
                 return $expense;
             });
@@ -271,7 +271,7 @@ class ExpenseController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        return response($this->withAccount($expense->fresh(['shopAccount', 'cheque'])), 201);
+        return response($this->withAccount($expense->fresh(['shopAccount', 'cheque', 'accountingAccount'])), 201);
     }
 
     /**
@@ -508,21 +508,26 @@ class ExpenseController extends Controller
         if (! array_key_exists('accounting_account_id', $fields)) {
             return null;
         }
-        if (! \Illuminate\Support\Facades\Schema::hasColumn('expenses', 'accounting_account_id')) {
-            unset($fields['accounting_account_id']);
-
-            return null;
-        }
 
         $raw = $fields['accounting_account_id'];
-        if ($raw === null || $raw === '') {
+        if ($raw === null || $raw === '' || $raw === false) {
             $fields['accounting_account_id'] = null;
 
             return null;
         }
 
+        if (! Schema::hasColumn('expenses', 'accounting_account_id')) {
+            return 'ستون حساب درخت روی جدول هزینه فعال نیست. فایل SQL مربوط به accounting_account_id را اجرا کنید.';
+        }
+
         $id = (int) $raw;
-        $allowed = \App\Services\ChartOfAccountsSeeder::expenseLinkableAccounts($atelierId)
+        if ($id <= 0) {
+            $fields['accounting_account_id'] = null;
+
+            return null;
+        }
+
+        $allowed = ChartOfAccountsSeeder::expenseLinkableAccounts($atelierId)
             ->pluck('id')
             ->map(fn ($rowId) => (int) $rowId)
             ->all();
@@ -636,28 +641,29 @@ class ExpenseController extends Controller
         }
 
         $items = [];
-        if ($selectedAccountId > 0) {
-            foreach ($expenses as $expense) {
-                $resolvedId = $resolvedByExpenseId[(int) $expense->id] ?? 0;
-                if ($resolvedId <= 0 || ! isset($selectedDescendantIds[$resolvedId])) {
-                    continue;
-                }
-                $account = $byId[$resolvedId] ?? null;
-                $items[] = [
-                    'id' => (int) $expense->id,
-                    'title' => $expense->title,
-                    'amount' => (float) $expense->amount,
-                    'type' => $expense->type,
-                    'date' => $expense->date,
-                    'user_name' => $expense->user_name,
-                    'accounting_account_id' => $resolvedId,
-                    'accounting_account' => $account ? [
-                        'id' => (int) $account->id,
-                        'code' => $account->code,
-                        'name' => $account->name,
-                    ] : null,
-                ];
+        foreach ($expenses as $expense) {
+            $resolvedId = $resolvedByExpenseId[(int) $expense->id] ?? 0;
+            if ($resolvedId <= 0) {
+                continue;
             }
+            if ($selectedAccountId > 0 && ! isset($selectedDescendantIds[$resolvedId])) {
+                continue;
+            }
+            $account = $byId[$resolvedId] ?? null;
+            $items[] = [
+                'id' => (int) $expense->id,
+                'title' => $expense->title,
+                'amount' => (float) $expense->amount,
+                'type' => $expense->type,
+                'date' => $expense->date,
+                'user_name' => $expense->user_name,
+                'accounting_account_id' => $resolvedId,
+                'accounting_account' => $account ? [
+                    'id' => (int) $account->id,
+                    'code' => $account->code,
+                    'name' => $account->name,
+                ] : null,
+            ];
         }
 
         $tree = [];
