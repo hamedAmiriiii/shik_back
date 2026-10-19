@@ -140,23 +140,52 @@ class CustomerController extends Controller
             })->addSelect(DB::raw('MAX(user_shiksho.name) as name'));
         }
 
-        // اعمال جستجو
+        // اعمال جستجو (تلفن OR نام — Grid همه فیلدها را با یک query پر می‌کند)
         if ($searchDataModel) {
-            if (is_object($searchDataModel)) {
-                if (isset($searchDataModel->phone)) {
-                    $query->where('purchases.phone', 'like', '%'.$searchDataModel->phone.'%');
-                }
-                if (isset($searchDataModel->name) && Schema::hasColumn('user_shiksho', 'name')) {
-                    $query->where('user_shiksho.name', 'like', '%'.$searchDataModel->name.'%');
-                }
-            } elseif (is_string($searchDataModel)) {
-                $query->where(function ($q) use ($searchDataModel) {
-                    $q->where('purchases.phone', 'like', '%'.$searchDataModel.'%');
-                    if (Schema::hasColumn('user_shiksho', 'name')) {
-                        $q->orWhere('user_shiksho.name', 'like', '%'.$searchDataModel.'%');
+            $normalizeDigits = static function (string $raw): string {
+                return strtr($raw, [
+                    '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+                    '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+                    '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+                    '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+                ]);
+            };
+
+            $query->where(function ($q) use ($searchDataModel, $normalizeDigits) {
+                if (is_object($searchDataModel)) {
+                    $phone = isset($searchDataModel->phone) ? trim((string) $searchDataModel->phone) : '';
+                    $name = isset($searchDataModel->name) ? trim((string) $searchDataModel->name) : '';
+                    $has = false;
+                    if ($phone !== '') {
+                        $phoneEn = $normalizeDigits($phone);
+                        $q->where('purchases.phone', 'like', '%'.$phoneEn.'%');
+                        if ($phoneEn !== $phone) {
+                            $q->orWhere('purchases.phone', 'like', '%'.$phone.'%');
+                        }
+                        $has = true;
                     }
-                });
-            }
+                    if ($name !== '' && Schema::hasColumn('user_shiksho', 'name')) {
+                        if ($has) {
+                            $q->orWhere('user_shiksho.name', 'like', '%'.$name.'%');
+                        } else {
+                            $q->where('user_shiksho.name', 'like', '%'.$name.'%');
+                        }
+                    }
+                } elseif (is_string($searchDataModel)) {
+                    $term = trim($searchDataModel);
+                    if ($term === '') {
+                        return;
+                    }
+                    $termEn = $normalizeDigits($term);
+                    $q->where('purchases.phone', 'like', '%'.$termEn.'%');
+                    if ($termEn !== $term) {
+                        $q->orWhere('purchases.phone', 'like', '%'.$term.'%');
+                    }
+                    if (Schema::hasColumn('user_shiksho', 'name')) {
+                        $q->orWhere('user_shiksho.name', 'like', '%'.$term.'%');
+                    }
+                }
+            });
         }
 
         // دریافت اعتبار فعلی هر مشتری
