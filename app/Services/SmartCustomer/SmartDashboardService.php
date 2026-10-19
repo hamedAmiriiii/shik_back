@@ -88,13 +88,15 @@ class SmartDashboardService
 
         $ai = self::aiSuggestion($headline, $suggestions, $actionCount, $atRisk);
 
-        $lastComputed = Schema::hasTable('shop_customer_metrics')
+        $lastComputedRaw = Schema::hasTable('shop_customer_metrics')
             ? ShopCustomerMetric::query()->where('atelier_id', $atelierId)->max('computed_at')
             : null;
 
         return [
             'ready' => true,
-            'last_computed_at' => $lastComputed,
+            'last_computed_at' => $lastComputedRaw
+                ? \App\Tools\JalaliTools::format($lastComputedRaw, 'Y/m/d H:i')
+                : null,
             'window_label' => self::windowLabel($window),
             'segment_labels' => $labels,
             'counts' => $counts,

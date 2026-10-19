@@ -67,13 +67,36 @@ class PurchasedProductController extends Controller
         })
         ->orderBy('id', 'desc');
 
-    // جستجو بر اساس searchFilterModel
+    // جستجو بر اساس searchFilterModel (تلفن، نام، شماره فاکتور/id، فیش روزانه)
     $searchDataModel = json_decode($request->input('searchFilterModel'));
     if ($searchDataModel) {
         $query->where(function ($q) use ($searchDataModel, $atelierId) {
+            $applyInvoiceOrTicket = function ($builder, string $raw) {
+                $normalized = strtr($raw, [
+                    '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+                    '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+                    '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+                    '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+                ]);
+                $digits = preg_replace('/\D+/', '', $normalized) ?? '';
+                if ($digits === '') {
+                    return;
+                }
+                $num = (int) $digits;
+                if ($num <= 0) {
+                    return;
+                }
+                $builder->orWhere('id', $num);
+                if (Schema::hasColumn('purchases', 'daily_ticket_number')) {
+                    $builder->orWhere('daily_ticket_number', $num);
+                }
+            };
+
             if (is_object($searchDataModel)) {
-                if (isset($searchDataModel->phone)) {
-                    $q->where('phone', 'like', '%'.$searchDataModel->phone.'%');
+                $hasClause = false;
+                if (isset($searchDataModel->phone) && trim((string) $searchDataModel->phone) !== '') {
+                    $q->where('phone', 'like', '%'.trim((string) $searchDataModel->phone).'%');
+                    $hasClause = true;
                 }
                 if (isset($searchDataModel->customer_name)
                     && Schema::hasTable('user_shiksho')
@@ -87,21 +110,43 @@ class PurchasedProductController extends Controller
                                 ->where('atelier_id', $atelierId)
                                 ->where('name', 'like', '%'.$name.'%');
                         });
+                        $hasClause = true;
                     }
+                }
+                if (isset($searchDataModel->id) && trim((string) $searchDataModel->id) !== '') {
+                    $applyInvoiceOrTicket($q, (string) $searchDataModel->id);
+                    $hasClause = true;
+                }
+                if (isset($searchDataModel->daily_ticket_number)
+                    && trim((string) $searchDataModel->daily_ticket_number) !== ''
+                ) {
+                    $applyInvoiceOrTicket($q, (string) $searchDataModel->daily_ticket_number);
+                    $hasClause = true;
+                }
+                // اگر فقط تلفن/نام پر شده (جستجوی عمومی Grid)، شماره فاکتور/فیش را هم OR کن
+                $freeTerm = trim((string) (
+                    $searchDataModel->phone
+                    ?? $searchDataModel->customer_name
+                    ?? $searchDataModel->id
+                    ?? $searchDataModel->daily_ticket_number
+                    ?? ''
+                ));
+                if ($freeTerm !== '' && $hasClause) {
+                    $applyInvoiceOrTicket($q, $freeTerm);
                 }
             } elseif (is_string($searchDataModel)) {
                 $term = trim($searchDataModel);
-                $q->where('phone', 'like', '%'.$term.'%');
-                if ($term !== ''
-                    && Schema::hasTable('user_shiksho')
-                    && Schema::hasColumn('user_shiksho', 'name')
-                ) {
-                    $q->orWhereIn('phone', function ($sub) use ($atelierId, $term) {
-                        $sub->select('phone')
-                            ->from('user_shiksho')
-                            ->where('atelier_id', $atelierId)
-                            ->where('name', 'like', '%'.$term.'%');
-                    });
+                if ($term !== '') {
+                    $q->where('phone', 'like', '%'.$term.'%');
+                    if (Schema::hasTable('user_shiksho') && Schema::hasColumn('user_shiksho', 'name')) {
+                        $q->orWhereIn('phone', function ($sub) use ($atelierId, $term) {
+                            $sub->select('phone')
+                                ->from('user_shiksho')
+                                ->where('atelier_id', $atelierId)
+                                ->where('name', 'like', '%'.$term.'%');
+                        });
+                    }
+                    $applyInvoiceOrTicket($q, $term);
                 }
             }
         });
