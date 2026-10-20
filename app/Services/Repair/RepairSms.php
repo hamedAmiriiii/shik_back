@@ -8,7 +8,6 @@ use App\Models\ShopSmsLog;
 use App\Services\ShopSmsQuotaService;
 use App\Tools\SmsTools;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
@@ -63,13 +62,9 @@ class RepairSms
         }
 
         try {
-            $response = Http::timeout(20)->get('http://api.shinapayamak.ir/v1/'.SmsTools::API_TOKEN.'/sms/send.json', [
-                'gateway' => SmsTools::GATEWAY,
-                'to' => $phone,
-                'text' => ShopSmsQuotaService::billableText($text),
-            ]);
-            $json = $response->json();
-            $fields = SmsTools::parseProviderResponse(is_array($json) ? $json : [], $response->successful());
+            // از مسیر واحد SmsTools تا پروایدر فعال (شینا / ملی‌پیامک) اعمال شود
+            $json = SmsTools::sendSms($phone, $text, false);
+            $fields = SmsTools::extractProviderFieldsFromResponse(is_array($json) ? $json : [], true);
         } catch (Throwable $e) {
             Log::warning('repair sms failed', ['phone' => $phone, 'error' => $e->getMessage()]);
             $fields = [

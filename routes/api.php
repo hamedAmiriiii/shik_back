@@ -765,6 +765,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::delete('consultation-requests/{consultationRequest}', [\App\Http\Controllers\Admin\ConsultationRequestController::class, 'destroy']);
 
         Route::resource("/log-sms", \App\Http\Controllers\Admin\LogSmsController::class)->only("index");
+
+        Route::get('sms-gateway', [\App\Http\Controllers\Admin\SmsGatewayController::class, 'show']);
+        Route::put('sms-gateway', [\App\Http\Controllers\Admin\SmsGatewayController::class, 'update']);
+        Route::get('sms-gateway/credit', [\App\Http\Controllers\Admin\SmsGatewayController::class, 'credit']);
     });
 
     Route::name('cameraman.')->prefix('cameraman')->group(function () {

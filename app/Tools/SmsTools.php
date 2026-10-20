@@ -6,16 +6,20 @@ use App\Models\Atelier;
 use App\Models\LogSms;
 use App\Models\ShopSmsLog;
 use App\Services\ShopSmsQuotaService;
+use App\Services\Sms\MelipayamakClient;
+use App\Services\Sms\ShinaPayamakClient;
+use App\Services\Sms\SmsGatewayConfig;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Kavenegar;
 
 class SmsTools
 {
+    /** @deprecated از config('sms.shina.api_token') استفاده کنید */
     public const API_TOKEN = "sa345478720:L2ZSDrZ7lEYzxark92MWhH2mveIUxQ7KABqI";
 
+    /** @deprecated از config('sms.shina.gateway') استفاده کنید */
     public const GATEWAY = '10003000207';
 
     /**
@@ -38,27 +42,77 @@ class SmsTools
 
     public static function getBalance()
     {
-        $response = Http::get('http://api.shinapayamak.ir/v1/' . self::API_TOKEN . '/account/balance.json');
+        if (SmsGatewayConfig::isMelipayamak()) {
+            return MelipayamakClient::fromConfig()->getCredit();
+        }
 
-        return $response->json();
+        return (new ShinaPayamakClient())->getBalance();
     }
 
-    public static function sendSms(string $receivers, string $text)
+    /**
+     * ارسال پیامک متن آزاد (سیستمی / OTP متنی).
+     * اگر پروایدر ملی‌پیامک باشد و کد OTP قابل تشخیص باشد، از پترن استفاده می‌شود.
+     *
+     * @param  bool  $writeSystemLog  ثبت در log_sms (صفحه کدهای دوعاملی)
+     */
+    public static function sendSms(string $receivers, string $text, bool $writeSystemLog = true)
     {
-        $response = Http::get('http://api.shinapayamak.ir/v1/' . self::API_TOKEN . '/sms/send.json', [
-            'gateway' => self::GATEWAY,
-            'to' => $receivers,
-            'text' => $text . " \n لغو11",
-        ]);
+        $otpCode = self::extractOtpCode($text);
+        if ($otpCode !== null && SmsGatewayConfig::isMelipayamak()) {
+            $shopName = self::extractShopNameFromOtpText($text);
+            $result = self::sendOtpSms($receivers, $otpCode, $shopName);
+        } else {
+            $result = self::dispatchFreeText($receivers, $text);
+        }
 
-        LogSms::create([
-            'text' => $text,
-            'number' => '1000528554',
-            'receivers' => $receivers,
-            'creator_id' => Auth::id(),
-        ]);
+        if ($writeSystemLog) {
+            LogSms::create([
+                'text' => $text,
+                'number' => SmsGatewayConfig::isMelipayamak()
+                    ? (SmsGatewayConfig::melipayamakFrom() ?: 'melipayamak')
+                    : (new ShinaPayamakClient())->logSender(),
+                'receivers' => $receivers,
+                'creator_id' => Auth::id(),
+            ]);
+        }
 
-        return $response->json();
+        return $result;
+    }
+
+    /**
+     * ارسال OTP با پترن ملی‌پیامک (یا متن آزاد روی شینا).
+     */
+    public static function sendOtpSms(string $phone, string $code, ?string $shopName = null): array
+    {
+        if (! SmsGatewayConfig::isMelipayamak()) {
+            $brand = $shopName !== null && $shopName !== '' ? $shopName : 'وبینو';
+            $text = "{$brand}\nکد احراز هویت شما : {$code}";
+
+            return self::dispatchFreeText($phone, $text);
+        }
+
+        $brand = ($shopName !== null && $shopName !== '') ? $shopName : 'وبینو';
+        $bodyId = SmsGatewayConfig::melipayamakOtpBodyId();
+
+        // اگر پترن تأییدشده دارید → BaseServiceNumber؛ وگرنه خط اختصاصی
+        if ($bodyId !== null) {
+            $mode = SmsGatewayConfig::melipayamakOtpVarsMode();
+            $vars = $mode === 'code' ? [$code] : [$brand, $code];
+
+            $client = MelipayamakClient::fromConfig();
+            $json = $client->sendByBaseNumber($phone, $vars, $bodyId);
+            $interpreted = MelipayamakClient::interpretSendResponse($json);
+
+            return array_merge($json, [
+                'provider' => SmsGatewayConfig::PROVIDER_MELIPAYAMAK,
+                'ok' => $interpreted['ok'],
+                'reference_id' => $interpreted['reference_id'] ?? null,
+            ]);
+        }
+
+        $text = "{$brand}\nکد احراز هویت شما : {$code}";
+
+        return self::dispatchFreeText($phone, $text);
     }
 
     /**
@@ -94,26 +148,13 @@ class SmsTools
         ];
 
         try {
-            $response = Http::timeout(20)->get(
-                'http://api.shinapayamak.ir/v1/' . self::API_TOKEN . '/sms/send.json',
-                [
-                    'gateway' => self::GATEWAY,
-                    'to' => $phone,
-                    'text' => $message . " \n لغو11",
-                ]
-            );
-
-            $json = $response->json();
-            if (! is_array($json)) {
-                $json = [];
-            }
-
-            $providerFields = self::extractProviderFieldsFromResponse($json, $response->successful());
+            $result = self::dispatchFreeText($phone, $message, true);
+            $providerFields = self::providerFieldsFromDispatch($result);
             $payload = array_merge($payload, $providerFields);
 
             self::createShopSmsLog($payload);
 
-            return $json;
+            return $result['raw'] ?? $result;
         } catch (\Throwable $e) {
             Log::warning('shop sms send failed', [
                 'phone' => $phone,
@@ -136,7 +177,7 @@ class SmsTools
     }
 
     /**
-     * استعلام وضعیت پیامک از شینا
+     * استعلام وضعیت پیامک از پروایدر فعال
      *
      * @param  string|null  $batchId
      * @param  string|null  $referenceId
@@ -144,29 +185,19 @@ class SmsTools
      */
     public static function fetchSmsDeliveryStatus(?string $batchId = null, ?string $referenceId = null): ?array
     {
-        if (($referenceId === null || $referenceId === '') && ($batchId === null || $batchId === '')) {
-            return null;
+        if (SmsGatewayConfig::isMelipayamak()) {
+            if ($referenceId === null || $referenceId === '') {
+                return null;
+            }
+
+            return MelipayamakClient::fromConfig()->getDeliveries($referenceId);
         }
 
-        $query = [];
-        if ($referenceId !== null && $referenceId !== '') {
-            $query['reference_id'] = $referenceId;
-        } else {
-            $query['batch_id'] = $batchId;
-        }
-
-        $response = Http::timeout(20)->get(
-            'http://api.shinapayamak.ir/v1/' . self::API_TOKEN . '/sms/status.json',
-            $query
-        );
-
-        $json = $response->json();
-
-        return is_array($json) ? $json : null;
+        return (new ShinaPayamakClient())->status($batchId, $referenceId);
     }
 
     /**
-     * به‌روزرسانی وضعیت یک لاگ از روی پاسخ شینا
+     * به‌روزرسانی وضعیت یک لاگ از روی پاسخ پروایدر
      */
     public static function refreshShopSmsLogStatus(ShopSmsLog $log): ShopSmsLog
     {
@@ -191,7 +222,12 @@ class SmsTools
             return $log;
         }
 
-        $fields = self::extractProviderFieldsFromResponse($json, true);
+        if (SmsGatewayConfig::isMelipayamak()) {
+            $fields = MelipayamakClient::interpretDeliveryResponse($json, $referenceId !== '' ? $referenceId : null);
+        } else {
+            $fields = self::extractProviderFieldsFromResponse($json, true);
+        }
+
         if (! empty($fields)) {
             $log->fill($fields);
             $log->save();
@@ -210,6 +246,19 @@ class SmsTools
     {
         if (! self::shopSmsDeliveryColumnsReady()) {
             return [];
+        }
+
+        if (isset($json['RetStatus'])) {
+            $interpreted = MelipayamakClient::interpretSendResponse($json);
+            $fields = [
+                'status_checked_at' => now(),
+                'delivery_status' => $interpreted['delivery_status'],
+            ];
+            if (! empty($interpreted['reference_id'])) {
+                $fields['reference_id'] = $interpreted['reference_id'];
+            }
+
+            return $fields;
         }
 
         return self::parseProviderResponse($json, $httpOk);
@@ -257,6 +306,110 @@ class SmsTools
         }
 
         return $fields;
+    }
+
+    /**
+     * @return array{provider: string, ok: bool, raw: array, http_ok?: bool}
+     */
+    protected static function dispatchFreeText(string $phone, string $text, bool $withOptOutSuffix = false): array
+    {
+        if (SmsGatewayConfig::isMelipayamak()) {
+            $from = SmsGatewayConfig::melipayamakFrom();
+            if ($from === '') {
+                Log::warning('melipayamak free-text requires dedicated from number');
+
+                return [
+                    'provider' => SmsGatewayConfig::PROVIDER_MELIPAYAMAK,
+                    'ok' => false,
+                    'raw' => [
+                        'Value' => '-3',
+                        'RetStatus' => 0,
+                        'StrRetStatus' => 'FromNumberMissing',
+                        'error' => 'برای پیامک متن آزاد در ملی‌پیامک، شماره خط اختصاصی (from) را در تنظیمات وارد کنید. خط اشتراکی فقط پترن OTP را پشتیبانی می‌کند.',
+                    ],
+                ];
+            }
+
+            $sendText = $withOptOutSuffix ? ShopSmsQuotaService::billableText($text) : $text;
+            $json = MelipayamakClient::fromConfig()->send($phone, $from, $sendText);
+            $interpreted = MelipayamakClient::interpretSendResponse($json);
+
+            return [
+                'provider' => SmsGatewayConfig::PROVIDER_MELIPAYAMAK,
+                'ok' => $interpreted['ok'],
+                'raw' => $json,
+                'reference_id' => $interpreted['reference_id'] ?? null,
+                'delivery_status' => $interpreted['delivery_status'],
+            ];
+        }
+
+        $sendText = $withOptOutSuffix
+            ? ShopSmsQuotaService::billableText($text)
+            : ($text." \n لغو11");
+        $shina = new ShinaPayamakClient();
+        $sent = $shina->send($phone, $sendText);
+
+        return [
+            'provider' => SmsGatewayConfig::PROVIDER_SHINA,
+            'ok' => $sent['http_ok'],
+            'http_ok' => $sent['http_ok'],
+            'raw' => $sent['json'],
+        ];
+    }
+
+    /**
+     * @param  array{provider?: string, ok?: bool, raw?: array, http_ok?: bool, reference_id?: string, delivery_status?: string}  $result
+     * @return array<string, mixed>
+     */
+    protected static function providerFieldsFromDispatch(array $result): array
+    {
+        if (! self::shopSmsDeliveryColumnsReady()) {
+            return [];
+        }
+
+        if (($result['provider'] ?? '') === SmsGatewayConfig::PROVIDER_MELIPAYAMAK) {
+            $fields = [
+                'status_checked_at' => now(),
+                'delivery_status' => $result['delivery_status']
+                    ?? (($result['ok'] ?? false) ? ShopSmsLog::STATUS_SENT : ShopSmsLog::STATUS_SEND_FAILED),
+            ];
+            if (! empty($result['reference_id'])) {
+                $fields['reference_id'] = (string) $result['reference_id'];
+            } elseif (! empty($result['raw']) && is_array($result['raw'])) {
+                $interpreted = MelipayamakClient::interpretSendResponse($result['raw']);
+                if (! empty($interpreted['reference_id'])) {
+                    $fields['reference_id'] = $interpreted['reference_id'];
+                }
+                $fields['delivery_status'] = $interpreted['delivery_status'];
+            }
+
+            return $fields;
+        }
+
+        $json = is_array($result['raw'] ?? null) ? $result['raw'] : [];
+
+        return self::parseProviderResponse($json, (bool) ($result['http_ok'] ?? $result['ok'] ?? false));
+    }
+
+    protected static function extractOtpCode(string $text): ?string
+    {
+        if (preg_match('/(?<!\\d)(\\d{4,8})(?!\\d)/u', $text, $m)) {
+            return $m[1];
+        }
+
+        return null;
+    }
+
+    protected static function extractShopNameFromOtpText(string $text): ?string
+    {
+        $lines = preg_split("/\\R/u", trim($text)) ?: [];
+        if (count($lines) >= 2 && ! preg_match('/^\\d+$/', trim($lines[0]))) {
+            $first = trim($lines[0]);
+
+            return $first !== '' ? $first : null;
+        }
+
+        return null;
     }
 
     protected static function createShopSmsLog(array $payload): void
