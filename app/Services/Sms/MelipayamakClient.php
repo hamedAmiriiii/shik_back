@@ -3,6 +3,7 @@
 namespace App\Services\Sms;
 
 use App\Models\ShopSmsLog;
+use App\Support\OutboundHttp;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -209,7 +210,8 @@ class MelipayamakClient
         ]);
 
         try {
-            $response = Http::timeout(20)
+            $response = Http::withOptions(OutboundHttp::sslOptions())
+                ->timeout(20)
                 ->acceptJson()
                 ->asJson()
                 ->post($this->baseUrl.'/'.$method, $payload);
