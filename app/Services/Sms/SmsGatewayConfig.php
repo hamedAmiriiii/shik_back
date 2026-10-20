@@ -107,25 +107,11 @@ class SmsGatewayConfig
     }
 
     /**
-     * ملی‌پیامک معمولاً نام کاربری را به صورت 98xxxxxxxxxx می‌خواهد.
+     * نام کاربری همان مقدار ورود به پنل است و نباید به 98 تبدیل شود.
      */
     public static function normalizeMelipayamakUsername(string $username): string
     {
-        $digits = preg_replace('/\D+/', '', $username) ?? '';
-        if ($digits === '') {
-            return trim($username);
-        }
-        if (str_starts_with($digits, '98') && strlen($digits) === 12) {
-            return $digits;
-        }
-        if (str_starts_with($digits, '0') && strlen($digits) === 11) {
-            return '98'.substr($digits, 1);
-        }
-        if (strlen($digits) === 10 && str_starts_with($digits, '9')) {
-            return '98'.$digits;
-        }
-
-        return $digits;
+        return trim($username);
     }
 
     /**

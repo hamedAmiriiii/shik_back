@@ -330,7 +330,9 @@ class SmsTools
                 ];
             }
 
-            $sendText = $withOptOutSuffix ? ShopSmsQuotaService::billableText($text) : $text;
+            $sendText = self::ensureMelipayamakOptOut(
+                $withOptOutSuffix ? ShopSmsQuotaService::billableText($text) : $text
+            );
             $json = MelipayamakClient::fromConfig()->send($phone, $from, $sendText);
             $interpreted = MelipayamakClient::interpretSendResponse($json);
 
@@ -389,6 +391,19 @@ class SmsTools
         $json = is_array($result['raw'] ?? null) ? $result['raw'] : [];
 
         return self::parseProviderResponse($json, (bool) ($result['http_ok'] ?? $result['ok'] ?? false));
+    }
+
+    /**
+     * خط اختصاصی ملی‌پیامک بدون «لغو11» در انتهای متن، ارسال را رد می‌کند (کد ۱۵).
+     */
+    protected static function ensureMelipayamakOptOut(string $text): string
+    {
+        $trimmed = rtrim($text);
+        if ($trimmed === '' || str_ends_with($trimmed, 'لغو11')) {
+            return $trimmed;
+        }
+
+        return $trimmed.ShopSmsQuotaService::OPT_OUT_SUFFIX;
     }
 
     protected static function extractOtpCode(string $text): ?string

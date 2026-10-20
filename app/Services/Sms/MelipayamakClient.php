@@ -42,8 +42,13 @@ class MelipayamakClient
             ? implode(';', array_map(static fn ($v) => (string) $v, $textOrVars))
             : (string) $textOrVars;
 
+        $recipients = $this->normalizeRecipients($to);
+        if ($recipients === []) {
+            return self::localError(16);
+        }
+
         return $this->post('BaseServiceNumber', [
-            'to' => $this->normalizeMobile($to),
+            'to' => implode(',', $recipients),
             'text' => $text,
             'bodyId' => $bodyId,
         ]);
@@ -51,33 +56,71 @@ class MelipayamakClient
 
     /**
      * ارسال متن آزاد با خط اختصاصی.
+     * هر فراخوانی حداکثر ۱۰۰ گیرنده؛ بیشتر از آن به چند درخواست شکسته می‌شود.
      */
     public function send(string $to, string $from, string $text, bool $isFlash = false): array
     {
-        return $this->post('SendSMS', [
-            'to' => $this->normalizeMobile($to),
-            'from' => $from,
-            'text' => $text,
-            'isFlash' => $isFlash,
-        ]);
+        $recipients = $this->normalizeRecipients($to);
+        if ($recipients === []) {
+            return self::localError(16);
+        }
+        if (trim($text) === '') {
+            return self::localError(17);
+        }
+        if (trim($from) === '') {
+            return self::localError(5);
+        }
+
+        $chunks = array_chunk($recipients, 100);
+        $recIds = [];
+        $last = null;
+
+        foreach ($chunks as $chunk) {
+            $last = $this->post('SendSMS', [
+                'to' => implode(',', $chunk),
+                'from' => $from,
+                'text' => $text,
+                'isFlash' => $isFlash,
+            ]);
+            $interpreted = self::interpretSendResponse($last);
+            if (! $interpreted['ok']) {
+                return $last;
+            }
+            if (! empty($interpreted['reference_id'])) {
+                $recIds[] = (string) $interpreted['reference_id'];
+            }
+        }
+
+        if ($last === null) {
+            return self::localError(11);
+        }
+
+        if (count($chunks) > 1) {
+            $last['Value'] = implode(',', $recIds);
+        }
+
+        return $last;
     }
 
     public function getDeliveries(string $recId): array
     {
+        $first = trim(explode(',', $recId)[0] ?? '');
+
         return $this->post('GetDeliveries2', [
-            'recId' => $recId,
+            'recID' => $first,
         ]);
     }
 
     /**
-     * @return array{ok: bool, reference_id?: string, delivery_status: string, raw: array}
+     * @return array{ok: bool, reference_id?: string|null, delivery_status: string, raw: array, error_code?: string, error_message?: string}
      */
     public static function interpretSendResponse(array $json): array
     {
         $ret = (int) ($json['RetStatus'] ?? 0);
-        $value = isset($json['Value']) ? (string) $json['Value'] : '';
+        $value = trim((string) ($json['Value'] ?? ''));
+        $str = trim((string) ($json['StrRetStatus'] ?? ''));
 
-        if ($ret === 1 && $value !== '' && ctype_digit($value) && strlen($value) >= 15) {
+        if ($ret === 1 && strcasecmp($str, 'Ok') === 0 && self::looksLikeRecIds($value)) {
             return [
                 'ok' => true,
                 'reference_id' => $value,
@@ -86,14 +129,15 @@ class MelipayamakClient
             ];
         }
 
-        // گاهی Value کد خطای منفی است
+        $code = self::resolveErrorCode($ret, $value);
+
         return [
             'ok' => false,
-            'reference_id' => $value !== '' && ctype_digit($value) ? $value : null,
-            'delivery_status' => ShopSmsLog::STATUS_SEND_FAILED,
+            'reference_id' => null,
+            'delivery_status' => self::mapSendErrorStatus($code),
             'raw' => $json,
-            'error_code' => $value !== '' ? $value : (string) $ret,
-            'error_message' => (string) ($json['StrRetStatus'] ?? 'SendFailed'),
+            'error_code' => (string) $code,
+            'error_message' => self::describeSendError($code, $str),
         ];
     }
 
@@ -117,7 +161,6 @@ class MelipayamakClient
         }
 
         $value = $json['Value'] ?? null;
-        // GetDeliveries2 ممکن است عدد وضعیت یا آرایه برگرداند
         $code = null;
         if (is_array($value) && isset($value[0])) {
             $code = (int) $value[0];
@@ -130,15 +173,21 @@ class MelipayamakClient
         return $fields;
     }
 
+    /**
+     * کدهای وضعیت GetDeliveries2.
+     */
     protected static function mapDeliveryCode(?int $code): string
     {
         return match ($code) {
-            1 => ShopSmsLog::STATUS_DELIVERED,       // رسیده به گوشی
-            2 => ShopSmsLog::STATUS_FAILED,          // نرسیده به گوشی
-            4 => ShopSmsLog::STATUS_SENT,            // رسیده به مخابرات
-            8 => ShopSmsLog::STATUS_PENDING,         // رسیده به مخابرات / در صف
-            16 => ShopSmsLog::STATUS_ENQUEUED,
-            null => ShopSmsLog::STATUS_UNKNOWN,
+            0, 8, 200 => ShopSmsLog::STATUS_SENT,
+            1 => ShopSmsLog::STATUS_DELIVERED,
+            2 => ShopSmsLog::STATUS_UNDELIVERED,
+            3, 16 => ShopSmsLog::STATUS_FAILED,
+            35 => ShopSmsLog::STATUS_BLACKLIST,
+            300 => ShopSmsLog::STATUS_FILTERED,
+            400 => ShopSmsLog::STATUS_ENQUEUED,
+            500 => ShopSmsLog::STATUS_REJECTED,
+            5, 100, -1, null => ShopSmsLog::STATUS_UNKNOWN,
             default => ShopSmsLog::STATUS_UNKNOWN,
         };
     }
@@ -151,11 +200,7 @@ class MelipayamakClient
         if ($this->username === '' || $this->apiKey === '') {
             Log::warning('melipayamak credentials missing');
 
-            return [
-                'Value' => '0',
-                'RetStatus' => 0,
-                'StrRetStatus' => 'CredentialsMissing',
-            ];
+            return self::localError(0, 'نام کاربری یا کلید API ملی‌پیامک خالی است.');
         }
 
         $payload = array_merge($data, [
@@ -165,20 +210,27 @@ class MelipayamakClient
 
         try {
             $response = Http::timeout(20)
-                ->asForm()
+                ->acceptJson()
+                ->asJson()
                 ->post($this->baseUrl.'/'.$method, $payload);
 
             $json = $response->json();
             if (! is_array($json)) {
+                Log::warning('melipayamak invalid response', [
+                    'method' => $method,
+                    'http_status' => $response->status(),
+                    'body' => mb_substr($response->body(), 0, 500),
+                ]);
+
                 return [
                     'Value' => '',
                     'RetStatus' => 0,
-                    'StrRetStatus' => 'InvalidResponse',
+                    'StrRetStatus' => 'پاسخ ملی‌پیامک قابل خواندن نبود.',
                     'http_status' => $response->status(),
                 ];
             }
 
-            return $json;
+            return self::annotate($json, $method);
         } catch (\Throwable $e) {
             Log::warning('melipayamak request failed', [
                 'method' => $method,
@@ -193,6 +245,142 @@ class MelipayamakClient
         }
     }
 
+    /**
+     * @param  array<string, mixed>  $json
+     * @return array<string, mixed>
+     */
+    protected static function annotate(array $json, string $method): array
+    {
+        $ret = (int) ($json['RetStatus'] ?? 0);
+        if ($ret === 1) {
+            return $json;
+        }
+
+        $value = trim((string) ($json['Value'] ?? ''));
+        $code = self::resolveErrorCode($ret, $value);
+        $message = self::describeSendError($code, (string) ($json['StrRetStatus'] ?? ''));
+        $json['StrRetStatus'] = $message;
+
+        Log::warning('melipayamak api rejected', [
+            'method' => $method,
+            'ret_status' => $ret,
+            'value' => $value,
+            'message' => $message,
+        ]);
+
+        return $json;
+    }
+
+    protected static function resolveErrorCode(int $ret, string $value): int
+    {
+        if (preg_match('/^-?\d+$/', $value) === 1) {
+            $asInt = (int) $value;
+            if ($asInt !== 1 && array_key_exists($asInt, self::sendErrorMessages())) {
+                return $asInt;
+            }
+        }
+
+        return $ret;
+    }
+
+    protected static function describeSendError(int $code, string $strRetStatus): string
+    {
+        $known = self::sendErrorMessages()[$code] ?? null;
+        $str = trim($strRetStatus);
+        if ($known !== null) {
+            return $known;
+        }
+        if ($str !== '' && strcasecmp($str, 'Ok') !== 0 && ! preg_match('/^-?\d+$/', $str)) {
+            return $str;
+        }
+
+        return 'ارسال پیامک از ملی‌پیامک ناموفق بود.';
+    }
+
+    protected static function mapSendErrorStatus(int $code): string
+    {
+        return match ($code) {
+            7, 14, 15 => ShopSmsLog::STATUS_INAPPROPRIATE_CONTENT,
+            16, 18 => ShopSmsLog::STATUS_INVALID_NUMBER,
+            default => ShopSmsLog::STATUS_SEND_FAILED,
+        };
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected static function sendErrorMessages(): array
+    {
+        return [
+            -111 => 'IP درخواست‌کننده برای ملی‌پیامک نامعتبر است.',
+            -110 => 'باید به‌جای رمز عبور، ApiKey وب‌سرویس را وارد کنید.',
+            -109 => 'IP سرور در پنل ملی‌پیامک به‌عنوان IP مجاز ثبت نشده است.',
+            -108 => 'IP به‌خاطر تلاش ناموفق API مسدود شده است.',
+            0 => 'نام کاربری یا ApiKey ملی‌پیامک اشتباه است.',
+            2 => 'اعتبار حساب ملی‌پیامک کافی نیست.',
+            3 => 'محدودیت ارسال روزانه ملی‌پیامک.',
+            4 => 'محدودیت حجم ارسال ملی‌پیامک.',
+            5 => 'شماره خط فرستنده معتبر نیست. خط اختصاصی را در تنظیمات درگاه وارد کنید.',
+            6 => 'سامانه ملی‌پیامک در حال به‌روزرسانی است.',
+            7 => 'متن پیامک حاوی کلمه فیلترشده است.',
+            9 => 'ارسال از خط عمومی با وب‌سرویس ممکن نیست. شماره خط اختصاصی لازم است.',
+            10 => 'کاربر ملی‌پیامک فعال نیست.',
+            11 => 'پیامک ارسال نشد.',
+            12 => 'مدارک کاربر در ملی‌پیامک کامل نیست.',
+            14 => 'متن پیامک حاوی لینک است و رد شد.',
+            15 => 'انتهای متن پیامک باید لغو11 باشد.',
+            16 => 'شماره گیرنده‌ای یافت نشد.',
+            17 => 'متن پیامک خالی است.',
+            18 => 'شماره موبایل معتبر نیست.',
+        ];
+    }
+
+    /**
+     * @return array{Value: string, RetStatus: int, StrRetStatus: string}
+     */
+    protected static function localError(int $code, ?string $message = null): array
+    {
+        return [
+            'Value' => (string) $code,
+            'RetStatus' => $code,
+            'StrRetStatus' => $message ?? self::describeSendError($code, ''),
+        ];
+    }
+
+    protected static function looksLikeRecIds(string $value): bool
+    {
+        if ($value === '' || $value === '11') {
+            return false;
+        }
+
+        foreach (explode(',', $value) as $part) {
+            $part = trim($part);
+            if ($part === '' || preg_match('/^\d{8,}$/', $part) !== 1) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function normalizeRecipients(string $to): array
+    {
+        $parts = preg_split('/[,،;]+/u', $to) ?: [];
+        $out = [];
+        foreach ($parts as $part) {
+            $mobile = $this->normalizeMobile(trim($part));
+            if ($mobile === '') {
+                continue;
+            }
+            $out[] = $mobile;
+        }
+
+        return $out;
+    }
+
     protected function normalizeMobile(string $phone): string
     {
         $digits = preg_replace('/\D+/', '', $phone) ?? '';
@@ -203,6 +391,6 @@ class MelipayamakClient
             return '0'.$digits;
         }
 
-        return $digits !== '' ? $digits : $phone;
+        return $digits;
     }
 }
