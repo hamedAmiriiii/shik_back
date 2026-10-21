@@ -33,26 +33,50 @@ class MelipayamakClient
     }
 
     /**
-     * ارسال با پترن خط خدماتی اشتراکی.
+     * ارسال از خط خدماتی اشتراکی (SendByBaseNumber2 / BaseServiceNumber).
+     * هر درخواست فقط یک گیرنده می‌پذیرد. متغیرها با ; جدا می‌شوند.
      *
-     * @param  string|array<int, string|int|float>  $textOrVars  متغیرها با ; یا آرایه
+     * @param  string|array<int, string|int|float>  $textOrVars
      */
     public function sendByBaseNumber(string $to, $textOrVars, int $bodyId): array
     {
         $text = is_array($textOrVars)
-            ? implode(';', array_map(static fn ($v) => (string) $v, $textOrVars))
+            ? self::joinPatternVariables($textOrVars)
             : (string) $textOrVars;
 
         $recipients = $this->normalizeRecipients($to);
         if ($recipients === []) {
             return self::localError(16);
         }
+        if (trim($text) === '') {
+            return self::localError(17);
+        }
 
-        return $this->post('BaseServiceNumber', [
-            'to' => implode(',', $recipients),
-            'text' => $text,
-            'bodyId' => $bodyId,
-        ]);
+        $last = null;
+        $recIds = [];
+        foreach ($recipients as $recipient) {
+            $last = $this->post('BaseServiceNumber', [
+                'to' => $recipient,
+                'text' => $text,
+                'bodyId' => $bodyId,
+            ]);
+            $interpreted = self::interpretSendResponse($last);
+            if (! $interpreted['ok']) {
+                return $last;
+            }
+            if (! empty($interpreted['reference_id'])) {
+                $recIds[] = (string) $interpreted['reference_id'];
+            }
+        }
+
+        if ($last === null) {
+            return self::localError(11);
+        }
+        if (count($recipients) > 1) {
+            $last['Value'] = implode(',', $recIds);
+        }
+
+        return $last;
     }
 
     /**
@@ -119,9 +143,8 @@ class MelipayamakClient
     {
         $ret = (int) ($json['RetStatus'] ?? 0);
         $value = trim((string) ($json['Value'] ?? ''));
-        $str = trim((string) ($json['StrRetStatus'] ?? ''));
 
-        if ($ret === 1 && strcasecmp($str, 'Ok') === 0 && self::looksLikeRecIds($value)) {
+        if ($ret === 1 && self::looksLikeRecIds($value)) {
             return [
                 'ok' => true,
                 'reference_id' => $value,
@@ -216,7 +239,8 @@ class MelipayamakClient
                 ->asJson()
                 ->post($this->baseUrl.'/'.$method, $payload);
 
-            $json = $response->json();
+            $decoded = json_decode($response->body(), true, 512, JSON_BIGINT_AS_STRING);
+            $json = is_array($decoded) ? $decoded : null;
             if (! is_array($json)) {
                 Log::warning('melipayamak invalid response', [
                     'method' => $method,
@@ -302,8 +326,9 @@ class MelipayamakClient
     protected static function mapSendErrorStatus(int $code): string
     {
         return match ($code) {
-            7, 14, 15 => ShopSmsLog::STATUS_INAPPROPRIATE_CONTENT,
+            7, 14, 15, -10 => ShopSmsLog::STATUS_INAPPROPRIATE_CONTENT,
             16, 18 => ShopSmsLog::STATUS_INVALID_NUMBER,
+            35 => ShopSmsLog::STATUS_BLACKLIST,
             default => ShopSmsLog::STATUS_SEND_FAILED,
         };
     }
@@ -314,10 +339,19 @@ class MelipayamakClient
     protected static function sendErrorMessages(): array
     {
         return [
+            -112 => 'دسترسی وب‌سرویس برای این حساب غیرفعال است.',
             -111 => 'IP درخواست‌کننده برای ملی‌پیامک نامعتبر است.',
             -110 => 'باید به‌جای رمز عبور، ApiKey وب‌سرویس را وارد کنید.',
             -109 => 'IP سرور در پنل ملی‌پیامک به‌عنوان IP مجاز ثبت نشده است.',
             -108 => 'IP به‌خاطر تلاش ناموفق API مسدود شده است.',
+            -10 => 'در متغیرهای الگو لینک وجود دارد.',
+            -7 => 'خطا در شماره فرستندهٔ خط خدماتی. با پشتیبانی ملی‌پیامک تماس بگیرید.',
+            -6 => 'خطای داخلی ملی‌پیامک. با پشتیبانی تماس بگیرید.',
+            -5 => 'متغیرهای ارسالی با الگوی تأییدشده هم‌خوان نیست. الگو دو مقدار می‌خواهد: عنوان و کد.',
+            -4 => 'شناسه الگو صحیح نیست یا هنوز تأیید نشده است.',
+            -3 => 'خط خدماتی در سامانه تعریف نشده است.',
+            -2 => 'وب‌سرویس الگو در هر بار فقط یک شماره می‌پذیرد.',
+            -1 => 'دسترسی وب‌سرویس خدماتی غیرفعال است.',
             0 => 'نام کاربری یا ApiKey ملی‌پیامک اشتباه است.',
             2 => 'اعتبار حساب ملی‌پیامک کافی نیست.',
             3 => 'محدودیت ارسال روزانه ملی‌پیامک.',
@@ -334,6 +368,8 @@ class MelipayamakClient
             16 => 'شماره گیرنده‌ای یافت نشد.',
             17 => 'متن پیامک خالی است.',
             18 => 'شماره موبایل معتبر نیست.',
+            19 => 'سقف ارسال روزانهٔ API پر شده است.',
+            35 => 'شماره گیرنده در لیست سیاه مخابرات است.',
         ];
     }
 
@@ -357,12 +393,29 @@ class MelipayamakClient
 
         foreach (explode(',', $value) as $part) {
             $part = trim($part);
-            if ($part === '' || preg_match('/^\d{8,}$/', $part) !== 1) {
+            if ($part === '' || preg_match('/^\d{16,}$/', $part) !== 1) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    /**
+     * متغیرهای الگو به ترتیب {0};{1};... — جداکنندهٔ REST همان ; است.
+     *
+     * @param  array<int, string|int|float>  $vars
+     */
+    public static function joinPatternVariables(array $vars): string
+    {
+        $clean = [];
+        foreach ($vars as $var) {
+            $value = trim(str_replace([';', '؛', ','], ' ', (string) $var));
+            $value = trim((string) preg_replace('/\s+/u', ' ', $value));
+            $clean[] = $value;
+        }
+
+        return implode(';', $clean);
     }
 
     /**

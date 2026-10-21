@@ -94,10 +94,10 @@ class SmsTools
         $brand = ($shopName !== null && $shopName !== '') ? $shopName : 'وبینو';
         $bodyId = SmsGatewayConfig::melipayamakOtpBodyId();
 
-        // اگر پترن تأییدشده دارید → BaseServiceNumber؛ وگرنه خط اختصاصی
+        // خط خدماتی اشتراکی (الگو) به لیست سیاه هم می‌رسد. الگوی ۵۶۴۷۰۳ دو متغیر دارد.
         if ($bodyId !== null) {
             $mode = SmsGatewayConfig::melipayamakOtpVarsMode();
-            $vars = $mode === 'code' ? [$code] : [$brand, $code];
+            $vars = ($mode === 'code' && $bodyId !== 564703) ? [$code] : [$brand, $code];
 
             $client = MelipayamakClient::fromConfig();
             $json = $client->sendByBaseNumber($phone, $vars, $bodyId);
