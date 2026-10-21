@@ -22,6 +22,8 @@ return [
         'from' => env('MELIPAYAMAK_FROM', '30008810852036'),
         'base_url' => env('MELIPAYAMAK_BASE_URL', 'https://rest.payamak-panel.com/api/SendSMS'),
         'otp_body_id' => env('MELIPAYAMAK_OTP_BODY_ID', '564703'),
+        // الگوی باشگاه ۵۶۴۷۷۵: {0} {1}عزیز مبلغ {2} تومان به اعتبار شما برای خرید بعدی اضافه شد webinoo-plus.ir
+        'credit_body_id' => env('MELIPAYAMAK_CREDIT_BODY_ID', '564775'),
         // code | shop_code
         // الگوی ۵۶۴۷۰۳: {0} کد تایید هویت شما : {1} webinoo-plus
         'otp_vars_mode' => env('MELIPAYAMAK_OTP_VARS_MODE', 'shop_code'),

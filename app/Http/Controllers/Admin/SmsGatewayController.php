@@ -29,6 +29,7 @@ class SmsGatewayController extends Controller
             'melipayamak_api_key' => 'nullable|string|max:120',
             'melipayamak_from' => 'nullable|string|max:40',
             'melipayamak_otp_body_id' => 'nullable|string|max:20',
+            'melipayamak_credit_body_id' => 'nullable|string|max:20',
             'melipayamak_otp_vars_mode' => 'nullable|string|in:code,shop_code',
         ]);
 

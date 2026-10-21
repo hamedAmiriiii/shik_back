@@ -434,10 +434,17 @@ class CartController extends Controller
                     UserShiksho::updateCredit($phone, $creditEarned, $atelierId);
 
                     // ارسال پیامک
-                    $creditFormatted = number_format($creditEarned, 0);
-                    $shopName = SmsTools::shopSmsBrand($atelierId);
-                    $text = "{$shopName}\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
-                    SmsTools::sendSms($phone, $text);
+                    try {
+                        SmsTools::sendLoyaltyCreditSms(
+                            $phone,
+                            $creditEarned,
+                            $atelierId,
+                            (string) $purchase->id,
+                            $userShiksho?->name
+                        );
+                    } catch (\App\Exceptions\InsufficientShopSmsQuotaException) {
+                        // کمبود سهمیه پیامک نباید ثبت سفارش را برگرداند
+                    }
                 } else {
                     // اگر اعتبار غیرفعال باشد، فقط پیام ساده بفرست
                     $shopName = SmsTools::shopSmsBrand($atelierId);

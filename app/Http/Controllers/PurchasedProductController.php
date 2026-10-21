@@ -756,11 +756,14 @@ class PurchasedProductController extends Controller
                 UserShiksho::updateCredit($phone, $creditEarned, $purchaseAtelierId);
 
                 // ارسال پیامک بعد از ذخیره خرید (فقط اگر اعتبار کسب شده باشد)
-                $creditFormatted = number_format($creditEarned, 0);
-                $shopName = SmsTools::shopSmsBrand($purchaseAtelierId);
-                $text = "{$shopName}\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
                 try {
-                    SmsTools::sendShopSms($phone, $text, (string) $purchase->id, $creditEarned, 'credit', $purchaseAtelierId);
+                    SmsTools::sendLoyaltyCreditSms(
+                        $phone,
+                        $creditEarned,
+                        $purchaseAtelierId,
+                        (string) $purchase->id,
+                        $customerNameInput
+                    );
                     $smsMeta = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(false);
                 } catch (\App\Exceptions\InsufficientShopSmsQuotaException) {
                     $smsMeta = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(true);

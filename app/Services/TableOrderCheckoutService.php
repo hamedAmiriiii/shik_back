@@ -162,11 +162,8 @@ class TableOrderCheckoutService
             if ($phone) {
                 if ($enableLoyaltyCredit && $creditEarned > 0) {
                     UserShiksho::updateCredit($phone, $creditEarned, $atelierId);
-                    $creditFormatted = number_format($creditEarned, 0);
-                    $shopName = SmsTools::shopSmsBrand($atelierId);
-                    $text = "{$shopName}\nهمراه عزیز مبلغ {$creditFormatted} تومان به اعتبار شما برای خرید بعدی اضافه شد";
                     try {
-                        SmsTools::sendShopSms($phone, $text, (string) $purchase->id, $creditEarned, 'credit', $atelierId);
+                        SmsTools::sendLoyaltyCreditSms($phone, $creditEarned, $atelierId, (string) $purchase->id);
                         $purchase->setAttribute('sms_sent', true);
                         $purchase->setAttribute('sms_quota_exhausted', false);
                     } catch (InsufficientShopSmsQuotaException $e) {

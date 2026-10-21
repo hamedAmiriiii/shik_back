@@ -5,6 +5,7 @@ namespace App\Tools;
 use App\Models\Atelier;
 use App\Models\LogSms;
 use App\Models\ShopSmsLog;
+use App\Models\UserShiksho;
 use App\Services\ShopSmsQuotaService;
 use App\Services\Sms\MelipayamakClient;
 use App\Services\Sms\ShinaPayamakClient;
@@ -116,6 +117,42 @@ class SmsTools
     }
 
     /**
+     * پیامک افزایش اعتبار باشگاه.
+     * الگوی ۵۶۴۷۷۵: {0} {1}عزیز مبلغ {2} تومان به اعتبار شما برای خرید بعدی اضافه شد webinoo-plus.ir
+     */
+    public static function sendLoyaltyCreditSms(
+        string $phone,
+        float|int|string $amount,
+        ?int $atelierId = null,
+        ?string $purchaseId = null,
+        ?string $customerName = null
+    ) {
+        $shopName = self::shopSmsBrand($atelierId);
+        $name = self::loyaltyCustomerName($phone, $atelierId, $customerName);
+        $amountText = (string) max(0, (int) round((float) $amount));
+        $message = "{$shopName} {$name}عزیز مبلغ {$amountText} تومان به اعتبار شما برای خرید بعدی اضافه شد";
+
+        $bodyId = SmsGatewayConfig::isMelipayamak()
+            ? SmsGatewayConfig::melipayamakCreditBodyId()
+            : null;
+
+        if ($bodyId !== null) {
+            return self::dispatchShopPattern(
+                $phone,
+                $message,
+                [$shopName, $name, $amountText],
+                $bodyId,
+                $purchaseId,
+                (float) $amount,
+                'credit',
+                $atelierId
+            );
+        }
+
+        return self::sendShopSms($phone, $message, $purchaseId, (float) $amount, 'credit', $atelierId);
+    }
+
+    /**
      * ارسال پیامک برای فروشگاه و ثبت در جدول shop_sms_logs
      *
      * @param  string  $phone  شماره تلفن گیرنده
@@ -174,6 +211,83 @@ class SmsTools
                 ],
             ];
         }
+    }
+
+    /**
+     * @param  array<int, string|int|float>  $vars
+     */
+    protected static function dispatchShopPattern(
+        string $phone,
+        string $message,
+        array $vars,
+        int $bodyId,
+        ?string $purchaseId,
+        ?float $creditAmount,
+        string $smsType,
+        ?int $atelierId
+    ) {
+        if ($atelierId !== null && $atelierId > 0) {
+            ShopSmsQuotaService::deductForMessage($atelierId, $message);
+        }
+
+        $payload = [
+            'atelier_id' => $atelierId,
+            'phone' => $phone,
+            'message' => $message,
+            'purchase_id' => $purchaseId,
+            'credit_amount' => $creditAmount,
+            'sms_type' => $smsType,
+        ];
+
+        try {
+            $json = MelipayamakClient::fromConfig()->sendByBaseNumber($phone, $vars, $bodyId);
+            $interpreted = MelipayamakClient::interpretSendResponse($json);
+            $result = [
+                'provider' => SmsGatewayConfig::PROVIDER_MELIPAYAMAK,
+                'ok' => $interpreted['ok'],
+                'raw' => $json,
+                'reference_id' => $interpreted['reference_id'] ?? null,
+                'delivery_status' => $interpreted['delivery_status'],
+            ];
+            $payload = array_merge($payload, self::providerFieldsFromDispatch($result));
+            self::createShopSmsLog($payload);
+
+            return $result['raw'] ?? $result;
+        } catch (\Throwable $e) {
+            Log::warning('shop pattern sms send failed', [
+                'phone' => $phone,
+                'atelier_id' => $atelierId,
+                'body_id' => $bodyId,
+                'error' => $e->getMessage(),
+            ]);
+
+            $payload['delivery_status'] = ShopSmsLog::STATUS_SEND_FAILED;
+            $payload['status_checked_at'] = now();
+            self::createShopSmsLog($payload);
+
+            return [
+                'error' => $e->getMessage(),
+                'status' => [
+                    'code' => 0,
+                    'message' => $e->getMessage(),
+                ],
+            ];
+        }
+    }
+
+    protected static function loyaltyCustomerName(string $phone, ?int $atelierId, ?string $customerName): string
+    {
+        $name = trim((string) $customerName);
+        if ($name === '' && $atelierId !== null && $atelierId > 0) {
+            $name = trim((string) UserShiksho::query()
+                ->where('phone', $phone)
+                ->where('atelier_id', $atelierId)
+                ->value('name'));
+        }
+
+        $name = trim((string) preg_replace('/\s*عزیز\s*$/u', '', $name));
+
+        return $name !== '' ? $name : 'همراه';
     }
 
     /**

@@ -23,6 +23,8 @@ class SmsGatewayConfig
 
     public const KEY_MELI_OTP_BODY_ID = 'melipayamak_otp_body_id';
 
+    public const KEY_MELI_CREDIT_BODY_ID = 'melipayamak_credit_body_id';
+
     public const KEY_MELI_OTP_VARS_MODE = 'melipayamak_otp_vars_mode';
 
     public static function providers(): array
@@ -95,6 +97,19 @@ class SmsGatewayConfig
         return (int) $v;
     }
 
+    public static function melipayamakCreditBodyId(): ?int
+    {
+        $v = trim((string) self::globalGet(self::KEY_MELI_CREDIT_BODY_ID, ''));
+        if ($v === '') {
+            $v = trim((string) config('sms.melipayamak.credit_body_id', ''));
+        }
+        if ($v === '' || ! ctype_digit($v)) {
+            return null;
+        }
+
+        return (int) $v;
+    }
+
     /** code | shop_code */
     public static function melipayamakOtpVarsMode(): string
     {
@@ -131,6 +146,7 @@ class SmsGatewayConfig
                 'from' => self::melipayamakFrom(),
                 'otp_body_id' => self::melipayamakOtpBodyId(),
                 'otp_vars_mode' => self::melipayamakOtpVarsMode(),
+                'credit_body_id' => self::melipayamakCreditBodyId(),
             ],
             'shina' => [
                 'gateway' => (string) config('sms.shina.gateway'),
@@ -173,6 +189,11 @@ class SmsGatewayConfig
             if (array_key_exists('melipayamak_otp_body_id', $input)) {
                 $id = trim((string) $input['melipayamak_otp_body_id']);
                 Setting::set(self::KEY_MELI_OTP_BODY_ID, $id === '' ? '' : (string) (int) $id);
+            }
+
+            if (array_key_exists('melipayamak_credit_body_id', $input)) {
+                $id = trim((string) $input['melipayamak_credit_body_id']);
+                Setting::set(self::KEY_MELI_CREDIT_BODY_ID, $id === '' ? '' : (string) (int) $id);
             }
 
             if (array_key_exists('melipayamak_otp_vars_mode', $input)) {
