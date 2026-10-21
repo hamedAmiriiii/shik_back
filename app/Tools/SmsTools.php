@@ -129,8 +129,8 @@ class SmsTools
     ) {
         $shopName = self::shopSmsBrand($atelierId);
         $name = self::loyaltyCustomerName($phone, $atelierId, $customerName);
-        $amountText = (string) max(0, (int) round((float) $amount));
-        $message = "{$shopName} {$name}عزیز مبلغ {$amountText} تومان به اعتبار شما برای خرید بعدی اضافه شد";
+        $amountText = number_format(max(0, (int) round((float) $amount)), 0, '.', ',');
+        $message = "{$shopName}\n{$name}عزیز مبلغ {$amountText} تومان به اعتبار شما برای خرید بعدی اضافه شد";
 
         $bodyId = SmsGatewayConfig::isMelipayamak()
             ? SmsGatewayConfig::melipayamakCreditBodyId()
@@ -140,7 +140,7 @@ class SmsTools
             return self::dispatchShopPattern(
                 $phone,
                 $message,
-                [$shopName, $name, $amountText],
+                [$shopName, "\n".$name, $amountText],
                 $bodyId,
                 $purchaseId,
                 (float) $amount,

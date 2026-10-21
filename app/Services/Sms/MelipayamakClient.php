@@ -410,8 +410,9 @@ class MelipayamakClient
     {
         $clean = [];
         foreach ($vars as $var) {
-            $value = trim(str_replace([';', '؛', ','], ' ', (string) $var));
-            $value = trim((string) preg_replace('/\s+/u', ' ', $value));
+            $value = str_replace([';', '؛'], ' ', (string) $var);
+            $value = (string) preg_replace('/[^\S\r\n]+/u', ' ', $value);
+            $value = trim($value, " \t");
             $clean[] = $value;
         }
 
