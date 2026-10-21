@@ -4,11 +4,20 @@ namespace App\Services;
 
 use App\Exceptions\InsufficientShopSmsQuotaException;
 use App\Models\Setting;
+use App\Models\User;
+use App\Tools\SmsTools;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class ShopSmsQuotaService
 {
     public const SETTING_KEY = 'shop_sms_quota';
+
+    /** فلگ «هشدار کمبود اعتبار پیامک برای این دوره مصرف ارسال شده» */
+    public const LOW_QUOTA_NOTIFIED_KEY = 'shop_sms_low_quota_notified';
+
+    /** وقتی موجودی به زیر این عدد برسد، یک‌بار به صاحب فروشگاه پیامک هشدار می‌رود */
+    public const LOW_QUOTA_THRESHOLD = 30;
 
     public const CHARS_PER_SMS_PART = 70;
 
@@ -119,6 +128,9 @@ class ShopSmsQuotaService
 
         Setting::setShopContext($atelierId);
 
+        $newBalance = self::getBalance($atelierId);
+        self::maybeNotifyLowQuota($atelierId, $newBalance);
+
         return $parts;
     }
 
@@ -155,7 +167,10 @@ class ShopSmsQuotaService
 
         Setting::setShopContext($atelierId);
 
-        return self::getBalance($atelierId);
+        $newBalance = self::getBalance($atelierId);
+        self::resetLowQuotaNoticeIfRecovered($atelierId, $newBalance);
+
+        return $newBalance;
     }
 
     /**
@@ -170,6 +185,128 @@ class ShopSmsQuotaService
             Setting::set(self::SETTING_KEY, (string) $balance);
         });
 
+        self::resetLowQuotaNoticeIfRecovered($atelierId, $balance);
+
         return $balance;
+    }
+
+    /**
+     * اگر موجودی دوباره به آستانه یا بالاتر رسید، فلگ هشدار پاک می‌شود
+     * تا دفعهٔ بعدِ افت زیر آستانه دوباره یک پیامک برود.
+     */
+    public static function resetLowQuotaNoticeIfRecovered(int $atelierId, ?int $balance = null): void
+    {
+        $balance ??= self::getBalance($atelierId);
+        if ($balance < self::LOW_QUOTA_THRESHOLD) {
+            return;
+        }
+
+        self::setLowQuotaNotified($atelierId, false);
+    }
+
+    /**
+     * یک‌بار در هر دورهٔ مصرف، وقتی موجودی زیر آستانه رفت به صاحب فروشگاه هشدار می‌دهد.
+     */
+    public static function maybeNotifyLowQuota(int $atelierId, ?int $balance = null): void
+    {
+        $balance ??= self::getBalance($atelierId);
+        if ($balance >= self::LOW_QUOTA_THRESHOLD) {
+            return;
+        }
+
+        $shouldSend = false;
+        DB::transaction(function () use ($atelierId, &$shouldSend) {
+            $row = Setting::query()
+                ->where('key', self::LOW_QUOTA_NOTIFIED_KEY)
+                ->where('atelier_id', $atelierId)
+                ->lockForUpdate()
+                ->first();
+
+            if ($row && (string) $row->value === '1') {
+                return;
+            }
+
+            Setting::setShopContext($atelierId);
+            Setting::set(self::LOW_QUOTA_NOTIFIED_KEY, '1');
+            $shouldSend = true;
+        });
+
+        if (! $shouldSend) {
+            return;
+        }
+
+        try {
+            $phone = self::resolveOwnerPhone($atelierId);
+            if ($phone === null) {
+                Log::warning('shop sms low-quota notify skipped: no owner phone', [
+                    'atelier_id' => $atelierId,
+                    'balance' => $balance,
+                ]);
+                self::setLowQuotaNotified($atelierId, false);
+
+                return;
+            }
+
+            $shopName = SmsTools::shopSmsBrand($atelierId);
+            $result = SmsTools::sendLowSmsQuotaAlert($phone, $shopName, $balance);
+            if (! ($result['ok'] ?? false)) {
+                Log::warning('shop sms low-quota notify failed', [
+                    'atelier_id' => $atelierId,
+                    'balance' => $balance,
+                    'result' => $result,
+                ]);
+                self::setLowQuotaNotified($atelierId, false);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('shop sms low-quota notify exception', [
+                'atelier_id' => $atelierId,
+                'balance' => $balance,
+                'error' => $e->getMessage(),
+            ]);
+            self::setLowQuotaNotified($atelierId, false);
+        }
+    }
+
+    public static function isLowQuotaNotified(int $atelierId): bool
+    {
+        Setting::setShopContext($atelierId);
+
+        return (string) Setting::get(self::LOW_QUOTA_NOTIFIED_KEY, '0') === '1';
+    }
+
+    protected static function setLowQuotaNotified(int $atelierId, bool $notified): void
+    {
+        Setting::setShopContext($atelierId);
+        Setting::set(self::LOW_QUOTA_NOTIFIED_KEY, $notified ? '1' : '0');
+    }
+
+    public static function resolveOwnerPhone(int $atelierId): ?string
+    {
+        $base = User::query()
+            ->where('atelier_id', $atelierId)
+            ->whereNotNull('phone')
+            ->where('phone', '!=', '');
+
+        $phone = (clone $base)
+            ->where('shop_staff_role', 'owner')
+            ->orderBy('id')
+            ->value('phone');
+        if (is_string($phone) && $phone !== '') {
+            return $phone;
+        }
+
+        $phone = (clone $base)
+            ->whereHas('roles', function ($q) {
+                $q->where('id', User::USER_TYPE_KEY['فروشگاه']);
+            })
+            ->orderBy('id')
+            ->value('phone');
+        if (is_string($phone) && $phone !== '') {
+            return $phone;
+        }
+
+        $phone = $base->orderBy('id')->value('phone');
+
+        return is_string($phone) && $phone !== '' ? $phone : null;
     }
 }

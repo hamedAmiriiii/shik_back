@@ -117,6 +117,57 @@ class SmsTools
     }
 
     /**
+     * هشدار کمبود اعتبار پیامک فروشگاه به صاحب فروشگاه (سیستمی؛ از سهمیه فروشگاه کم نمی‌شود).
+     * الگوی پیشنهادی ملی‌پیامک:
+     * {0}
+     * اعتبار ارسال پیامک فروشگاه شما رو به اتمام است. موجودی باقیمانده: {1} پیامک
+     * webinoo-plus
+     *
+     * @return array{provider?: string, ok?: bool, raw?: array, reference_id?: string|null}
+     */
+    public static function sendLowSmsQuotaAlert(string $phone, string $shopName, int $balance): array
+    {
+        $brand = trim($shopName) !== '' ? trim($shopName) : 'فروشگاه';
+        $balanceText = (string) max(0, $balance);
+        $message = "{$brand}\nاعتبار ارسال پیامک فروشگاه شما رو به اتمام است. موجودی باقیمانده: {$balanceText} پیامک";
+
+        if (SmsGatewayConfig::isMelipayamak()) {
+            $bodyId = SmsGatewayConfig::melipayamakLowQuotaBodyId();
+            if ($bodyId !== null) {
+                $client = MelipayamakClient::fromConfig();
+                $json = $client->sendByBaseNumber($phone, [$brand, $balanceText], $bodyId);
+                $interpreted = MelipayamakClient::interpretSendResponse($json);
+
+                LogSms::create([
+                    'text' => $message,
+                    'number' => SmsGatewayConfig::melipayamakFrom() ?: 'melipayamak',
+                    'receivers' => $phone,
+                    'creator_id' => Auth::id(),
+                ]);
+
+                return array_merge($json, [
+                    'provider' => SmsGatewayConfig::PROVIDER_MELIPAYAMAK,
+                    'ok' => $interpreted['ok'],
+                    'reference_id' => $interpreted['reference_id'] ?? null,
+                ]);
+            }
+        }
+
+        // مستقیم متن آزاد؛ sendSms ممکن است عدد موجودی را به‌عنوان OTP تشخیص دهد.
+        $result = self::dispatchFreeText($phone, $message);
+        LogSms::create([
+            'text' => $message,
+            'number' => SmsGatewayConfig::isMelipayamak()
+                ? (SmsGatewayConfig::melipayamakFrom() ?: 'melipayamak')
+                : (new ShinaPayamakClient())->logSender(),
+            'receivers' => $phone,
+            'creator_id' => Auth::id(),
+        ]);
+
+        return $result;
+    }
+
+    /**
      * پیامک افزایش اعتبار باشگاه.
      * الگوی ۵۶۴۷۷۵: {0} {1}عزیز مبلغ {2} تومان به اعتبار شما برای خرید بعدی اضافه شد webinoo-plus.ir
      */
