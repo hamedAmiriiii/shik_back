@@ -11,6 +11,8 @@ class ProductionConsumption extends Model
         'production_id',
         'raw_material_id',
         'raw_material_lot_id',
+        'ingredient_produced_good_id',
+        'source_production_id',
         'quantity_kg',
         'price_per_kg',
         'cost',
@@ -35,5 +37,20 @@ class ProductionConsumption extends Model
     public function lot(): BelongsTo
     {
         return $this->belongsTo(RawMaterialLot::class, 'raw_material_lot_id');
+    }
+
+    public function ingredientProducedGood(): BelongsTo
+    {
+        return $this->belongsTo(ProducedGood::class, 'ingredient_produced_good_id');
+    }
+
+    public function sourceProduction(): BelongsTo
+    {
+        return $this->belongsTo(Production::class, 'source_production_id');
+    }
+
+    public function isNestedProducedGood(): bool
+    {
+        return (int) ($this->ingredient_produced_good_id ?? 0) > 0;
     }
 }

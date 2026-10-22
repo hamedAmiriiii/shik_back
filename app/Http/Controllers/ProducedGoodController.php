@@ -28,7 +28,7 @@ class ProducedGoodController extends Controller
 
         $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::PRODUCED_GOODS, 'کالای تولیدی برای این فروشگاه فعال نیست.');
 
-        $with = ['ingredients.rawMaterial'];
+        $with = $this->ingredientWith();
         if (Schema::hasTable('category_produced_good')) {
             $with[] = 'categories';
         }
@@ -83,7 +83,7 @@ class ProducedGoodController extends Controller
         }
 
         $fields = $this->validatedGood($request, $atelierId);
-        $this->assertIngredientsBelongToShop($fields['ingredients'] ?? [], $atelierId);
+        $this->assertIngredientsBelongToShop($fields['ingredients'] ?? [], $atelierId, null);
         $pricing = $this->pricingFromFields($fields, null, $atelierId);
 
         $unitType = $fields['unit_type'] ?? ProducedGood::UNIT_KG;
@@ -149,7 +149,7 @@ class ProducedGoodController extends Controller
         $fields = $this->validatedGood($request, $atelierId, $producedGood->id);
 
         if (isset($fields['ingredients'])) {
-            $this->assertIngredientsBelongToShop($fields['ingredients'], $atelierId);
+            $this->assertIngredientsBelongToShop($fields['ingredients'], $atelierId, $producedGood->id);
         }
 
         if (array_key_exists('unit_type', $fields)) {
@@ -229,6 +229,17 @@ class ProducedGoodController extends Controller
             ], 422);
         }
 
+        if (Schema::hasColumn('produced_good_ingredients', 'ingredient_produced_good_id')) {
+            $usedIn = \App\Models\ProducedGoodIngredient::query()
+                ->where('ingredient_produced_good_id', $producedGood->id)
+                ->exists();
+            if ($usedIn) {
+                return response()->json([
+                    'message' => 'این کالا در فرمول کالای تولیدی دیگری استفاده شده و قابل حذف نیست.',
+                ], 422);
+            }
+        }
+
         $producedGood->delete();
 
         return response(['message' => 'کالای تولیدی حذف شد'], 200);
@@ -277,7 +288,7 @@ class ProducedGoodController extends Controller
         }
 
         return response([
-            'message' => 'تولید برگشت خورد و موجودی مواد اولیه بازگردانده شد.',
+            'message' => 'تولید برگشت خورد و موجودی مواد بازگردانده شد.',
         ], 200);
     }
 
@@ -288,10 +299,15 @@ class ProducedGoodController extends Controller
             return response(['message' => 'یافت نشد'], 404);
         }
 
+        $consumptionWith = ['consumptions.rawMaterial'];
+        if (Schema::hasColumn('production_consumptions', 'ingredient_produced_good_id')) {
+            $consumptionWith[] = 'consumptions.ingredientProducedGood';
+        }
+
         $query = Production::query()
             ->where('produced_good_id', $producedGood->id)
             ->where('atelier_id', $atelierId)
-            ->with(['consumptions.rawMaterial'])
+            ->with($consumptionWith)
             ->orderByDesc('id');
 
         $perPage = (int) $request->input('per_page', 20);
@@ -306,7 +322,11 @@ class ProducedGoodController extends Controller
 
     private function serializeProduction(Production $production): array
     {
-        $production->loadMissing(['consumptions.rawMaterial', 'producedGood']);
+        $with = ['consumptions.rawMaterial', 'producedGood'];
+        if (Schema::hasColumn('production_consumptions', 'ingredient_produced_good_id')) {
+            $with[] = 'consumptions.ingredientProducedGood';
+        }
+        $production->loadMissing($with);
 
         return [
             'id' => $production->id,
@@ -328,11 +348,19 @@ class ProducedGoodController extends Controller
             'note' => $production->note,
             'created_at' => optional($production->created_at)->toDateTimeString(),
             'consumptions' => $production->consumptions->map(function ($row) {
+                $nestedId = (int) ($row->ingredient_produced_good_id ?? 0);
+                $isNested = $nestedId > 0;
+
                 return [
                     'id' => $row->id,
+                    'ingredient_kind' => $isNested ? 'produced_good' : 'raw_material',
                     'raw_material_id' => $row->raw_material_id,
-                    'raw_material_name' => optional($row->rawMaterial)->name,
+                    'raw_material_name' => $isNested
+                        ? optional($row->ingredientProducedGood)->name
+                        : optional($row->rawMaterial)->name,
+                    'ingredient_produced_good_id' => $isNested ? $nestedId : null,
                     'raw_material_lot_id' => $row->raw_material_lot_id,
+                    'source_production_id' => $row->source_production_id ?? null,
                     'quantity_kg' => (float) $row->quantity_kg,
                     'price_per_kg' => (float) $row->price_per_kg,
                     'cost' => (float) $row->cost,
@@ -363,7 +391,8 @@ class ProducedGoodController extends Controller
             'round_sale_price' => 'sometimes|boolean',
             'note' => 'nullable|string',
             'ingredients' => $ingredientsRule,
-            'ingredients.*.raw_material_id' => 'required|integer',
+            'ingredients.*.raw_material_id' => 'nullable|integer',
+            'ingredients.*.ingredient_produced_good_id' => 'nullable|integer',
             'ingredients.*.grams_per_kg' => 'required|numeric|min:0.001',
             'ingredients.*.is_removable' => 'sometimes|boolean',
             'ingredients.*.is_addable' => 'sometimes|boolean',
@@ -464,36 +493,150 @@ class ProducedGoodController extends Controller
         return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 
-    private function assertIngredientsBelongToShop(array $ingredients, int $atelierId): void
+    /**
+     * @param  array<int, array<string, mixed>>  $ingredients
+     */
+    private function assertIngredientsBelongToShop(array $ingredients, int $atelierId, ?int $parentGoodId): void
     {
-        $ids = array_unique(array_map(function ($row) {
-            return (int) $row['raw_material_id'];
-        }, $ingredients));
-
-        if (count($ids) === 0) {
+        if (count($ingredients) === 0) {
             return;
         }
 
-        if (count($ids) !== count($ingredients)) {
+        $hasNestedCol = Schema::hasColumn('produced_good_ingredients', 'ingredient_produced_good_id');
+        $rawIds = [];
+        $nestedIds = [];
+
+        foreach ($ingredients as $row) {
+            $rawId = (int) ($row['raw_material_id'] ?? 0);
+            $nestedId = (int) ($row['ingredient_produced_good_id'] ?? 0);
+
+            if ($rawId > 0 && $nestedId > 0) {
+                abort(response()->json([
+                    'message' => 'هر خط فرمول باید ماده اولیه یا کالای تولیدی باشد، نه هر دو.',
+                ], 422));
+            }
+            if ($rawId <= 0 && $nestedId <= 0) {
+                abort(response()->json([
+                    'message' => 'هر خط فرمول باید ماده اولیه یا کالای تولیدی داشته باشد.',
+                ], 422));
+            }
+            if ($nestedId > 0 && ! $hasNestedCol) {
+                abort(response()->json([
+                    'message' => 'ستون کالای تولیدی در فرمول وجود ندارد. migration یا SQL را اجرا کنید.',
+                ], 503));
+            }
+            if ($nestedId > 0 && $parentGoodId !== null && $nestedId === (int) $parentGoodId) {
+                abort(response()->json([
+                    'message' => 'کالا نمی‌تواند خودش را در فرمول داشته باشد.',
+                ], 422));
+            }
+
+            if ($rawId > 0) {
+                $rawIds[] = $rawId;
+            } else {
+                $nestedIds[] = $nestedId;
+            }
+        }
+
+        if (count($rawIds) !== count(array_unique($rawIds))) {
             abort(response()->json([
                 'message' => 'هر ماده اولیه فقط یک‌بار در فرمول کالا می‌تواند بیاید.',
             ], 422));
         }
-
-        $found = RawMaterial::where('atelier_id', $atelierId)
-            ->whereIn('id', $ids)
-            ->count();
-
-        if ($found !== count($ids)) {
+        if (count($nestedIds) !== count(array_unique($nestedIds))) {
             abort(response()->json([
-                'message' => 'یک یا چند ماده اولیه متعلق به این فروشگاه نیست.',
+                'message' => 'هر کالای تولیدی فقط یک‌بار در فرمول کالا می‌تواند بیاید.',
             ], 422));
         }
+
+        if (count($rawIds) > 0) {
+            $found = RawMaterial::where('atelier_id', $atelierId)
+                ->whereIn('id', $rawIds)
+                ->count();
+            if ($found !== count($rawIds)) {
+                abort(response()->json([
+                    'message' => 'یک یا چند ماده اولیه متعلق به این فروشگاه نیست.',
+                ], 422));
+            }
+        }
+
+        if (count($nestedIds) > 0) {
+            $found = ProducedGood::where('atelier_id', $atelierId)
+                ->whereIn('id', $nestedIds)
+                ->count();
+            if ($found !== count($nestedIds)) {
+                abort(response()->json([
+                    'message' => 'یک یا چند کالای تولیدی متعلق به این فروشگاه نیست.',
+                ], 422));
+            }
+
+            if ($parentGoodId !== null) {
+                $this->assertNoIngredientCycle($parentGoodId, $nestedIds);
+            }
+        }
+    }
+
+    /**
+     * جلوگیری از حلقه: ساندویچ ← برگر ← ساندویچ.
+     *
+     * @param  array<int, int>  $directNestedIds
+     */
+    private function assertNoIngredientCycle(int $parentGoodId, array $directNestedIds): void
+    {
+        if (! Schema::hasColumn('produced_good_ingredients', 'ingredient_produced_good_id')) {
+            return;
+        }
+
+        $queue = array_values(array_unique(array_map('intval', $directNestedIds)));
+        $seen = [];
+        $cycleMessage = 'فرمول حلقه‌ای است؛ یک کالای تولیدی نمی‌تواند از طریق فرمول‌های دیگر به خودش برسد.';
+
+        while ($queue !== []) {
+            $current = array_shift($queue);
+            if ($current <= 0 || isset($seen[$current])) {
+                continue;
+            }
+            if ($current === (int) $parentGoodId) {
+                abort(response()->json(['message' => $cycleMessage], 422));
+            }
+            $seen[$current] = true;
+
+            $childIds = \App\Models\ProducedGoodIngredient::query()
+                ->where('produced_good_id', $current)
+                ->whereNotNull('ingredient_produced_good_id')
+                ->pluck('ingredient_produced_good_id')
+                ->map(function ($id) {
+                    return (int) $id;
+                })
+                ->all();
+
+            foreach ($childIds as $childId) {
+                if ($childId === (int) $parentGoodId) {
+                    abort(response()->json(['message' => $cycleMessage], 422));
+                }
+                if (! isset($seen[$childId])) {
+                    $queue[] = $childId;
+                }
+            }
+        }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function ingredientWith(): array
+    {
+        $with = ['ingredients.rawMaterial'];
+        if (Schema::hasColumn('produced_good_ingredients', 'ingredient_produced_good_id')) {
+            $with[] = 'ingredients.ingredientProducedGood';
+        }
+
+        return $with;
     }
 
     private function loadProducedGoodRelations(ProducedGood $good): ProducedGood
     {
-        $with = ['ingredients.rawMaterial'];
+        $with = $this->ingredientWith();
         if (Schema::hasTable('category_produced_good')) {
             $with[] = 'categories';
         }
@@ -507,17 +650,26 @@ class ProducedGoodController extends Controller
 
         $hasRemovable = Schema::hasColumn('produced_good_ingredients', 'is_removable');
         $hasAddable = Schema::hasColumn('produced_good_ingredients', 'is_addable');
+        $hasNested = Schema::hasColumn('produced_good_ingredients', 'ingredient_produced_good_id');
 
         foreach ($ingredients as $row) {
+            $rawId = (int) ($row['raw_material_id'] ?? 0);
+            $nestedId = (int) ($row['ingredient_produced_good_id'] ?? 0);
+            $isNested = $nestedId > 0;
+
             $payload = [
-                'raw_material_id' => $row['raw_material_id'],
+                'raw_material_id' => $isNested ? null : $rawId,
                 'grams_per_kg' => $row['grams_per_kg'],
             ];
+            if ($hasNested) {
+                $payload['ingredient_produced_good_id'] = $isNested ? $nestedId : null;
+            }
             if ($hasRemovable) {
-                $payload['is_removable'] = ! empty($row['is_removable']);
+                // حذف/اضافه فقط برای مواد اولیه منوی سه‌بعدی معنا دارد
+                $payload['is_removable'] = ! $isNested && ! empty($row['is_removable']);
             }
             if ($hasAddable) {
-                $payload['is_addable'] = ! empty($row['is_addable']);
+                $payload['is_addable'] = ! $isNested && ! empty($row['is_addable']);
             }
             $good->ingredients()->create($payload);
         }
@@ -535,9 +687,14 @@ class ProducedGoodController extends Controller
             return;
         }
 
-        $allowed = $good->ingredients()->pluck('raw_material_id')->map(function ($id) {
-            return (int) $id;
-        })->all();
+        // لایه‌های منوی سه‌بعدی فقط مواد اولیه هستند؛ کالای تولیدی تو در تو لایه ندارد.
+        $allowed = $good->ingredients()
+            ->whereNotNull('raw_material_id')
+            ->pluck('raw_material_id')
+            ->map(function ($id) {
+                return (int) $id;
+            })
+            ->all();
 
         $clampScale = static function ($value): float {
             $n = is_numeric($value) ? (float) $value : 1.0;

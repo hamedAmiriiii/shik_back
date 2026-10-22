@@ -143,6 +143,7 @@ class ShopBackupTables
                 'fks' => [
                     'produced_good_id' => 'produced_goods',
                     'raw_material_id' => 'raw_materials',
+                    'ingredient_produced_good_id' => 'produced_goods',
                 ],
             ],
             [
@@ -404,6 +405,8 @@ class ShopBackupTables
                     'production_id' => 'productions',
                     'raw_material_id' => 'raw_materials',
                     'raw_material_lot_id' => 'raw_material_lots',
+                    'ingredient_produced_good_id' => 'produced_goods',
+                    'source_production_id' => 'productions',
                 ],
             ],
             [
