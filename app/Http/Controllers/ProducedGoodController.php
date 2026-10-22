@@ -107,6 +107,9 @@ class ProducedGoodController extends Controller
             if ($hasUnitColumn) {
                 $payload['unit_type'] = $unitType;
             }
+            if (ProducedGood::hasIsFinalColumn()) {
+                $payload['is_final'] = $this->boolField($fields, 'is_final', true);
+            }
             if (Schema::hasColumn('produced_goods', 'layer_compose')) {
                 $payload['layer_compose'] = $this->normalizedLayerCompose($fields['layer_compose'] ?? null);
             }
@@ -178,6 +181,9 @@ class ProducedGoodController extends Controller
             }
             if (array_key_exists('round_sale_price', $fields)) {
                 $payload['round_sale_price'] = $this->boolField($fields, 'round_sale_price', false);
+            }
+            if (array_key_exists('is_final', $fields) && ProducedGood::hasIsFinalColumn()) {
+                $payload['is_final'] = $this->boolField($fields, 'is_final', true);
             }
             if (array_key_exists('layer_compose', $fields) && Schema::hasColumn('produced_goods', 'layer_compose')) {
                 $payload['layer_compose'] = $this->normalizedLayerCompose($fields['layer_compose']);
@@ -386,6 +392,7 @@ class ProducedGoodController extends Controller
             'name' => $nameRule,
             'display_order' => 'nullable|integer|min:0|max:9999',
             'unit_type' => ['sometimes', Rule::in([ProducedGood::UNIT_KG, ProducedGood::UNIT_PIECE])],
+            'is_final' => 'sometimes|boolean',
             'sale_price' => 'nullable|numeric|min:0',
             'markup_percent' => 'nullable|numeric|min:0|max:9999',
             'round_sale_price' => 'sometimes|boolean',

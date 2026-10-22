@@ -540,6 +540,7 @@ class CategoryController extends Controller
 
         $query = ProducedGood::query()
             ->where('atelier_id', $atelierId)
+            ->forSaleCatalog()
             ->whereHas('categories', function ($q) use ($categoryIds) {
                 $q->whereIn('categories.id', $categoryIds);
             })

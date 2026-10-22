@@ -40,6 +40,8 @@ class AccountingVoucher extends Model
 
     public const SOURCE_PRODUCTION = 'production';
 
+    public const SOURCE_INVENTORY_WASTE = 'inventory_waste';
+
     public const SOURCE_PURCHASE_RETURN = 'purchase_return';
 
     public const SOURCE_PAYROLL_PAYMENT = 'payroll_payment';

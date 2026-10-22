@@ -237,6 +237,11 @@ class ShopPosSaleService
         if (! $good) {
             throw new RuntimeException('کالای تولیدی یافت نشد');
         }
+        if (! $good->isFinalProduct()) {
+            throw new RuntimeException(
+                '«'.$good->name.'» نیمه‌ساخته است و فقط در فرمول تولید قابل استفاده است؛ در فروش/منو عرضه نمی‌شود.'
+            );
+        }
         $qty = ProductQuantityTools::normalize(
             $row['quantity'],
             $good->isPieceUnit() ? Product::UNIT_PIECE : Product::UNIT_KG

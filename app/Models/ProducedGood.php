@@ -2,9 +2,11 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Schema;
 use App\Tools\PriceTools;
 
 class ProducedGood extends Model
@@ -25,6 +27,7 @@ class ProducedGood extends Model
         'atelier_id',
         'name',
         'unit_type',
+        'is_final',
         'display_order',
         'sale_price',
         'original_sale_price',
@@ -41,8 +44,41 @@ class ProducedGood extends Model
         'original_sale_price' => 'decimal:2',
         'markup_percent' => 'decimal:2',
         'round_sale_price' => 'boolean',
+        'is_final' => 'boolean',
         'display_order' => 'integer',
     ];
+
+    public static function hasIsFinalColumn(): bool
+    {
+        return Schema::hasColumn('produced_goods', 'is_final');
+    }
+
+    /**
+     * فقط کالاهای نهایی برای منو / فروش آنلاین / صندوق.
+     */
+    public function scopeForSaleCatalog(Builder $query): Builder
+    {
+        if (! static::hasIsFinalColumn()) {
+            return $query;
+        }
+
+        return $query->where('is_final', true);
+    }
+
+    /**
+     * کالای نهایی (قابل فروش در منو) در مقابل نیمه‌ساخته.
+     * بدون ستون، همه نهایی حساب می‌شوند.
+     */
+    public function isFinalProduct(): bool
+    {
+        if (! static::hasIsFinalColumn()) {
+            return true;
+        }
+
+        $value = $this->attributes['is_final'] ?? true;
+
+        return $value === true || $value === 1 || $value === '1';
+    }
 
     public static function layerComposeModes(): array
     {

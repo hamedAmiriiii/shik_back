@@ -1594,6 +1594,7 @@ class ProductController extends Controller
 
         $query = ProducedGood::query()
             ->where('atelier_id', $atelierId)
+            ->forSaleCatalog()
             ->with('ingredients.rawMaterial');
         if (Schema::hasColumn('produced_goods', 'display_order')) {
             $query->orderBy('display_order')->orderBy('name');
@@ -1660,6 +1661,7 @@ class ProductController extends Controller
             'id' => $good->id,
             'item_type' => 'produced_good',
             'produced_good_id' => $good->id,
+            'is_final' => $good->isFinalProduct(),
             'product_id' => null,
             'name' => $good->name,
             'display_order' => Schema::hasColumn('produced_goods', 'display_order')
@@ -1750,6 +1752,10 @@ class ProductController extends Controller
         }
         $good = $query->first();
         if (! $good) {
+            return null;
+        }
+        // جزئیات/منوی فروش: نیمه‌ساخته نمایش داده نمی‌شود
+        if (! $good->isFinalProduct() && ! $request->boolean('include_intermediate')) {
             return null;
         }
         app(ProducedGoodCostService::class)->attachCost($good, 1.0, true);

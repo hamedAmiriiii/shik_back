@@ -31,6 +31,7 @@ class PosCatalogController extends Controller
         if ($type !== 'raw_material') {
             $goods = ProducedGood::query()
                 ->where('atelier_id', $atelierId)
+                ->forSaleCatalog()
                 ->with('ingredients.rawMaterial')
                 ->orderBy('name')
                 ->get()

@@ -410,6 +410,25 @@ class ShopBackupTables
                 ],
             ],
             [
+                'name' => 'inventory_wastes',
+                'scope' => 'atelier',
+                'fks' => [
+                    'raw_material_id' => 'raw_materials',
+                    'produced_good_id' => 'produced_goods',
+                ],
+            ],
+            [
+                'name' => 'inventory_waste_consumptions',
+                'scope' => 'parent',
+                'parent' => 'inventory_wastes',
+                'parent_key' => 'inventory_waste_id',
+                'fks' => [
+                    'inventory_waste_id' => 'inventory_wastes',
+                    'raw_material_lot_id' => 'raw_material_lots',
+                    'production_id' => 'productions',
+                ],
+            ],
+            [
                 'name' => 'oil_visits',
                 'scope' => 'atelier',
                 'fks' => [],
