@@ -175,11 +175,14 @@ class PurchaseItemReturnService
     ): array {
         return DB::transaction(function () use ($purchase, $phone, $userName, $notes, $refundOptions) {
             $purchase->load('purchasedProducts');
-            if ($purchase->purchasedProducts->isEmpty()) {
+            $items = $purchase->purchasedProducts
+                ->filter(fn (PurchasedProduct $item) => (float) $item->quantity > 0)
+                ->values()
+                ->all();
+            if ($items === []) {
                 throw new \InvalidArgumentException('این خرید اقلام باقی‌مانده برای برگشت ندارد.');
             }
 
-            $items = $purchase->purchasedProducts->all();
             $returnedItems = [];
             $rows = [];
             $creditRefunded = 0.0;
@@ -398,12 +401,11 @@ class PurchaseItemReturnService
             }
 
             $purchasedProductId = (int) $purchasedProduct->id;
-            if (ProductQuantityTools::isFullReturn($returnQuantity, $lineQty)) {
-                $purchasedProduct->delete();
-            } else {
-                $purchasedProduct->quantity = ProductQuantityTools::normalize($lineQty - $returnQuantity, $unitType);
-                $purchasedProduct->save();
-            }
+            // خط فاکتور را حذف نمی‌کنیم تا ردپای کالا در هیستوری بماند (quantity=0 یعنی برگشت کامل خط)
+            $purchasedProduct->quantity = ProductQuantityTools::isFullReturn($returnQuantity, $lineQty)
+                ? ProductQuantityTools::normalize(0, $unitType)
+                : ProductQuantityTools::normalize($lineQty - $returnQuantity, $unitType);
+            $purchasedProduct->save();
 
             $logPayload = [
                 'atelier_id' => $atelierId,

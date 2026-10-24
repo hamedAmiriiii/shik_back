@@ -12,6 +12,7 @@ use App\Models\CustomerPhone;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Customer;
+use App\Services\PurchaseHistoryEnricher;
 use App\Services\PurchaseItemReturnService;
 use App\Services\PurchaseReplaceService;
 use App\Services\ShopPosSaleService;
@@ -229,14 +230,17 @@ class PurchasedProductController extends Controller
     }
 
     $latestReturnsByPurchase = [];
+    $returnsByPurchase = collect();
     if ($hasReturnTable) {
         $purchaseIds = collect($itemsArray['data'] ?? [])->pluck('id')->filter()->map(fn ($id) => (int) $id)->all();
         if ($purchaseIds !== []) {
-            $latestReturnsByPurchase = \App\Models\PurchaseItemReturn::query()
+            $allReturns = \App\Models\PurchaseItemReturn::query()
                 ->whereIn('purchase_id', $purchaseIds)
                 ->orderByDesc('id')
-                ->get(['id', 'purchase_id', 'user_name', 'notes', 'return_sale_total', 'created_at'])
-                ->groupBy('purchase_id')
+                ->with(['product:id,name,barcode', 'producedGood:id,name', 'rawMaterial:id,name'])
+                ->get();
+            $returnsByPurchase = $allReturns->groupBy(fn ($row) => (int) $row->purchase_id);
+            $latestReturnsByPurchase = $returnsByPurchase
                 ->map(fn ($rows) => $rows->first())
                 ->all();
         }
@@ -289,6 +293,11 @@ class PurchasedProductController extends Controller
             $purchaseData['last_return_user_name'] = null;
             $purchaseData['last_return_at'] = null;
             $purchaseData['last_return_notes'] = null;
+        }
+
+        $purchaseReturns = $returnsByPurchase->get((int) ($purchaseData['id'] ?? 0), collect());
+        if ($returnsCount > 0 || $purchaseReturns->isNotEmpty()) {
+            $purchaseData = PurchaseHistoryEnricher::enrichArray($purchaseData, $purchaseReturns);
         }
     }
     unset($purchaseData);
@@ -901,10 +910,11 @@ class PurchasedProductController extends Controller
             'purchasedProducts.rawMaterial',
             'shopTable',
         ]);
+        $returnRows = null;
         if (Schema::hasTable('purchase_item_returns')) {
             $purchase->load([
                 'itemReturns' => fn ($q) => $q->orderByDesc('id')
-                    ->with(['product:id,name', 'producedGood:id,name', 'rawMaterial:id,name']),
+                    ->with(['product:id,name,barcode', 'producedGood:id,name', 'rawMaterial:id,name']),
             ]);
             $purchase->loadCount('itemReturns');
             $purchase->loadSum('itemReturns as returned_sale_total', 'return_sale_total');
@@ -915,7 +925,8 @@ class PurchasedProductController extends Controller
             $purchase->setAttribute('last_return_user_name', $latestReturn?->user_name);
             $purchase->setAttribute('last_return_at', $latestReturn?->created_at);
             $purchase->setAttribute('last_return_notes', $latestReturn?->notes);
-            $returnHistory = $purchase->itemReturns->map(function (\App\Models\PurchaseItemReturn $row) {
+            $returnRows = $purchase->itemReturns;
+            $returnHistory = $returnRows->map(function (\App\Models\PurchaseItemReturn $row) {
                 return [
                     'id' => (int) $row->id,
                     'item_name' => $row->itemName(),
@@ -940,7 +951,7 @@ class PurchasedProductController extends Controller
         }
         if ($purchase->isDebt()) {
             $purchase->setAttribute('payable_amount', $purchase->payableAmount());
-            $purchase->setAttribute('payment_type_label', 'قرضی');
+            $purchase->setAttribute('payment_type_label', 'قرضی';
             [$refundCash, $refundCard] = PurchaseItemReturnService::refundableCashCard($purchase);
             $purchase->setAttribute('refundable_cash_amount', $refundCash);
             $purchase->setAttribute('refundable_card_amount', $refundCard);
@@ -957,7 +968,13 @@ class PurchasedProductController extends Controller
                 $purchase->immediatePaidAmount() > 0.02 ? 'نقد/کارت + چک' : 'چکی'
             );
         }
-        return response($purchase, 200);
+
+        $payload = $purchase->toArray();
+        if ($returnRows !== null) {
+            $payload = PurchaseHistoryEnricher::enrichArray($payload, $returnRows);
+        }
+
+        return response($payload, 200);
     }
 
     public function update(Request $request, Purchase $purchase)
@@ -1557,6 +1574,19 @@ class PurchasedProductController extends Controller
             return response(['error' => $e->getMessage(), 'message' => $e->getMessage()], 422);
         }
 
+        $purchasePayload = $result['purchase'] ?? $purchase;
+        if ($purchasePayload instanceof Purchase) {
+            $purchasePayload = PurchaseHistoryEnricher::enrichArray(
+                $purchasePayload->load([
+                    'purchasedProducts.product',
+                    'purchasedProducts.producedGood',
+                    'purchasedProducts.rawMaterial',
+                ])->toArray(),
+                PurchaseHistoryEnricher::returnsForPurchaseIds([(int) $purchasePayload->id])
+                    ->get((int) $purchasePayload->id, collect())
+            );
+        }
+
         return response([
             'message' => 'محصول با موفقیت برگشت داده شد.',
             'returned_item' => $result['returned_item'],
@@ -1567,7 +1597,7 @@ class PurchasedProductController extends Controller
             'cash_refunded' => $result['returned_item']['cash_refunded'] ?? null,
             'card_refunded' => $result['returned_item']['card_refunded'] ?? null,
             'card_refund_destination' => $result['returned_item']['card_refund_destination'] ?? null,
-            'purchase' => $result['purchase'] ?? $purchase,
+            'purchase' => $purchasePayload,
         ], 200);
     }
 
@@ -1634,6 +1664,19 @@ class PurchasedProductController extends Controller
             return response(['error' => $e->getMessage(), 'message' => $e->getMessage()], 422);
         }
 
+        $purchasePayload = $result['purchase'] ?? null;
+        if ($purchasePayload instanceof Purchase) {
+            $purchasePayload = PurchaseHistoryEnricher::enrichArray(
+                $purchasePayload->load([
+                    'purchasedProducts.product',
+                    'purchasedProducts.producedGood',
+                    'purchasedProducts.rawMaterial',
+                ])->toArray(),
+                PurchaseHistoryEnricher::returnsForPurchaseIds([(int) $purchasePayload->id])
+                    ->get((int) $purchasePayload->id, collect())
+            );
+        }
+
         return response([
             'message' => 'خرید به‌طور کامل برگشت داده شد.',
             'full_return' => true,
@@ -1646,7 +1689,7 @@ class PurchasedProductController extends Controller
             'card_refund_destination' => $result['card_refund_destination'] ?? null,
             'phone' => $result['phone'],
             'customer_credit' => $result['customer_credit'],
-            'purchase' => $result['purchase'],
+            'purchase' => $purchasePayload,
         ], 200);
     }
 
