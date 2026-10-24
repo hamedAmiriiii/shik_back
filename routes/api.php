@@ -769,6 +769,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
         Route::resource("/log-sms", \App\Http\Controllers\Admin\LogSmsController::class)->only("index");
 
+        Route::get('laravel-log', [\App\Http\Controllers\Admin\LaravelLogController::class, 'index']);
+        Route::get('laravel-log/download', [\App\Http\Controllers\Admin\LaravelLogController::class, 'download']);
+        Route::delete('laravel-log', [\App\Http\Controllers\Admin\LaravelLogController::class, 'destroy']);
+
         Route::get('sms-gateway', [\App\Http\Controllers\Admin\SmsGatewayController::class, 'show']);
         Route::put('sms-gateway', [\App\Http\Controllers\Admin\SmsGatewayController::class, 'update']);
         Route::get('sms-gateway/credit', [\App\Http\Controllers\Admin\SmsGatewayController::class, 'credit']);
