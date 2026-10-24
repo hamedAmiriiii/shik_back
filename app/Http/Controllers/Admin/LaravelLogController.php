@@ -11,6 +11,9 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class LaravelLogController extends Controller
 {
+    /** فایل اصلی خطاهای ۵۰۰ API */
+    public const PRIMARY_ERROR_LOG = 'api-errors.log';
+
     /**
      * وضعیت و لیست فایل‌های لاگ در storage/logs — فقط ادمین سامانه.
      */
@@ -19,18 +22,33 @@ class LaravelLogController extends Controller
         $this->requirePlatformAdmin($request);
 
         $dir = $this->logsDirectory();
-        $files = [];
+        $byName = [];
+
         if (is_dir($dir)) {
             foreach (File::files($dir) as $file) {
                 $name = $file->getFilename();
                 if (! $this->isAllowedLogName($name)) {
                     continue;
                 }
-                $files[] = $this->fileMeta($name, $file->getPathname());
+                $byName[$name] = $this->fileMeta($name, $file->getPathname());
             }
         }
 
+        // همیشه این دو را نشان بده تا اگر خالی بودند هم مشخص باشد کجا را باید دید
+        foreach ([self::PRIMARY_ERROR_LOG, 'laravel.log'] as $ensure) {
+            if (! isset($byName[$ensure])) {
+                $byName[$ensure] = $this->fileMeta($ensure, $dir.DIRECTORY_SEPARATOR.$ensure);
+            }
+        }
+
+        $files = array_values($byName);
         usort($files, function (array $a, array $b) {
+            $pa = (int) ($a['priority'] ?? 99);
+            $pb = (int) ($b['priority'] ?? 99);
+            if ($pa !== $pb) {
+                return $pa <=> $pb;
+            }
+
             return ($b['modified_at_unix'] ?? 0) <=> ($a['modified_at_unix'] ?? 0);
         });
 
@@ -41,7 +59,69 @@ class LaravelLogController extends Controller
 
         return response()->json([
             'directory' => 'storage/logs',
+            'primary' => self::PRIMARY_ERROR_LOG,
+            'hint' => 'خطاهای ۵۰۰ API در api-errors.log هستند. laravel.log بیشتر هشدار عمومی (مثل slow.request) است.',
             'files' => $files,
+        ]);
+    }
+
+    /**
+     * آخرین خطوط یک فایل لاگ برای پیش‌نمایش در ادمین.
+     */
+    public function tail(Request $request)
+    {
+        $this->requirePlatformAdmin($request);
+
+        $name = (string) $request->query('file', self::PRIMARY_ERROR_LOG);
+        $path = $this->resolveLogPath($name);
+        $bytes = max(1024, min(200 * 1024, (int) $request->query('bytes', 64 * 1024)));
+
+        if (! is_file($path)) {
+            return response()->json([
+                'file' => basename($path),
+                'exists' => false,
+                'size' => 0,
+                'size_label' => '0 B',
+                'content' => '',
+                'truncated' => false,
+                'message' => 'فایل هنوز ساخته نشده؛ یعنی خطای ۵۰۰ ثبت‌شده‌ای نیست.',
+            ]);
+        }
+
+        $size = (int) filesize($path);
+        $content = '';
+        $truncated = false;
+        if ($size > 0) {
+            $fh = fopen($path, 'rb');
+            if ($fh) {
+                try {
+                    if ($size > $bytes) {
+                        fseek($fh, -$bytes, SEEK_END);
+                        $truncated = true;
+                        $content = stream_get_contents($fh) ?: '';
+                        $nl = strpos($content, "\n");
+                        if ($nl !== false) {
+                            $content = substr($content, $nl + 1);
+                        }
+                    } else {
+                        $content = stream_get_contents($fh) ?: '';
+                    }
+                } finally {
+                    fclose($fh);
+                }
+            }
+        }
+
+        return response()->json([
+            'file' => basename($path),
+            'exists' => true,
+            'size' => $size,
+            'size_label' => $this->formatBytes($size),
+            'modified_at' => ($mtime = @filemtime($path)) ? date('Y-m-d H:i:s', $mtime) : null,
+            'truncated' => $truncated,
+            'content' => $content,
+            'kind' => $this->fileKind(basename($path)),
+            'title' => $this->fileTitle(basename($path)),
         ]);
     }
 
@@ -52,7 +132,7 @@ class LaravelLogController extends Controller
     {
         $this->requirePlatformAdmin($request);
 
-        $path = $this->resolveLogPath((string) $request->query('file', 'laravel.log'));
+        $path = $this->resolveLogPath((string) $request->query('file', self::PRIMARY_ERROR_LOG));
         if (! is_file($path)) {
             abort(response()->json(['message' => 'فایل لاگ پیدا نشد.'], 404));
         }
@@ -71,7 +151,7 @@ class LaravelLogController extends Controller
     {
         $this->requirePlatformAdmin($request);
 
-        $name = (string) $request->input('file', $request->query('file', 'laravel.log'));
+        $name = (string) $request->input('file', $request->query('file', self::PRIMARY_ERROR_LOG));
         $path = $this->resolveLogPath($name);
         if (! is_file($path)) {
             return response()->json(['message' => 'فایل لاگ پیدا نشد.'], 404);
@@ -157,17 +237,51 @@ class LaravelLogController extends Controller
      */
     protected function fileMeta(string $name, string $path): array
     {
-        $size = @filesize($path);
-        $mtime = @filemtime($path);
+        $exists = is_file($path);
+        $size = $exists ? @filesize($path) : 0;
+        $mtime = $exists ? @filemtime($path) : false;
 
         return [
             'name' => $name,
+            'title' => $this->fileTitle($name),
+            'kind' => $this->fileKind($name),
+            'priority' => $this->filePriority($name),
             'size' => is_int($size) ? $size : 0,
             'size_label' => $this->formatBytes(is_int($size) ? $size : 0),
             'modified_at' => is_int($mtime) ? date('Y-m-d H:i:s', $mtime) : null,
             'modified_at_unix' => is_int($mtime) ? $mtime : 0,
-            'exists' => is_file($path),
+            'exists' => $exists,
         ];
+    }
+
+    protected function fileKind(string $name): string
+    {
+        if ($name === self::PRIMARY_ERROR_LOG || str_starts_with($name, 'api-errors')) {
+            return 'errors';
+        }
+        if ($name === 'laravel.log' || str_starts_with($name, 'laravel-')) {
+            return 'general';
+        }
+
+        return 'other';
+    }
+
+    protected function fileTitle(string $name): string
+    {
+        return match ($this->fileKind($name)) {
+            'errors' => 'خطاهای ۵۰۰ API',
+            'general' => 'لاگ عمومی لاراول (هشدار / slow.request)',
+            default => 'سایر لاگ‌ها',
+        };
+    }
+
+    protected function filePriority(string $name): int
+    {
+        return match ($this->fileKind($name)) {
+            'errors' => 1,
+            'general' => 2,
+            default => 3,
+        };
     }
 
     protected function formatBytes(int $bytes): string

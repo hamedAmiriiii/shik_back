@@ -770,6 +770,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::resource("/log-sms", \App\Http\Controllers\Admin\LogSmsController::class)->only("index");
 
         Route::get('laravel-log', [\App\Http\Controllers\Admin\LaravelLogController::class, 'index']);
+        Route::get('laravel-log/tail', [\App\Http\Controllers\Admin\LaravelLogController::class, 'tail']);
         Route::get('laravel-log/download', [\App\Http\Controllers\Admin\LaravelLogController::class, 'download']);
         Route::delete('laravel-log', [\App\Http\Controllers\Admin\LaravelLogController::class, 'destroy']);
 
