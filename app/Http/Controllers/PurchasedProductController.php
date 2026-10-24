@@ -963,7 +963,7 @@ class PurchasedProductController extends Controller
         }
         if ($purchase->isDebt()) {
             $purchase->setAttribute('payable_amount', $purchase->payableAmount());
-            $purchase->setAttribute('payment_type_label', 'قرضی';
+            $purchase->setAttribute('payment_type_label', 'قرضی');
             [$refundCash, $refundCard] = PurchaseItemReturnService::refundableCashCard($purchase);
             $purchase->setAttribute('refundable_cash_amount', $refundCash);
             $purchase->setAttribute('refundable_card_amount', $refundCard);
