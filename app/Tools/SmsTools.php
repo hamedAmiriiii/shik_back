@@ -204,6 +204,109 @@ class SmsTools
     }
 
     /**
+     * پیامک تشکر از خرید.
+     * الگوی ۵۶۶۹۰۳: {0} با تشکر از خرید شما
+     */
+    public static function sendPurchaseThanksSms(
+        string $phone,
+        ?int $atelierId = null,
+        ?string $purchaseId = null
+    ) {
+        $shopName = self::shopSmsBrand($atelierId);
+        $message = "{$shopName}\nبا تشکر از خرید شما";
+
+        $bodyId = SmsGatewayConfig::isMelipayamak()
+            ? SmsGatewayConfig::melipayamakPurchaseBodyId()
+            : null;
+
+        if ($bodyId !== null) {
+            return self::dispatchShopPattern(
+                $phone,
+                $message,
+                [$shopName],
+                $bodyId,
+                $purchaseId,
+                null,
+                'purchase',
+                $atelierId
+            );
+        }
+
+        return self::sendShopSms($phone, $message, $purchaseId, null, 'purchase', $atelierId);
+    }
+
+    /**
+     * اطلاع موجود شدن کالا در دسته.
+     * الگوی ۵۶۶۹۰۱: {0} کالای «{1}» در دسته «{2}» دوباره موجود شد.
+     */
+    public static function sendCategoryRestockSms(
+        string $phone,
+        string $productName,
+        string $categoryName,
+        ?int $atelierId = null
+    ) {
+        $shopName = self::shopSmsBrand($atelierId);
+        $productName = trim($productName) !== '' ? trim($productName) : 'کالا';
+        $categoryName = trim($categoryName) !== '' ? trim($categoryName) : 'دسته';
+        $message = "{$shopName}\nکالای «{$productName}» در دسته «{$categoryName}» دوباره موجود شد.";
+
+        $bodyId = SmsGatewayConfig::isMelipayamak()
+            ? SmsGatewayConfig::melipayamakCategoryRestockBodyId()
+            : null;
+
+        if ($bodyId !== null) {
+            return self::dispatchShopPattern(
+                $phone,
+                $message,
+                [$shopName, $productName, $categoryName],
+                $bodyId,
+                null,
+                null,
+                'category_stock_notify',
+                $atelierId
+            );
+        }
+
+        return self::sendShopSms($phone, $message, null, null, 'category_stock_notify', $atelierId);
+    }
+
+    /**
+     * لینک مشاهده کالا (پیام جدا).
+     * الگوی ۵۶۶۹۰۲: {0} مشاهده کالا: {1}
+     */
+    public static function sendCategoryProductLinkSms(
+        string $phone,
+        string $viewUrl,
+        ?int $atelierId = null
+    ) {
+        $shopName = self::shopSmsBrand($atelierId);
+        $viewUrl = trim($viewUrl);
+        if ($viewUrl === '') {
+            return ['ok' => false, 'error' => 'empty_url'];
+        }
+        $message = "{$shopName}\nمشاهده کالا:\n{$viewUrl}";
+
+        $bodyId = SmsGatewayConfig::isMelipayamak()
+            ? SmsGatewayConfig::melipayamakCategoryLinkBodyId()
+            : null;
+
+        if ($bodyId !== null) {
+            return self::dispatchShopPattern(
+                $phone,
+                $message,
+                [$shopName, $viewUrl],
+                $bodyId,
+                null,
+                null,
+                'category_stock_notify_link',
+                $atelierId
+            );
+        }
+
+        return self::sendShopSms($phone, $viewUrl, null, null, 'category_stock_notify_link', $atelierId);
+    }
+
+    /**
      * ارسال پیامک برای فروشگاه و ثبت در جدول shop_sms_logs
      *
      * @param  string  $phone  شماره تلفن گیرنده

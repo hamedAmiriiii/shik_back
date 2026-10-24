@@ -27,6 +27,12 @@ class SmsGatewayConfig
 
     public const KEY_MELI_LOW_QUOTA_BODY_ID = 'melipayamak_low_quota_body_id';
 
+    public const KEY_MELI_PURCHASE_BODY_ID = 'melipayamak_purchase_body_id';
+
+    public const KEY_MELI_CATEGORY_RESTOCK_BODY_ID = 'melipayamak_category_restock_body_id';
+
+    public const KEY_MELI_CATEGORY_LINK_BODY_ID = 'melipayamak_category_link_body_id';
+
     public const KEY_MELI_OTP_VARS_MODE = 'melipayamak_otp_vars_mode';
 
     public static function providers(): array
@@ -114,9 +120,32 @@ class SmsGatewayConfig
 
     public static function melipayamakLowQuotaBodyId(): ?int
     {
-        $v = trim((string) self::globalGet(self::KEY_MELI_LOW_QUOTA_BODY_ID, ''));
+        return self::melipayamakBodyId(self::KEY_MELI_LOW_QUOTA_BODY_ID, 'low_quota_body_id');
+    }
+
+    /** پترن تشکر از خرید: {0} با تشکر از خرید شما */
+    public static function melipayamakPurchaseBodyId(): ?int
+    {
+        return self::melipayamakBodyId(self::KEY_MELI_PURCHASE_BODY_ID, 'purchase_body_id');
+    }
+
+    /** پترن موجود شدن کالا در دسته: {0} کالای «{1}» در دسته «{2}» دوباره موجود شد. */
+    public static function melipayamakCategoryRestockBodyId(): ?int
+    {
+        return self::melipayamakBodyId(self::KEY_MELI_CATEGORY_RESTOCK_BODY_ID, 'category_restock_body_id');
+    }
+
+    /** پترن لینک مشاهده کالا: {0} مشاهده کالا: {1} */
+    public static function melipayamakCategoryLinkBodyId(): ?int
+    {
+        return self::melipayamakBodyId(self::KEY_MELI_CATEGORY_LINK_BODY_ID, 'category_link_body_id');
+    }
+
+    protected static function melipayamakBodyId(string $settingKey, string $configKey): ?int
+    {
+        $v = trim((string) self::globalGet($settingKey, ''));
         if ($v === '') {
-            $v = trim((string) config('sms.melipayamak.low_quota_body_id', ''));
+            $v = trim((string) config('sms.melipayamak.'.$configKey, ''));
         }
         if ($v === '' || ! ctype_digit($v)) {
             return null;
@@ -163,6 +192,9 @@ class SmsGatewayConfig
                 'otp_vars_mode' => self::melipayamakOtpVarsMode(),
                 'credit_body_id' => self::melipayamakCreditBodyId(),
                 'low_quota_body_id' => self::melipayamakLowQuotaBodyId(),
+                'purchase_body_id' => self::melipayamakPurchaseBodyId(),
+                'category_restock_body_id' => self::melipayamakCategoryRestockBodyId(),
+                'category_link_body_id' => self::melipayamakCategoryLinkBodyId(),
             ],
             'shina' => [
                 'gateway' => (string) config('sms.shina.gateway'),
@@ -215,6 +247,21 @@ class SmsGatewayConfig
             if (array_key_exists('melipayamak_low_quota_body_id', $input)) {
                 $id = trim((string) $input['melipayamak_low_quota_body_id']);
                 Setting::set(self::KEY_MELI_LOW_QUOTA_BODY_ID, $id === '' ? '' : (string) (int) $id);
+            }
+
+            if (array_key_exists('melipayamak_purchase_body_id', $input)) {
+                $id = trim((string) $input['melipayamak_purchase_body_id']);
+                Setting::set(self::KEY_MELI_PURCHASE_BODY_ID, $id === '' ? '' : (string) (int) $id);
+            }
+
+            if (array_key_exists('melipayamak_category_restock_body_id', $input)) {
+                $id = trim((string) $input['melipayamak_category_restock_body_id']);
+                Setting::set(self::KEY_MELI_CATEGORY_RESTOCK_BODY_ID, $id === '' ? '' : (string) (int) $id);
+            }
+
+            if (array_key_exists('melipayamak_category_link_body_id', $input)) {
+                $id = trim((string) $input['melipayamak_category_link_body_id']);
+                Setting::set(self::KEY_MELI_CATEGORY_LINK_BODY_ID, $id === '' ? '' : (string) (int) $id);
             }
 
             if (array_key_exists('melipayamak_otp_vars_mode', $input)) {

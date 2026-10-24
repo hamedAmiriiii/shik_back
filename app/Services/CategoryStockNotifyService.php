@@ -117,26 +117,19 @@ class CategoryStockNotifyService
                 $catName = 'دسته';
             }
 
-            if ($event === self::EVENT_NEW) {
-                $text = "{$brand}\nکالای جدید «{$productName}» به دسته «{$catName}» اضافه شد.";
-            } else {
-                $text = "{$brand}\nکالای «{$productName}» در دسته «{$catName}» دوباره موجود شد.";
-            }
-
             try {
-                SmsTools::sendShopSms($phone, $text, null, null, 'category_stock_notify', $atelierId);
+                if ($event === self::EVENT_NEW) {
+                    // هنوز پترن جدا برای «کالای جدید» ثبت نشده؛ متن آزاد (یا خط اختصاصی)
+                    $text = "{$brand}\nکالای جدید «{$productName}» به دسته «{$catName}» اضافه شد.";
+                    SmsTools::sendShopSms($phone, $text, null, null, 'category_stock_notify', $atelierId);
+                } else {
+                    SmsTools::sendCategoryRestockSms($phone, $productName, $catName, $atelierId);
+                }
                 $sent++;
 
                 if ($viewUrl !== '') {
                     try {
-                        SmsTools::sendShopSms(
-                            $phone,
-                            $viewUrl,
-                            null,
-                            null,
-                            'category_stock_notify_link',
-                            $atelierId
-                        );
+                        SmsTools::sendCategoryProductLinkSms($phone, $viewUrl, $atelierId);
                     } catch (\Throwable $e) {
                         Log::warning('category stock notify link sms failed', [
                             'phone' => $phone,

@@ -820,10 +820,8 @@ class PurchasedProductController extends Controller
                 }
             } else {
                 // اگر اعتبار غیرفعال باشد یا اعتبار کسب نشده باشد (به دلیل تخفیف)، فقط پیام ساده بفرست
-                $shopName = SmsTools::shopSmsBrand($purchaseAtelierId);
-                $text = "{$shopName}\nبا تشکر از خرید شما";
                 try {
-                    SmsTools::sendShopSms($phone, $text, (string) $purchase->id, null, 'purchase', $purchaseAtelierId);
+                    SmsTools::sendPurchaseThanksSms($phone, $purchaseAtelierId, (string) $purchase->id);
                     $smsMeta = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(false);
                 } catch (\App\Exceptions\InsufficientShopSmsQuotaException) {
                     $smsMeta = \App\Exceptions\InsufficientShopSmsQuotaException::sideEffectFields(true);

@@ -27,6 +27,12 @@ return [
         // هشدار کمبود اعتبار فروشگاه — بعد از تأیید در ملی‌پیامک شناسه را بگذارید:
         // {0}\nاعتبار ارسال پیامک فروشگاه شما رو به اتمام است. موجودی باقیمانده: {1} پیامک\nwebinoo-plus
         'low_quota_body_id' => env('MELIPAYAMAK_LOW_QUOTA_BODY_ID', ''),
+        // تشکر از خرید: {0} با تشکر از خرید شما
+        'purchase_body_id' => env('MELIPAYAMAK_PURCHASE_BODY_ID', '566903'),
+        // موجود شدن در دسته: {0} کالای «{1}» در دسته «{2}» دوباره موجود شد.
+        'category_restock_body_id' => env('MELIPAYAMAK_CATEGORY_RESTOCK_BODY_ID', '566901'),
+        // لینک مشاهده: {0} مشاهده کالا: {1}
+        'category_link_body_id' => env('MELIPAYAMAK_CATEGORY_LINK_BODY_ID', '566902'),
         // code | shop_code
         // الگوی ۵۶۴۷۰۳: {0} کد تایید هویت شما : {1} webinoo-plus
         'otp_vars_mode' => env('MELIPAYAMAK_OTP_VARS_MODE', 'shop_code'),

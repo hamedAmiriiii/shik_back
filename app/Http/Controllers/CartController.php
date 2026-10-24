@@ -447,9 +447,11 @@ class CartController extends Controller
                     }
                 } else {
                     // اگر اعتبار غیرفعال باشد، فقط پیام ساده بفرست
-                    $shopName = SmsTools::shopSmsBrand($atelierId);
-                    $text = "{$shopName}\nبا تشکر از خرید شما";
-                    SmsTools::sendSms($phone, $text);
+                    try {
+                        SmsTools::sendPurchaseThanksSms($phone, $atelierId, (string) $purchase->id);
+                    } catch (\App\Exceptions\InsufficientShopSmsQuotaException) {
+                        // کمبود سهمیه پیامک نباید ثبت سفارش را برگرداند
+                    }
                 }
 
                 // ثبت شماره تلفن در جدول customer_phones
