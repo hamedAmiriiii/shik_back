@@ -145,6 +145,15 @@ class ProductController extends Controller
         $product = $this->createProductFromPreparedFields($prepared, $atelierId, $request->all());
         $product->load(['images', 'categories']);
 
+        try {
+            \App\Services\CategoryStockNotifyService::notifyNewProduct($product);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('category stock notify on create failed', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return response($this->appendProductPricingMeta($product), 201);
     }
 
@@ -250,9 +259,18 @@ class ProductController extends Controller
                             throw new \InvalidArgumentException($prepared);
                         }
 
+                        $previousQuantity = (float) ($existing->quantity ?? 0);
                         $existing->update($prepared);
                         $this->syncProductRelations($existing, $productData);
                         $existing->load(['images', 'categories']);
+                        if (array_key_exists('quantity', $prepared)) {
+                            $newQuantity = (float) ($existing->fresh()->quantity ?? $previousQuantity);
+                            \App\Services\ProductStockNotifyService::notifyIfRestocked(
+                                $existing->fresh(),
+                                $previousQuantity,
+                                $newQuantity
+                            );
+                        }
                         $updatedProducts[] = $this->appendProductPricingMeta($existing);
                     } else {
                         $prepared = $this->prepareProductFieldsForCreate($productData, $atelierId);
@@ -262,6 +280,14 @@ class ProductController extends Controller
 
                         $product = $this->createProductFromPreparedFields($prepared, $atelierId, $productData);
                         $product->load(['images', 'categories']);
+                        try {
+                            \App\Services\CategoryStockNotifyService::notifyNewProduct($product);
+                        } catch (\Throwable $e) {
+                            \Illuminate\Support\Facades\Log::warning('category stock notify on bulk create failed', [
+                                'product_id' => $product->id,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
                         $createdProducts[] = $this->appendProductPricingMeta($product);
                     }
                 }
@@ -823,10 +849,19 @@ class ProductController extends Controller
                         throw new \InvalidArgumentException($prepared);
                     }
 
+                    $previousQuantity = (float) ($product->quantity ?? 0);
                     $product->update($prepared);
                     $this->syncProductRelations($product, $productData);
 
                     $product->load(['images', 'categories']);
+                    if (array_key_exists('quantity', $prepared)) {
+                        $newQuantity = (float) ($product->fresh()->quantity ?? $previousQuantity);
+                        \App\Services\ProductStockNotifyService::notifyIfRestocked(
+                            $product->fresh(),
+                            $previousQuantity,
+                            $newQuantity
+                        );
+                    }
                     $updatedProducts[] = $this->appendProductPricingMeta($product);
                 }
             });

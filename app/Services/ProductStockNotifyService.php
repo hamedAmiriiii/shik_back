@@ -27,10 +27,6 @@ class ProductStockNotifyService
      */
     public static function notifyIfRestocked(Product $product, float $previousQuantity, float $newQuantity): int
     {
-        if (! Schema::hasTable('product_stock_notify_requests')) {
-            return 0;
-        }
-
         if ($newQuantity <= $previousQuantity) {
             return 0;
         }
@@ -41,6 +37,20 @@ class ProductStockNotifyService
         }
 
         if (! \App\Services\ShopFeatureFlags::enabled($atelierId, \App\Services\ShopFeatureFlags::CUSTOMER_CLUB)) {
+            return 0;
+        }
+
+        // لیست «خبر بده» روی دسته: فقط وقتی از صفر به موجود می‌رود
+        try {
+            CategoryStockNotifyService::notifyIfRestockedFromZero($product, $previousQuantity, $newQuantity);
+        } catch (\Throwable $e) {
+            Log::warning('category stock notify after restock failed', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        if (! Schema::hasTable('product_stock_notify_requests')) {
             return 0;
         }
 

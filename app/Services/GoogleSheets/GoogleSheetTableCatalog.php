@@ -44,6 +44,7 @@ class GoogleSheetTableCatalog
             'shop_customer_groups' => 'گروه‌های مشتری',
             'shop_customer_group_members' => 'اعضای گروه‌های مشتری',
             'product_stock_notify_requests' => 'درخواست اطلاع از موجودی',
+            'category_stock_notify_requests' => 'خبر موجود شدن دسته',
         ],
         'نسیه، چک و اقساط' => [
             'purchase_debt_payments' => 'پرداخت‌های نسیه',

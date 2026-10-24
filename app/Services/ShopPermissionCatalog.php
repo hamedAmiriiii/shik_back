@@ -69,7 +69,7 @@ class ShopPermissionCatalog
             ['key' => 'settings', 'label' => 'تنظیمات فروشگاه', 'prefixes' => ['settings']],
             ['key' => 'reports', 'label' => 'گزارش مالی', 'prefixes' => ['financial-report', 'reports']],
             ['key' => 'accounting', 'label' => 'حسابداری', 'prefixes' => ['accounting']],
-            ['key' => 'shop_sms', 'label' => 'باشگاه مشتریان / پیامک', 'prefixes' => ['shop-sms-logs', 'shop-sms-quota', 'sms-package-orders', 'sms-packages', 'sms-logs', 'payments', 'product-stock-notify']],
+            ['key' => 'shop_sms', 'label' => 'باشگاه مشتریان / پیامک', 'prefixes' => ['shop-sms-logs', 'shop-sms-quota', 'sms-package-orders', 'sms-packages', 'sms-logs', 'payments', 'product-stock-notify', 'category-stock-notify']],
             ['key' => 'backup', 'label' => 'پشتیبان‌گیری', 'prefixes' => ['shop-backup']],
             ['key' => 'online_orders', 'label' => 'سفارش آنلاین', 'prefixes' => ['orders']],
             ['key' => 'returns', 'label' => 'مرجوعی', 'prefixes' => ['returned-products', 'purchase-item-returns']],

@@ -223,6 +223,13 @@ class ShopBackupTables
                 ],
             ],
             [
+                'name' => 'category_stock_notify_requests',
+                'scope' => 'atelier',
+                'fks' => [
+                    'category_id' => 'categories',
+                ],
+            ],
+            [
                 'name' => 'shop_customer_metrics',
                 'scope' => 'atelier',
                 'fks' => [],

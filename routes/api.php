@@ -607,6 +607,12 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     });
 
     Route::post('product-stock-notify', [\App\Http\Controllers\ProductStockNotifyController::class, 'store']);
+    Route::get('category-stock-notify', [\App\Http\Controllers\CategoryStockNotifyController::class, 'index']);
+    Route::post('category-stock-notify', [\App\Http\Controllers\CategoryStockNotifyController::class, 'store']);
+    Route::put('category-stock-notify/{id}', [\App\Http\Controllers\CategoryStockNotifyController::class, 'update'])
+        ->whereNumber('id');
+    Route::delete('category-stock-notify/{id}', [\App\Http\Controllers\CategoryStockNotifyController::class, 'destroy'])
+        ->whereNumber('id');
 
     // Product routes that require authentication
     Route::post("product", [ProductController::class, 'store']);
