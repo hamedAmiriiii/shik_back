@@ -58,12 +58,44 @@ class PurchaseHistoryEnricher
             return collect();
         }
 
-        return PurchaseItemReturn::query()
-            ->whereIn('purchase_id', $purchaseIds)
-            ->with(['product:id,name,barcode', 'producedGood:id,name', 'rawMaterial:id,name'])
-            ->orderBy('id')
-            ->get()
-            ->groupBy(fn (PurchaseItemReturn $row) => (int) $row->purchase_id);
+        try {
+            return PurchaseItemReturn::query()
+                ->whereIn('purchase_id', $purchaseIds)
+                ->with(self::returnItemRelations())
+                ->orderBy('id')
+                ->get()
+                ->groupBy(fn (PurchaseItemReturn $row) => (int) $row->purchase_id);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return PurchaseItemReturn::query()
+                ->whereIn('purchase_id', $purchaseIds)
+                ->orderBy('id')
+                ->get()
+                ->groupBy(fn (PurchaseItemReturn $row) => (int) $row->purchase_id);
+        }
+    }
+
+    /**
+     * روابط امن برای بارگذاری اقلام برگشتی (بر اساس جداول/ستون‌های موجود).
+     *
+     * @return array<int, string>
+     */
+    public static function returnItemRelations(): array
+    {
+        $with = [];
+        if (Schema::hasTable('products')) {
+            // بدون محدود کردن ستون‌ها تا SoftDeletes/بازداده‌های قدیمی خطا ندهد
+            $with[] = 'product';
+        }
+        if (Schema::hasTable('produced_goods') && Schema::hasColumn('purchase_item_returns', 'produced_good_id')) {
+            $with[] = 'producedGood';
+        }
+        if (Schema::hasTable('raw_materials') && Schema::hasColumn('purchase_item_returns', 'raw_material_id')) {
+            $with[] = 'rawMaterial';
+        }
+
+        return $with;
     }
 
     /**

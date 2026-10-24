@@ -234,11 +234,19 @@ class PurchasedProductController extends Controller
     if ($hasReturnTable) {
         $purchaseIds = collect($itemsArray['data'] ?? [])->pluck('id')->filter()->map(fn ($id) => (int) $id)->all();
         if ($purchaseIds !== []) {
-            $allReturns = \App\Models\PurchaseItemReturn::query()
-                ->whereIn('purchase_id', $purchaseIds)
-                ->orderByDesc('id')
-                ->with(['product:id,name,barcode', 'producedGood:id,name', 'rawMaterial:id,name'])
-                ->get();
+            try {
+                $allReturns = \App\Models\PurchaseItemReturn::query()
+                    ->whereIn('purchase_id', $purchaseIds)
+                    ->orderByDesc('id')
+                    ->with(PurchaseHistoryEnricher::returnItemRelations())
+                    ->get();
+            } catch (\Throwable $e) {
+                report($e);
+                $allReturns = \App\Models\PurchaseItemReturn::query()
+                    ->whereIn('purchase_id', $purchaseIds)
+                    ->orderByDesc('id')
+                    ->get(['id', 'purchase_id', 'user_name', 'notes', 'return_sale_total', 'created_at']);
+            }
             $returnsByPurchase = $allReturns->groupBy(fn ($row) => (int) $row->purchase_id);
             $latestReturnsByPurchase = $returnsByPurchase
                 ->map(fn ($rows) => $rows->first())
@@ -297,7 +305,11 @@ class PurchasedProductController extends Controller
 
         $purchaseReturns = $returnsByPurchase->get((int) ($purchaseData['id'] ?? 0), collect());
         if ($returnsCount > 0 || $purchaseReturns->isNotEmpty()) {
-            $purchaseData = PurchaseHistoryEnricher::enrichArray($purchaseData, $purchaseReturns);
+            try {
+                $purchaseData = PurchaseHistoryEnricher::enrichArray($purchaseData, $purchaseReturns);
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
     }
     unset($purchaseData);
@@ -914,7 +926,7 @@ class PurchasedProductController extends Controller
         if (Schema::hasTable('purchase_item_returns')) {
             $purchase->load([
                 'itemReturns' => fn ($q) => $q->orderByDesc('id')
-                    ->with(['product:id,name,barcode', 'producedGood:id,name', 'rawMaterial:id,name']),
+                    ->with(PurchaseHistoryEnricher::returnItemRelations()),
             ]);
             $purchase->loadCount('itemReturns');
             $purchase->loadSum('itemReturns as returned_sale_total', 'return_sale_total');
@@ -971,7 +983,11 @@ class PurchasedProductController extends Controller
 
         $payload = $purchase->toArray();
         if ($returnRows !== null) {
-            $payload = PurchaseHistoryEnricher::enrichArray($payload, $returnRows);
+            try {
+                $payload = PurchaseHistoryEnricher::enrichArray($payload, $returnRows);
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
         return response($payload, 200);

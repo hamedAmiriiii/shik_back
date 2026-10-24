@@ -47,13 +47,17 @@ class PurchaseItemReturn extends Model
         'shop_account_id' => 'integer',
     ];
 
-    public function getCreatedAtAttribute($value): string
+    public function getCreatedAtAttribute($value): ?string
     {
         if (! $value) {
             return null;
         }
 
-        return Jalalian::fromDateTime($value)->format('Y-m-d H:i:s');
+        try {
+            return Jalalian::fromDateTime($value)->format('Y-m-d H:i:s');
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     public function purchase(): BelongsTo
