@@ -324,10 +324,13 @@ class DocumentPaymentService
             return false;
         }
 
+        // پرداخت ساده (فقط payment_method=account/credit بدون payments/cash_amount)
+        // هم باید جایگزین ردیف‌های قبلی شود؛ وگرنه هزینهٔ ترکیبی/نسیه بعد از ویرایش عوض نمی‌شود.
         return $request->exists('payments')
             || $request->exists('cash_amount')
             || $request->exists('cheque_amount')
-            || $request->exists('credit_amount');
+            || $request->exists('credit_amount')
+            || $request->filled('payment_method');
     }
 
     /**
