@@ -111,6 +111,36 @@ class User extends Authenticatable
         return $this->hasOne(ShopEmployee::class);
     }
 
+    /**
+     * نام قابل‌نمایش برای فروشنده / ثبت‌کننده هزینه و برگشت.
+     * اگر name خالی باشد از نام کارمند یا شماره موبایل استفاده می‌شود.
+     */
+    public function shopDisplayName(): string
+    {
+        $name = trim((string) ($this->attributes['name'] ?? ''));
+        $last = trim((string) ($this->attributes['last_name'] ?? ''));
+        if (in_array($last, ['—', '–', '-', 'ـ'], true)) {
+            $last = '';
+        }
+        $full = trim($name.($last !== '' ? ' '.$last : ''));
+        if ($full !== '' && $full !== '—') {
+            return mb_substr($full, 0, 120);
+        }
+
+        $this->loadMissing('shopEmployee');
+        $emp = trim((string) ($this->shopEmployee->name ?? ''));
+        if ($emp !== '') {
+            return mb_substr($emp, 0, 120);
+        }
+
+        $phone = trim((string) ($this->attributes['phone'] ?? ''));
+        if ($phone !== '') {
+            return $phone;
+        }
+
+        return '';
+    }
+
     public function city()
     {
         return $this->belongsTo(City::class);

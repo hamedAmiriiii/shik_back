@@ -9,6 +9,7 @@ use App\Models\Purchase;
 use App\Models\PurchasedProduct;
 use App\Models\Setting;
 use App\Models\TableOrder;
+use App\Models\User;
 use App\Models\UserShiksho;
 use App\Services\CustomerCreditExpenseService;
 use App\Tools\SmsTools;
@@ -16,6 +17,7 @@ use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
 class TableOrderCheckoutService
@@ -120,7 +122,7 @@ class TableOrderCheckoutService
                 $creditEarned = UserShiksho::calculateCredit($grossTotal, $atelierId);
             }
 
-            $purchase = Purchase::create([
+            $purchasePayload = [
                 'atelier_id' => $atelierId,
                 'shop_table_id' => $order->shop_table_id,
                 'table_label' => $order->table_label,
@@ -133,7 +135,16 @@ class TableOrderCheckoutService
                 'cash_amount' => $settlement['cash_amount'],
                 'is_debt_settled' => false,
                 'debt_settlement_note' => $request->input('note', $order->note),
-            ]);
+            ];
+            $actor = $request->user('sanctum') ?: $request->user();
+            if ($actor instanceof User && Schema::hasColumn('purchases', 'sold_by_name')) {
+                $sellerName = $actor->shopDisplayName();
+                $purchasePayload['sold_by_name'] = $sellerName !== '' ? $sellerName : null;
+                if (Schema::hasColumn('purchases', 'sold_by_user_id')) {
+                    $purchasePayload['sold_by_user_id'] = (int) $actor->id;
+                }
+            }
+            $purchase = Purchase::create($purchasePayload);
             \App\Services\DailyTicketNumberService::assign($purchase);
             CustomerCreditExpenseService::recordCreditUsed($purchase);
 

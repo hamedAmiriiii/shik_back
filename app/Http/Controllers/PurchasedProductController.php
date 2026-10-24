@@ -254,6 +254,27 @@ class PurchasedProductController extends Controller
         }
     }
 
+    $sellerNamesByUserId = [];
+    $missingSellerUserIds = collect($itemsArray['data'] ?? [])
+        ->filter(function ($row) {
+            $name = trim((string) ($row['sold_by_name'] ?? ''));
+
+            return ($name === '' || $name === '—') && (int) ($row['sold_by_user_id'] ?? 0) > 0;
+        })
+        ->pluck('sold_by_user_id')
+        ->map(fn ($id) => (int) $id)
+        ->unique()
+        ->values()
+        ->all();
+    if ($missingSellerUserIds !== []) {
+        $sellerNamesByUserId = \App\Models\User::query()
+            ->with('shopEmployee')
+            ->whereIn('id', $missingSellerUserIds)
+            ->get()
+            ->mapWithKeys(fn (\App\Models\User $u) => [$u->id => $u->shopDisplayName()])
+            ->all();
+    }
+
     foreach ($itemsArray['data'] as &$purchaseData) {
         $purchase = $items->firstWhere('id', $purchaseData['id']);
         if ($purchase && $purchase->isInstallment()) {
@@ -286,6 +307,12 @@ class PurchasedProductController extends Controller
         $phone = is_string($purchaseData['phone'] ?? null) ? $purchaseData['phone'] : '';
         $customerName = $phone !== '' ? trim((string) ($customerNames[$phone] ?? '')) : '';
         $purchaseData['customer_name'] = $customerName !== '' ? $customerName : null;
+
+        $soldByName = trim((string) ($purchaseData['sold_by_name'] ?? ''));
+        if ($soldByName === '' || $soldByName === '—') {
+            $resolvedSeller = trim((string) ($sellerNamesByUserId[(int) ($purchaseData['sold_by_user_id'] ?? 0)] ?? ''));
+            $purchaseData['sold_by_name'] = $resolvedSeller !== '' ? $resolvedSeller : null;
+        }
 
         $returnsCount = (int) ($purchaseData['item_returns_count'] ?? 0);
         $remainingTotal = (float) ($purchaseData['total_amount'] ?? 0);
@@ -716,8 +743,10 @@ class PurchasedProductController extends Controller
             $posSale->commitStock($preparedLines, $purchasedProducts);
             if ($creditUsed > 0) {
                 $actor = $this->shopRequestActor($request);
-                $actorName = $actor ? trim($actor->name.' '.($actor->last_name ?? '')) : null;
-                \App\Services\CustomerCreditExpenseService::recordCreditUsed($purchase, $actorName);
+                $actorName = $actor instanceof \App\Models\User
+                    ? $actor->shopDisplayName()
+                    : ($actor ? trim($actor->name.' '.($actor->last_name ?? '')) : null);
+                \App\Services\CustomerCreditExpenseService::recordCreditUsed($purchase, $actorName ?: null);
             }
             $purchase->load(['purchasedProducts', 'cheque']);
             if ($linkedCheque) {
@@ -820,9 +849,9 @@ class PurchasedProductController extends Controller
             return [];
         }
 
-        $name = trim((string) ($actor->name ?? ''));
-        $last = trim((string) ($actor->last_name ?? ''));
-        $full = trim($name.' '.$last);
+        $full = $actor instanceof \App\Models\User
+            ? $actor->shopDisplayName()
+            : trim(trim((string) ($actor->name ?? '')).' '.trim((string) ($actor->last_name ?? '')));
         if ($full === '') {
             $full = trim((string) ($actor->phone ?? ''));
         }
@@ -1561,7 +1590,7 @@ class PurchasedProductController extends Controller
         $staffAtelierId = $this->staffShopAtelierId($request);
         if ($staffAtelierId !== null) {
             $user = $this->requireStaffShopUser($request);
-            $userName = trim($user->name.' '.$user->last_name);
+            $userName = $user->shopDisplayName() ?: null;
             if ($purchase->atelier_id !== null && (int) $purchase->atelier_id !== (int) $staffAtelierId) {
                 return response(['error' => 'این فاکتور متعلق به فروشگاه شما نیست'], 403);
             }
@@ -1654,7 +1683,7 @@ class PurchasedProductController extends Controller
         $staffAtelierId = $this->staffShopAtelierId($request);
         if ($staffAtelierId !== null) {
             $user = $this->requireStaffShopUser($request);
-            $userName = trim($user->name.' '.$user->last_name);
+            $userName = $user->shopDisplayName() ?: null;
             if ($purchase->atelier_id !== null && (int) $purchase->atelier_id !== (int) $staffAtelierId) {
                 return response(['error' => 'این فاکتور متعلق به فروشگاه شما نیست'], 403);
             }

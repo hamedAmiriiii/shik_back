@@ -55,7 +55,17 @@ class PurchaseDebtController extends Controller
         $title = $note !== '' ? $note : 'بدهی دستی';
         $name = trim((string) ($fields['name'] ?? ''));
 
-        $purchase = DB::transaction(function () use ($atelierId, $phone, $amount, $title, $name) {
+        $actor = $this->shopRequestActor($request);
+        $sellerFields = [];
+        if ($actor instanceof \App\Models\User && Schema::hasColumn('purchases', 'sold_by_name')) {
+            $sellerName = $actor->shopDisplayName();
+            $sellerFields['sold_by_name'] = $sellerName !== '' ? $sellerName : null;
+            if (Schema::hasColumn('purchases', 'sold_by_user_id')) {
+                $sellerFields['sold_by_user_id'] = (int) $actor->id;
+            }
+        }
+
+        $purchase = DB::transaction(function () use ($atelierId, $phone, $amount, $title, $name, $sellerFields) {
             if ($name !== '' && Schema::hasTable('user_shiksho')) {
                 $create = [
                     'credit' => 0,
@@ -78,7 +88,7 @@ class PurchaseDebtController extends Controller
                 }
             }
 
-            $purchase = Purchase::create([
+            $purchase = Purchase::create(array_merge([
                 'phone' => $phone,
                 'total_amount' => $amount,
                 'discount_amount' => 0,
@@ -89,7 +99,7 @@ class PurchaseDebtController extends Controller
                 'cash_amount' => 0,
                 'is_debt_settled' => false,
                 'atelier_id' => $atelierId,
-            ]);
+            ], $sellerFields));
             DailyTicketNumberService::assign($purchase);
 
             PurchasedProduct::create([

@@ -62,6 +62,11 @@ class Purchase extends Model
         return \App\Tools\JalaliTools::format($value);
     }
 
+    public function soldBy()
+    {
+        return $this->belongsTo(User::class, 'sold_by_user_id');
+    }
+
     /**
      * محصولات این خرید
      */

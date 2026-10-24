@@ -243,7 +243,9 @@ class ExpenseController extends Controller
             return response(['error' => 'کاربر احراز هویت نشده است'], 401);
         }
 
-        $fields['user_name'] = trim($user->name . ' ' . $user->last_name);
+        $fields['user_name'] = $user instanceof \App\Models\User
+            ? ($user->shopDisplayName() ?: trim($user->name.' '.$user->last_name))
+            : trim($user->name.' '.$user->last_name);
         $fields['date'] = Carbon::now()->format('Y-m-d');
         if (!isset($fields['type']) || empty($fields['type'])) {
             $fields['type'] = 'جاری';
