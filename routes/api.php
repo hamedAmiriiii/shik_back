@@ -706,6 +706,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/reminders', [\App\Http\Controllers\OutstandingSettlementController::class, 'reminders']);
     });
 
+    Route::get('financial-day-activity', [\App\Http\Controllers\FinancialDayActivityController::class, 'index']);
+
     Route::get('shop-health', [\App\Http\Controllers\ShopDataHealthController::class, 'show']);
     Route::post('shop-health/fix-voided-credit-returns', [\App\Http\Controllers\ShopDataHealthController::class, 'fixVoidedCreditReturns']);
 
