@@ -3,10 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Models\ShopAccount;
+use App\Models\ShopAccountBalanceAdjustment;
 use App\Services\ChartOfAccountsSeeder;
 use App\Services\ShopAccountBalanceService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
+use Morilog\Jalali\Jalalian;
 
 class ShopAccountController extends Controller
 {
@@ -210,6 +213,93 @@ class ShopAccountController extends Controller
     }
 
     /**
+     * لاگ اصلاح مانده حساب‌ها و تنخواه.
+     * GET /api/shop-accounts/balance-adjustments?type=petty_cash|shop|all&limit=100
+     */
+    public function balanceAdjustments(Request $request)
+    {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        if (! Schema::hasTable('shop_account_balance_adjustments')) {
+            return response(['data' => []], 200);
+        }
+
+        $fields = $request->validate([
+            'type' => ['sometimes', Rule::in(['all', 'shop', 'petty_cash', 'till'])],
+            'shop_account_id' => 'sometimes|integer|min:1',
+            'limit' => 'sometimes|integer|min:1|max:500',
+        ]);
+
+        $limit = (int) ($fields['limit'] ?? 100);
+        $type = $fields['type'] ?? 'all';
+        $accountId = isset($fields['shop_account_id']) ? (int) $fields['shop_account_id'] : 0;
+
+        $query = ShopAccountBalanceAdjustment::query()
+            ->forAtelier($atelierId)
+            ->with(['shopAccount' => fn ($q) => $q->select('id', 'name', 'type')])
+            ->orderByDesc('id')
+            ->limit($limit);
+
+        if ($accountId > 0) {
+            $query->where('shop_account_id', $accountId);
+        } elseif ($type !== 'all' && ShopAccount::supportsTypes()) {
+            $query->whereHas('shopAccount', function ($q) use ($type) {
+                if ($type === ShopAccount::TYPE_SHOP) {
+                    $q->where(function ($inner) {
+                        $inner->where('type', ShopAccount::TYPE_SHOP)->orWhereNull('type');
+                    });
+                } else {
+                    $q->where('type', $type);
+                }
+            });
+        }
+
+        $rows = $query->get()->map(function (ShopAccountBalanceAdjustment $row) {
+            $account = $row->shopAccount;
+            $amount = round((float) $row->amount, 2);
+            $before = $row->balance_before !== null ? round((float) $row->balance_before, 2) : null;
+            $after = $row->balance_after !== null ? round((float) $row->balance_after, 2) : null;
+            $date = $row->date;
+            $dateJalali = null;
+            if ($date) {
+                try {
+                    $dateJalali = Jalalian::fromDateTime($date)->format('Y/m/d');
+                } catch (\Throwable $e) {
+                    $dateJalali = null;
+                }
+            }
+            $createdAt = $row->created_at;
+            $createdJalali = null;
+            if ($createdAt) {
+                try {
+                    $createdJalali = Jalalian::fromDateTime($createdAt)->format('Y/m/d H:i');
+                } catch (\Throwable $e) {
+                    $createdJalali = null;
+                }
+            }
+
+            return [
+                'id' => (int) $row->id,
+                'shop_account_id' => (int) $row->shop_account_id,
+                'account_name' => $account?->name ?? ('حساب #'.$row->shop_account_id),
+                'account_type' => $account?->type ?: ShopAccount::TYPE_SHOP,
+                'account_type_label' => $account ? $account->typeLabel() : 'حساب فروشگاه',
+                'amount' => $amount,
+                'balance_before' => $before,
+                'balance_after' => $after,
+                'date' => $date ? $date->format('Y-m-d') : null,
+                'date_jalali' => $dateJalali,
+                'description' => $row->description,
+                'user_id' => $row->user_id ? (int) $row->user_id : null,
+                'user_name' => $row->user_name,
+                'created_at' => $createdAt ? $createdAt->toIso8601String() : null,
+                'created_at_jalali' => $createdJalali,
+            ];
+        })->values();
+
+        return response(['data' => $rows], 200);
+    }
+
+    /**
      * موجودی عملیاتی و دفتر هر حساب را به رقم واقعی می‌رساند.
      * POST /api/shop-accounts/set-balances
      */
@@ -230,13 +320,23 @@ class ShopAccountController extends Controller
             'items.*.target_balance' => 'required|numeric',
         ]);
 
+        $actor = $this->shopRequestActor($request);
+        $userName = null;
+        $userId = null;
+        if ($actor) {
+            $userId = (int) ($actor->id ?? 0) ?: null;
+            $name = trim((string) (($actor->name ?? '').' '.($actor->last_name ?? '')));
+            $userName = $name !== '' ? $name : (string) ($actor->phone ?? null);
+        }
+
         try {
             $date = \App\Services\ShopAccountBalanceSetService::parseDate($fields['date'] ?? null);
             $result = \App\Services\ShopAccountBalanceSetService::apply(
                 $atelierId,
                 $fields['items'],
                 $date,
-                $fields['description'] ?? null
+                $fields['description'] ?? null,
+                ['user_id' => $userId, 'user_name' => $userName]
             );
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);

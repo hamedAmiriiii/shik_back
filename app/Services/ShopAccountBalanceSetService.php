@@ -19,10 +19,16 @@ class ShopAccountBalanceSetService
 {
     /**
      * @param  array<int, array{shop_account_id: int, target_balance: float}>  $items
+     * @param  array{user_id?: int|null, user_name?: string|null}|null  $actor
      * @return array{adjustments: int, voucher: ?AccountingVoucher, items: array<int, array<string, mixed>>}
      */
-    public static function apply(int $atelierId, array $items, $date = null, ?string $description = null): array
-    {
+    public static function apply(
+        int $atelierId,
+        array $items,
+        $date = null,
+        ?string $description = null,
+        ?array $actor = null
+    ): array {
         if ($atelierId <= 0) {
             throw new RuntimeException('فروشگاه نامعتبر است.');
         }
@@ -42,9 +48,25 @@ class ShopAccountBalanceSetService
             ? trim($description)
             : 'اصلاح مانده حساب با موجودی واقعی';
 
+        $userId = isset($actor['user_id']) ? (int) $actor['user_id'] : null;
+        if ($userId !== null && $userId <= 0) {
+            $userId = null;
+        }
+        $userName = isset($actor['user_name']) ? trim((string) $actor['user_name']) : null;
+        if ($userName === '') {
+            $userName = null;
+        }
+
         ChartOfAccountsSeeder::ensureForAtelier($atelierId);
 
-        return DB::transaction(function () use ($atelierId, $items, $dateString, $description) {
+        return DB::transaction(function () use (
+            $atelierId,
+            $items,
+            $dateString,
+            $description,
+            $userId,
+            $userName
+        ) {
             AccountingVoucherService::lockAtelier($atelierId);
 
             $ids = [];
@@ -66,6 +88,7 @@ class ShopAccountBalanceSetService
             $created = [];
             $report = [];
             $firstId = 0;
+            $hasAuditCols = Schema::hasColumn('shop_account_balance_adjustments', 'user_name');
 
             foreach ($items as $item) {
                 $shopId = (int) ($item['shop_account_id'] ?? 0);
@@ -91,13 +114,21 @@ class ShopAccountBalanceSetService
                     continue;
                 }
 
-                $row = ShopAccountBalanceAdjustment::create([
+                $payload = [
                     'atelier_id' => $atelierId,
                     'shop_account_id' => $shopId,
                     'amount' => $opsDelta,
                     'date' => $dateString,
                     'description' => $description,
-                ]);
+                ];
+                if ($hasAuditCols) {
+                    $payload['user_id'] = $userId;
+                    $payload['user_name'] = $userName;
+                    $payload['balance_before'] = $ops;
+                    $payload['balance_after'] = $shop->isTill() ? $ops : $target;
+                }
+
+                $row = ShopAccountBalanceAdjustment::create($payload);
                 if ($firstId === 0) {
                     $firstId = (int) $row->id;
                 }
@@ -113,6 +144,8 @@ class ShopAccountBalanceSetService
                     'shop_account_id' => $shopId,
                     'name' => $shop->name,
                     'target' => $target,
+                    'balance_before' => $ops,
+                    'balance_after' => $shop->isTill() ? $ops : $target,
                     'operational_delta' => $opsDelta,
                     'ledger_delta' => $ledgerDelta,
                     'skipped' => false,
