@@ -21,10 +21,24 @@ class InventoryWasteController extends Controller
             'کالای تولیدی برای این فروشگاه فعال نیست.'
         );
 
-        if (! Schema::hasTable('inventory_wastes')) {
-            return response()->json([
-                'message' => 'جدول inventory_wastes وجود ندارد. migration یا SQL را اجرا کنید.',
-            ], 503);
+        if (! Schema::hasTable('inventory_wastes') || ! Schema::hasTable('inventory_waste_consumptions')) {
+            $emptySummary = [
+                'count' => 0,
+                'total_cost' => 0,
+                'total_quantity' => 0,
+                'raw_material_cost' => 0,
+                'produced_good_cost' => 0,
+            ];
+
+            return response([
+                'summary' => $emptySummary,
+                'data' => [],
+                'current_page' => 1,
+                'last_page' => 1,
+                'per_page' => (int) min(max((int) $request->input('per_page', 30), 1), 100),
+                'total' => 0,
+                'message' => 'جداول ضایعات هنوز ساخته نشده است. database/sql/create_inventory_wastes_manual.sql را اجرا کنید.',
+            ], 200);
         }
 
         $query = InventoryWaste::query()
@@ -113,10 +127,10 @@ class InventoryWasteController extends Controller
             ], 422);
         }
 
-        if (! Schema::hasTable('inventory_wastes')) {
+        if (! Schema::hasTable('inventory_wastes') || ! Schema::hasTable('inventory_waste_consumptions')) {
             return response()->json([
-                'message' => 'جدول inventory_wastes وجود ندارد. migration یا SQL را اجرا کنید.',
-            ], 503);
+                'message' => 'جداول ضایعات هنوز ساخته نشده است. database/sql/create_inventory_wastes_manual.sql را اجرا کنید.',
+            ], 422);
         }
 
         $fields = $request->validate([

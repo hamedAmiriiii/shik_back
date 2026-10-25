@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Morilog\Jalali\Jalalian;
 
 class EmployeePayroll extends Model
 {
@@ -187,5 +188,25 @@ class EmployeePayroll extends Model
             'salary_calculated' => $this->isSalaryCalculated(),
             'can_recalculate' => $this->canRecalculateSalary(),
         ];
+    }
+
+    /**
+     * تاریخ سند هزینه/حسابداری برای این ماه حقوقی (آخرین روز همان ماه شمسی).
+     * حتی اگر پرداخت در ماه بعد ثبت شود، هزینه در ماه حقوق می‌نشیند.
+     */
+    public function periodExpenseDate(): string
+    {
+        $year = (int) $this->payroll_year;
+        $month = (int) $this->payroll_month;
+        if ($year < 1300 || $month < 1 || $month > 12) {
+            return now('Asia/Tehran')->format('Y-m-d');
+        }
+
+        return (new Jalalian($year, $month, 1))
+            ->addMonths(1)
+            ->subDays(1)
+            ->toCarbon()
+            ->timezone('Asia/Tehran')
+            ->format('Y-m-d');
     }
 }

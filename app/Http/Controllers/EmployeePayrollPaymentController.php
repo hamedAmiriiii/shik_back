@@ -345,7 +345,7 @@ class EmployeePayrollPaymentController extends Controller
             .$payroll->payroll_year.'/'.$payroll->payroll_month;
 
         $expense = $this->createPayrollExpense(
-            (int) $payroll->atelier_id,
+            $payroll,
             $userName,
             $amount,
             $expenseTitle,
@@ -372,19 +372,21 @@ class EmployeePayrollPaymentController extends Controller
 
     /**
      * هر پرداخت حقوق/مساعده یک ردیف در هزینه‌ها می‌سازد.
+     * تاریخ هزینه = آخرین روز ماه شمسی فیش (نه روز ثبت پرداخت).
      *
      * @param  array<string, mixed>  $fields
      */
     protected function createPayrollExpense(
-        int $atelierId,
+        EmployeePayroll $payroll,
         string $userName,
         float $amount,
         string $title,
         array $fields
     ): Expense {
+        $atelierId = (int) $payroll->atelier_id;
         $payload = [
             'user_name' => $userName,
-            'date' => now()->format('Y-m-d'),
+            'date' => $payroll->periodExpenseDate(),
             'amount' => $amount,
             'title' => $title,
             'type' => 'جاری',
