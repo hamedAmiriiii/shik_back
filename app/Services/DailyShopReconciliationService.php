@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\DailyShopReconciliation;
 use App\Models\DailyShopReconciliationAccountDeposit;
 use App\Models\DailyShopReconciliationDeposit;
-use App\Models\Purchase;
 use App\Models\ShopAccount;
 use App\Models\ShopAccountBalanceAdjustment;
 use App\Models\AccountingVoucher;
@@ -125,18 +124,10 @@ class DailyShopReconciliationService
         float $cumulative,
         Collection $shopAccounts
     ): array {
-        $metrics = ShopSalesReportService::salesAndProfitForDate($atelierId, $dayCarbon);
+        $editable = self::isDateEditable($dateKey);
+        $recon = $reconciliations->get($dateKey);
 
-        $dayKey = $dayCarbon->copy()->setTimezone('Asia/Tehran')->format('Y-m-d');
-        $purchasesCount = Purchase::query()
-            ->forAtelier($atelierId)
-            ->whereDate('created_at', $dayKey)
-            ->count();
-
-        $accounts = ShopSalesReportService::accountsBreakdown($metrics);
-        $tillPaidOut = ShopAccountBalanceService::tillPaidOnDate($atelierId, $dateKey);
-
-        $accountDeposits = $shopAccounts->map(fn (ShopAccount $a) => [
+        $emptyDeposits = $shopAccounts->map(fn (ShopAccount $a) => [
             'shop_account_id' => $a->id,
             'name' => $a->name,
             'legacy_slot' => $a->legacy_slot,
@@ -148,76 +139,56 @@ class DailyShopReconciliationService
             'date' => $dateKey,
             'date_jalali' => Jalalian::fromCarbon($dayCarbon)->format('Y-m-d'),
             'day_of_month' => (int) Jalalian::fromCarbon($dayCarbon)->getDay(),
-            'total_sales' => (float) $metrics['sales'],
-            'gross_sales' => (float) $metrics['gross_sales'],
-            'total_returns' => (float) $metrics['returns'],
-            'card_amount' => (float) $metrics['card_amount'],
-            'cash_amount' => (float) $metrics['cash_amount'],
-            'cash_and_card_total' => (float) $metrics['cash_and_card_total'],
-            'till_paid_out' => $tillPaidOut,
-            'expected_deposit' => round(max(0, (float) $metrics['total_collected'] - $tillPaidOut), 2),
-            'installments_collected' => (float) $metrics['installments_collected'],
-            'total_collected' => (float) $metrics['total_collected'],
-            'discount_given' => (float) $metrics['discount_given'],
-            'credit_used_total' => (float) $metrics['credit_used_total'],
-            'settlement_total' => (float) $metrics['settlement_total'],
-            'accounts' => $accounts,
-            'uncollected_installments' => (float) $metrics['uncollected_installments'],
-            'uncollected_debts' => (float) ($metrics['uncollected_debts'] ?? 0),
-            'uncollected_cheques' => (float) ($metrics['uncollected_cheques'] ?? 0),
-            'cheque_payments' => (float) ($metrics['cheque_payments'] ?? 0),
-            'cheques_collected' => (float) ($metrics['cheques_collected'] ?? 0),
-            'open_debt' => (float) ($metrics['open_debt'] ?? $metrics['uncollected_debts'] ?? 0),
-            'open_cheques' => (float) ($metrics['open_cheques'] ?? 0),
-            'debts_collected' => (float) ($metrics['debts_collected'] ?? 0),
-            'purchases_count' => $purchasesCount,
+            'total_sales' => 0.0,
+            'gross_sales' => 0.0,
+            'total_returns' => 0.0,
+            'card_amount' => 0.0,
+            'cash_amount' => 0.0,
+            'cash_and_card_total' => 0.0,
+            'till_paid_out' => 0.0,
+            'expected_deposit' => 0.0,
+            'installments_collected' => 0.0,
+            'total_collected' => 0.0,
+            'discount_given' => 0.0,
+            'credit_used_total' => 0.0,
+            'settlement_total' => 0.0,
+            'accounts' => [],
+            'uncollected_installments' => 0.0,
+            'uncollected_debts' => 0.0,
+            'uncollected_cheques' => 0.0,
+            'cheque_payments' => 0.0,
+            'cheques_collected' => 0.0,
+            'open_debt' => 0.0,
+            'open_cheques' => 0.0,
+            'debts_collected' => 0.0,
+            'purchases_count' => 0,
             'deposit_account_1' => 0.0,
             'deposit_account_2' => 0.0,
             'deposit_cash' => 0.0,
-            'account_deposits' => $accountDeposits,
+            'account_deposits' => $emptyDeposits,
             'deposited_total' => 0.0,
             'daily_discrepancy' => null,
             'cumulative_discrepancy' => round($cumulative, 2),
-            'editable' => self::isDateEditable($dateKey),
+            'editable' => $editable,
             'is_closed' => false,
             'notes' => null,
             'user_name' => null,
             'reconciliation_id' => null,
             'deposit_ids' => null,
+            'sales_lite' => true,
         ];
 
-        $recon = $reconciliations->get($dateKey);
+        // روز بسته‌شده: فقط اسنپ‌شات ذخیره‌شده — بدون محاسبهٔ زندهٔ فروش (گرید سریع‌تر)
         if ($recon) {
-            // اگر محاسبهٔ زنده فروش ۰ بود ولی اسنپ‌شات روز مقدار دارد، از اسنپ‌شات استفاده کن
-            $usedSnapshot = (float) $row['total_sales'] <= 0 && (float) $recon->total_sales > 0;
-            if ($usedSnapshot) {
-                $row['total_sales'] = (float) $recon->total_sales;
-                $row['card_amount'] = (float) $recon->card_amount;
-                $row['cash_amount'] = (float) $recon->cash_amount;
-                $row['installments_collected'] = (float) $recon->installments_collected;
-                $row['total_collected'] = (float) $recon->total_collected;
-                $row['credit_used_total'] = (float) $recon->credit_used_total;
-                $row['settlement_total'] = (float) $recon->settlement_total;
-                $row['discount_given'] = (float) ($recon->discount_given ?? 0);
-                $row['accounts'] = ShopSalesReportService::accountsBreakdown([
-                    'sales' => $row['total_sales'],
-                    'card_amount' => $row['card_amount'],
-                    'cash_amount' => $row['cash_amount'],
-                    'installments_collected' => $row['installments_collected'],
-                    'total_collected' => $row['total_collected'],
-                    'credit_used_total' => $row['credit_used_total'],
-                    'settlement_total' => $row['settlement_total'],
-                    'discount_given' => $row['discount_given'],
-                    'debts_collected' => $row['debts_collected'],
-                    'cheques_collected' => $row['cheques_collected'],
-                    'cheque_payments' => $row['cheque_payments'],
-                    'uncollected_installments' => $row['uncollected_installments'],
-                    'uncollected_debts' => $row['uncollected_debts'],
-                    'uncollected_cheques' => $row['uncollected_cheques'],
-                    'open_debt' => $row['open_debt'],
-                    'open_cheques' => $row['open_cheques'],
-                ]);
-            }
+            $row['total_sales'] = (float) $recon->total_sales;
+            $row['card_amount'] = (float) $recon->card_amount;
+            $row['cash_amount'] = (float) $recon->cash_amount;
+            $row['cash_and_card_total'] = round((float) $recon->card_amount + (float) $recon->cash_amount, 2);
+            $row['installments_collected'] = (float) $recon->installments_collected;
+            $row['total_collected'] = (float) $recon->total_collected;
+            $row['credit_used_total'] = (float) $recon->credit_used_total;
+            $row['settlement_total'] = (float) $recon->settlement_total;
+            $row['discount_given'] = (float) ($recon->discount_given ?? 0);
 
             $savedDeposits = self::accountDepositsForReconciliation($recon, $shopAccounts);
             $row['account_deposits'] = $savedDeposits;
@@ -225,22 +196,8 @@ class DailyShopReconciliationService
             $row['deposit_account_2'] = self::amountForLegacySlot($savedDeposits, ShopAccount::LEGACY_ACCOUNT_2, (float) $recon->deposit_account_2);
             $row['deposit_cash'] = (float) $recon->deposit_cash;
             $row['deposited_total'] = (float) $recon->deposited_total;
-            $row['expected_deposit'] = round(max(0, (float) $row['total_collected'] - $tillPaidOut), 2);
-            if ($usedSnapshot) {
-                $row['daily_discrepancy'] = (float) $recon->daily_discrepancy;
-            } else {
-                $row['daily_discrepancy'] = round(
-                    (float) $recon->deposited_total - (float) $row['expected_deposit'],
-                    2
-                );
-                if (abs((float) $recon->daily_discrepancy - (float) $row['daily_discrepancy']) >= 0.5
-                    || abs((float) $recon->total_collected - (float) $row['total_collected']) >= 0.5
-                ) {
-                    $recon->daily_discrepancy = $row['daily_discrepancy'];
-                    $recon->total_collected = $row['total_collected'];
-                    $recon->save();
-                }
-            }
+            $row['expected_deposit'] = (float) $recon->total_collected;
+            $row['daily_discrepancy'] = (float) $recon->daily_discrepancy;
             $row['is_closed'] = true;
             $row['notes'] = $recon->notes;
             $row['user_name'] = $recon->user_name;
@@ -260,6 +217,30 @@ class DailyShopReconciliationService
                     Carbon::parse($recon->getRawOriginal('updated_at'))->setTimezone('Asia/Tehran')
                 )->format('Y-m-d H:i:s')
                 : null;
+
+            return $row;
+        }
+
+        // روز بازِ قابل‌ویرایش: فروش زنده فقط برای پیش‌نمایش اختلاف (جزئیات کامل در مودال از show می‌آید)
+        if ($editable) {
+            $metrics = ShopSalesReportService::salesAndProfitForDate($atelierId, $dayCarbon);
+            $tillPaidOut = ShopAccountBalanceService::tillPaidOnDate($atelierId, $dateKey);
+            $row['total_sales'] = (float) $metrics['sales'];
+            $row['gross_sales'] = (float) $metrics['gross_sales'];
+            $row['total_returns'] = (float) $metrics['returns'];
+            $row['card_amount'] = (float) $metrics['card_amount'];
+            $row['cash_amount'] = (float) $metrics['cash_amount'];
+            $row['cash_and_card_total'] = (float) $metrics['cash_and_card_total'];
+            $row['till_paid_out'] = $tillPaidOut;
+            $row['expected_deposit'] = round(max(0, (float) $metrics['total_collected'] - $tillPaidOut), 2);
+            $row['installments_collected'] = (float) $metrics['installments_collected'];
+            $row['total_collected'] = (float) $metrics['total_collected'];
+            $row['discount_given'] = (float) $metrics['discount_given'];
+            $row['credit_used_total'] = (float) $metrics['credit_used_total'];
+            $row['settlement_total'] = (float) $metrics['settlement_total'];
+            $row['debts_collected'] = (float) ($metrics['debts_collected'] ?? 0);
+            $row['uncollected_debts'] = (float) ($metrics['uncollected_debts'] ?? 0);
+            $row['sales_lite'] = false;
         }
 
         return $row;
