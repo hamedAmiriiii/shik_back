@@ -36,6 +36,7 @@ class ProducedGood extends Model
         'note',
         'layer_order',
         'layer_compose',
+        'cover_image_path',
     ];
 
     protected $casts = [
@@ -47,6 +48,52 @@ class ProducedGood extends Model
         'is_final' => 'boolean',
         'display_order' => 'integer',
     ];
+
+    public function getCoverImageUrlAttribute(): ?string
+    {
+        $path = $this->attributes['cover_image_path'] ?? null;
+        if (! $path) {
+            return null;
+        }
+
+        return \Illuminate\Support\Facades\Storage::url($path);
+    }
+
+    /**
+     * عکس نمایشی لیست/سبد: کلی کالا، وگرنه لایهٔ مواد.
+     */
+    public function displayImageUrl(): ?string
+    {
+        $cover = trim((string) ($this->cover_image_url ?? ''));
+        if ($cover !== '') {
+            return $cover;
+        }
+
+        try {
+            $fields = app(\App\Services\ThreedMenuService::class)->catalogFields($this);
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        $layers = array_values(array_filter((array) ($fields['layers'] ?? []), 'is_array'));
+        for ($i = count($layers) - 1; $i >= 0; $i--) {
+            $url = trim((string) ($layers[$i]['image_url'] ?? ''));
+            if ($url !== '') {
+                return $url;
+            }
+        }
+        foreach ((array) ($fields['ingredients'] ?? []) as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $url = trim((string) ($row['image_url'] ?? ''));
+            if ($url !== '') {
+                return $url;
+            }
+        }
+
+        return null;
+    }
 
     public static function hasIsFinalColumn(): bool
     {
@@ -97,6 +144,7 @@ class ProducedGood extends Model
     protected $appends = [
         'sale_price_mode',
         'unit_type',
+        'cover_image_url',
     ];
 
     public function getUnitTypeAttribute(): string

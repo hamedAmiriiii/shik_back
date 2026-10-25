@@ -572,6 +572,8 @@ class CategoryController extends Controller
             $discountAmount = max(0, $original - $salePrice);
             $discountPercent = $original > 0 ? ($discountAmount / $original) * 100 : 0;
 
+            $thumb = $good->displayImageUrl();
+
             return [
                 'id' => $good->id,
                 'item_type' => 'produced_good',
@@ -589,7 +591,8 @@ class CategoryController extends Controller
                 'discount_percent' => round($discountPercent, 2),
                 'discount_amount' => round($discountAmount, 2),
                 'has_discount' => $discountPercent > 0,
-                'images' => [],
+                'image' => $thumb,
+                'images' => $thumb ? [['image_url' => $thumb]] : [],
                 'categories' => $good->categories,
                 'atelier_id' => $good->atelier_id,
             ];

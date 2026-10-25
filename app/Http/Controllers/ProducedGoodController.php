@@ -246,9 +246,101 @@ class ProducedGoodController extends Controller
             }
         }
 
+        $this->removeCoverImageFile($producedGood);
         $producedGood->delete();
 
         return response(['message' => 'کالای تولیدی حذف شد'], 200);
+    }
+
+    /**
+     * عکس کلی کالا (بدون لایه‌های مواد) برای لیست / سبد / کارت منو.
+     * POST /api/produced-goods/{producedGood}/cover-image
+     */
+    public function uploadCoverImage(Request $request, ProducedGood $producedGood, ProducedGoodCostService $costService)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $producedGood);
+
+        if (! Schema::hasColumn('produced_goods', 'cover_image_path')) {
+            return response()->json([
+                'message' => 'ستون cover_image_path وجود ندارد. migration یا SQL مربوط را اجرا کنید.',
+            ], 503);
+        }
+
+        $ext = 'jpeg';
+        $content = null;
+
+        if ($request->hasFile('image')) {
+            $file = $request->file('image');
+            $mime = (string) $file->getMimeType();
+            if (! in_array($mime, ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'], true)) {
+                return response()->json(['message' => 'فرمت عکس باید jpg، png یا webp باشد.'], 422);
+            }
+            $ext = $mime === 'image/png' ? 'png' : ($mime === 'image/webp' ? 'webp' : 'jpeg');
+            $content = file_get_contents($file->getRealPath());
+        } else {
+            $raw = (string) $request->input('image_base64', $request->input('image', ''));
+            if ($raw === '') {
+                return response()->json(['message' => 'فایل عکس را ارسال کنید.'], 422);
+            }
+            if (strpos($raw, ',') !== false) {
+                $header = strtolower(strstr($raw, ',', true) ?: '');
+                $raw = substr($raw, strpos($raw, ',') + 1);
+                if (strpos($header, 'png') !== false) {
+                    $ext = 'png';
+                } elseif (strpos($header, 'webp') !== false) {
+                    $ext = 'webp';
+                } elseif (strpos($header, 'jpeg') === false && strpos($header, 'jpg') === false) {
+                    return response()->json(['message' => 'فرمت عکس باید jpg، png یا webp باشد.'], 422);
+                }
+            }
+            $content = base64_decode($raw, true);
+        }
+
+        if ($content === false || $content === null || $content === '') {
+            return response()->json(['message' => 'عکس نامعتبر است.'], 422);
+        }
+        if (strlen($content) > 5 * 1024 * 1024) {
+            return response()->json(['message' => 'حجم عکس نباید بیشتر از ۵ مگابایت باشد.'], 422);
+        }
+
+        $this->removeCoverImageFile($producedGood);
+
+        $path = \App\Tools\ImageTools::saveFile(
+            "/produced-goods/{$producedGood->id}/cover_".time().".{$ext}",
+            $content
+        );
+        $producedGood->update(['cover_image_path' => $path]);
+
+        return response(
+            $costService->attachCost($this->loadProducedGoodRelations($producedGood->fresh())),
+            200
+        );
+    }
+
+    /**
+     * DELETE /api/produced-goods/{producedGood}/cover-image
+     */
+    public function deleteCoverImage(Request $request, ProducedGood $producedGood, ProducedGoodCostService $costService)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $producedGood);
+
+        if (Schema::hasColumn('produced_goods', 'cover_image_path')) {
+            $this->removeCoverImageFile($producedGood);
+            $producedGood->update(['cover_image_path' => null]);
+        }
+
+        return response(
+            $costService->attachCost($this->loadProducedGoodRelations($producedGood->fresh())),
+            200
+        );
+    }
+
+    private function removeCoverImageFile(ProducedGood $producedGood): void
+    {
+        $path = $producedGood->getAttributes()['cover_image_path'] ?? null;
+        if ($path && \Illuminate\Support\Facades\Storage::exists('public/'.$path)) {
+            \Illuminate\Support\Facades\Storage::delete('public/'.$path);
+        }
     }
 
     public function produce(Request $request, ProducedGood $producedGood, RawMaterialFifoService $fifo)

@@ -362,6 +362,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::put('raw-materials/{rawMaterial}/lots/{lot}', [\App\Http\Controllers\RawMaterialController::class, 'updateLot']);
     Route::delete('raw-materials/{rawMaterial}/lots/{lot}', [\App\Http\Controllers\RawMaterialController::class, 'destroyLot']);
     Route::resource('produced-goods', \App\Http\Controllers\ProducedGoodController::class)->except(['create', 'edit']);
+    Route::post('produced-goods/{producedGood}/cover-image', [\App\Http\Controllers\ProducedGoodController::class, 'uploadCoverImage']);
+    Route::delete('produced-goods/{producedGood}/cover-image', [\App\Http\Controllers\ProducedGoodController::class, 'deleteCoverImage']);
     Route::post('produced-goods/{producedGood}/produce', [\App\Http\Controllers\ProducedGoodController::class, 'produce']);
     Route::get('produced-goods/{producedGood}/productions', [\App\Http\Controllers\ProducedGoodController::class, 'productions']);
     Route::delete('produced-goods/{producedGood}/productions/{production}', [\App\Http\Controllers\ProducedGoodController::class, 'destroyProduction']);

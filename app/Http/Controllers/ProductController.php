@@ -1690,7 +1690,8 @@ class ProductController extends Controller
         $unitProfit = $salePrice - $purchasePrice;
 
         $threed = $this->threedMenuFields($good);
-        $thumb = $this->producedGoodThumbUrl($threed);
+        $cover = trim((string) ($good->cover_image_url ?? ''));
+        $thumb = $cover !== '' ? $cover : $this->producedGoodThumbUrl($threed);
 
         return array_merge($threed, [
             'id' => $good->id,
@@ -1727,7 +1728,7 @@ class ProductController extends Controller
     }
 
     /**
-     * تصویر بندانگشتی کالای تولیدی برای سبد/لیست: لایهٔ پایه یا اولین مادهٔ دارای عکس.
+     * تصویر بندانگشتی از لایه‌های مواد (وقتی عکس کلی کالا نباشد).
      *
      * @param  array<string, mixed>  $threed
      */

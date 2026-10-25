@@ -39,6 +39,8 @@ class PosCatalogController extends Controller
                     $costService->attachCost($good, 1.0, true);
                 })
                 ->map(function (ProducedGood $good) {
+                    $thumb = $good->displayImageUrl();
+
                     return [
                         'id' => $good->id,
                         'item_type' => 'produced_good',
@@ -51,6 +53,9 @@ class PosCatalogController extends Controller
                         'stock_kg' => (float) $good->stock_kg,
                         'unit_type' => $good->unitType(),
                         'stock_sufficient' => (bool) $good->stock_sufficient,
+                        'image' => $thumb,
+                        'cover_image_url' => $good->cover_image_url,
+                        'images' => $thumb ? [['image_url' => $thumb]] : [],
                     ];
                 })
                 ->values();
