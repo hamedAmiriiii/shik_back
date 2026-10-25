@@ -467,10 +467,12 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('shop-partners', [\App\Http\Controllers\ShopPartnerController::class, 'index']);
     Route::post('shop-partners', [\App\Http\Controllers\ShopPartnerController::class, 'store']);
     Route::get('shop-partners/profit-preview', [\App\Http\Controllers\ShopPartnerController::class, 'profitPreview']);
+    Route::get('shop-partners/activity-log', [\App\Http\Controllers\ShopPartnerController::class, 'activityLog']);
     Route::post('shop-partners/settle', [\App\Http\Controllers\ShopPartnerController::class, 'settle']);
     Route::get('shop-partners/settlements', [\App\Http\Controllers\ShopPartnerController::class, 'settlements']);
     Route::get('shop-partners/settlements/{settlement}', [\App\Http\Controllers\ShopPartnerController::class, 'showSettlement']);
     Route::delete('shop-partners/settlements/{settlement}', [\App\Http\Controllers\ShopPartnerController::class, 'destroySettlement']);
+    Route::post('shop-partners/{shopPartner}/settle-profit', [\App\Http\Controllers\ShopPartnerController::class, 'settlePartner']);
     Route::put('shop-partners/{shopPartner}', [\App\Http\Controllers\ShopPartnerController::class, 'update']);
     Route::delete('shop-partners/{shopPartner}', [\App\Http\Controllers\ShopPartnerController::class, 'destroy']);
 

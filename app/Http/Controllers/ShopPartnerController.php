@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ShopPartner;
+use App\Models\ShopPartnerActivityLog;
 use App\Models\ShopPartnerSettlement;
 use App\Services\AccountingPartnerSettlementPoster;
 use App\Services\ShopPartnerService;
@@ -58,9 +59,30 @@ class ShopPartnerController extends Controller
             'notes' => $fields['notes'] ?? null,
         ]);
 
+        $serialized = ShopPartnerService::serializePartner($partner);
+        $shares = ShopPartnerService::shareSnapshot($atelierId);
+        $actor = $this->settlementActor($request);
+        ShopPartnerActivityLog::record([
+            'atelier_id' => $atelierId,
+            'action' => ShopPartnerActivityLog::ACTION_PARTNER_CREATE,
+            'user_id' => $actor['user_id'],
+            'user_name' => $actor['user_name'],
+            'partner_id' => (int) $partner->id,
+            'message' => sprintf(
+                'ثبت شریک «%s» با سرمایه %s تومان (سهم %s٪)',
+                $serialized['name'],
+                number_format((float) $serialized['capital_amount'], 0),
+                rtrim(rtrim(number_format((float) $serialized['share_percent'], 4, '.', ''), '0'), '.')
+            ),
+            'payload' => [
+                'partner' => $serialized,
+                'shares_after' => $shares,
+            ],
+        ]);
+
         return response([
             'message' => 'شریک ثبت شد.',
-            'data' => ShopPartnerService::serializePartner($partner),
+            'data' => $serialized,
         ], 201);
     }
 
@@ -82,6 +104,9 @@ class ShopPartnerController extends Controller
             'notes' => 'nullable|string|max:2000',
         ]);
 
+        $sharesBefore = ShopPartnerService::shareSnapshot($atelierId);
+        $before = ShopPartnerService::serializePartner($shopPartner);
+
         if (isset($fields['name'])) {
             $shopPartner->name = trim($fields['name']);
         }
@@ -99,9 +124,53 @@ class ShopPartnerController extends Controller
         }
         $shopPartner->save();
 
+        $after = ShopPartnerService::serializePartner($shopPartner->fresh());
+        $sharesAfter = ShopPartnerService::shareSnapshot($atelierId);
+        $changes = $this->partnerFieldChanges($before, $after);
+        $actor = $this->settlementActor($request);
+        $messageParts = [];
+        foreach ($changes as $key => $diff) {
+            if ($key === 'capital_amount') {
+                $messageParts[] = sprintf(
+                    'سرمایه %s → %s',
+                    number_format((float) $diff['from'], 0),
+                    number_format((float) $diff['to'], 0)
+                );
+            } elseif ($key === 'share_percent') {
+                $messageParts[] = sprintf('سهم %s٪ → %s٪', $diff['from'], $diff['to']);
+            } elseif ($key === 'is_active') {
+                $messageParts[] = ($diff['to'] ? 'فعال شد' : 'غیرفعال شد');
+            } elseif ($key === 'name') {
+                $messageParts[] = sprintf('نام «%s» → «%s»', $diff['from'], $diff['to']);
+            } elseif ($key === 'phone') {
+                $messageParts[] = 'تغییر موبایل';
+            } elseif ($key === 'notes') {
+                $messageParts[] = 'تغییر یادداشت';
+            }
+        }
+        if ($messageParts === []) {
+            $messageParts[] = 'بدون تغییر مؤثر';
+        }
+
+        ShopPartnerActivityLog::record([
+            'atelier_id' => $atelierId,
+            'action' => ShopPartnerActivityLog::ACTION_PARTNER_UPDATE,
+            'user_id' => $actor['user_id'],
+            'user_name' => $actor['user_name'],
+            'partner_id' => (int) $shopPartner->id,
+            'message' => 'ویرایش «'.$after['name'].'»: '.implode(' · ', $messageParts),
+            'payload' => [
+                'before' => $before,
+                'after' => $after,
+                'changes' => $changes,
+                'shares_before' => $sharesBefore,
+                'shares_after' => $sharesAfter,
+            ],
+        ]);
+
         return response([
             'message' => 'شریک به‌روز شد.',
-            'data' => ShopPartnerService::serializePartner($shopPartner->fresh()),
+            'data' => $after,
         ], 200);
     }
 
@@ -115,7 +184,31 @@ class ShopPartnerController extends Controller
             return response(['message' => 'این شریک متعلق به فروشگاه شما نیست.'], 403);
         }
 
+        $sharesBefore = ShopPartnerService::shareSnapshot($atelierId);
+        $before = ShopPartnerService::serializePartner($shopPartner);
+        $partnerId = (int) $shopPartner->id;
         $shopPartner->delete();
+        $sharesAfter = ShopPartnerService::shareSnapshot($atelierId);
+        $actor = $this->settlementActor($request);
+
+        ShopPartnerActivityLog::record([
+            'atelier_id' => $atelierId,
+            'action' => ShopPartnerActivityLog::ACTION_PARTNER_DELETE,
+            'user_id' => $actor['user_id'],
+            'user_name' => $actor['user_name'],
+            'partner_id' => $partnerId,
+            'message' => sprintf(
+                'حذف شریک «%s» (سرمایه %s · سهم %s٪)',
+                $before['name'],
+                number_format((float) $before['capital_amount'], 0),
+                rtrim(rtrim(number_format((float) $before['share_percent'], 4, '.', ''), '0'), '.')
+            ),
+            'payload' => [
+                'partner' => $before,
+                'shares_before' => $sharesBefore,
+                'shares_after' => $sharesAfter,
+            ],
+        ]);
 
         return response(['message' => 'شریک حذف شد.'], 200);
     }
@@ -151,20 +244,14 @@ class ShopPartnerController extends Controller
             return response(['message' => $accountError], 422);
         }
 
-        $userName = null;
-        try {
-            $user = $this->requireStaffShopUser($request);
-            $userName = trim($user->name.' '.$user->last_name);
-        } catch (\Throwable $e) {
-            /* optional */
-        }
-
+        $actor = $this->settlementActor($request);
         try {
             $settlement = ShopPartnerService::settle($atelierId, [
                 'shop_account_id' => (int) $fields['shop_account_id'],
                 'to' => $fields['to'] ?? null,
                 'notes' => $fields['notes'] ?? null,
-                'user_name' => $userName,
+                'user_name' => $actor['user_name'],
+                'user_id' => $actor['user_id'],
             ]);
         } catch (InvalidArgumentException $e) {
             return response(['message' => $e->getMessage(), 'error' => $e->getMessage()], 422);
@@ -176,6 +263,96 @@ class ShopPartnerController extends Controller
             'message' => 'تقسیم سود ثبت شد و از حساب برداشت شد.',
             'data' => $this->serializeSettlement($settlement),
         ], 201);
+    }
+
+    public function settlePartner(Request $request, ShopPartner $shopPartner)
+    {
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            return response(['message' => 'پرداخت سود فقط با حساب پرسنل فروشگاه امکان‌پذیر است.'], 422);
+        }
+        if ((int) $shopPartner->atelier_id !== (int) $atelierId) {
+            return response(['message' => 'این شریک متعلق به فروشگاه شما نیست.'], 403);
+        }
+
+        $fields = $request->validate([
+            'shop_account_id' => 'required|integer|exists:shop_accounts,id',
+            'to' => 'nullable|date',
+            'notes' => 'nullable|string|max:2000',
+        ]);
+
+        $accountError = $this->paymentAccountError($atelierId, $fields['shop_account_id']);
+        if ($accountError) {
+            return response(['message' => $accountError], 422);
+        }
+
+        $actor = $this->settlementActor($request);
+        try {
+            $settlement = ShopPartnerService::settlePartner($atelierId, (int) $shopPartner->id, [
+                'shop_account_id' => (int) $fields['shop_account_id'],
+                'to' => $fields['to'] ?? null,
+                'notes' => $fields['notes'] ?? null,
+                'user_name' => $actor['user_name'],
+                'user_id' => $actor['user_id'],
+            ]);
+        } catch (InvalidArgumentException $e) {
+            return response(['message' => $e->getMessage(), 'error' => $e->getMessage()], 422);
+        } catch (RuntimeException $e) {
+            return response(['message' => $e->getMessage(), 'error' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'message' => 'پرداخت سود شریک ثبت شد.',
+            'data' => $this->serializeSettlement($settlement),
+        ], 201);
+    }
+
+    /**
+     * @return array{user_id: int|null, user_name: string|null}
+     */
+    protected function settlementActor(Request $request): array
+    {
+        try {
+            $user = $this->requireStaffShopUser($request);
+
+            return [
+                'user_id' => (int) $user->id,
+                'user_name' => trim($user->name.' '.$user->last_name) ?: null,
+            ];
+        } catch (\Throwable $e) {
+            return ['user_id' => null, 'user_name' => null];
+        }
+    }
+
+    protected function settlementActorName(Request $request): ?string
+    {
+        return $this->settlementActor($request)['user_name'];
+    }
+
+    /**
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     * @return array<string, array{from: mixed, to: mixed}>
+     */
+    protected function partnerFieldChanges(array $before, array $after): array
+    {
+        $keys = ['name', 'phone', 'capital_amount', 'share_percent', 'is_active', 'notes'];
+        $changes = [];
+        foreach ($keys as $key) {
+            $from = $before[$key] ?? null;
+            $to = $after[$key] ?? null;
+            if ($key === 'capital_amount' || $key === 'share_percent') {
+                if (round((float) $from, 4) !== round((float) $to, 4)) {
+                    $changes[$key] = ['from' => $from, 'to' => $to];
+                }
+                continue;
+            }
+            if ($from != $to) {
+                $changes[$key] = ['from' => $from, 'to' => $to];
+            }
+        }
+
+        return $changes;
     }
 
     public function settlements(Request $request)
@@ -220,13 +397,59 @@ class ShopPartnerController extends Controller
             return response(['message' => 'این تسویه متعلق به فروشگاه شما نیست.'], 403);
         }
 
-        DB::transaction(function () use ($settlement) {
+        $settlement->load(['lines', 'shopAccount:id,name,type']);
+        $snapshot = $this->serializeSettlement($settlement);
+        $settlementId = (int) $settlement->id;
+        $actor = $this->settlementActor($request);
+        $lineNames = collect($snapshot['lines'] ?? [])->pluck('partner_name')->filter()->implode('، ');
+
+        DB::transaction(function () use ($settlement, $atelierId, $actor, $snapshot, $settlementId, $lineNames) {
             AccountingPartnerSettlementPoster::reverse($settlement);
             $settlement->lines()->delete();
             $settlement->delete();
+
+            ShopPartnerActivityLog::record([
+                'atelier_id' => $atelierId,
+                'action' => ShopPartnerActivityLog::ACTION_SETTLEMENT_DELETE,
+                'user_id' => $actor['user_id'],
+                'user_name' => $actor['user_name'],
+                'settlement_id' => $settlementId,
+                'message' => sprintf(
+                    'حذف تسویه #%d (%s) — %s تومان',
+                    $settlementId,
+                    $lineNames !== '' ? $lineNames : 'بدون خط',
+                    number_format((float) ($snapshot['total_distributed'] ?? 0), 0)
+                ),
+                'payload' => [
+                    'settlement' => $snapshot,
+                ],
+            ]);
         });
 
         return response(['message' => 'تسویه حذف و سند حسابداری برگشت خورد.'], 200);
+    }
+
+    public function activityLog(Request $request)
+    {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        if (! ShopPartnerActivityLog::tableReady()) {
+            return response([
+                'data' => [],
+                'message' => 'جدول لاگ شرکا هنوز ساخته نشده است. SQL را اجرا کنید.',
+            ], 200);
+        }
+
+        $limit = min(200, max(1, (int) $request->input('limit', 100)));
+        $rows = ShopPartnerActivityLog::query()
+            ->forAtelier($atelierId)
+            ->with('user:id,name,last_name')
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get()
+            ->map(fn (ShopPartnerActivityLog $log) => $log->toApiArray())
+            ->values();
+
+        return response(['data' => $rows], 200);
     }
 
     /**
