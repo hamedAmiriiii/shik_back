@@ -113,6 +113,55 @@ class ShopStaffAccess
         return ShopEmployee::where('user_id', $user->id)->first();
     }
 
+    /**
+     * شماره موبایل سازنده/صاحب فروشگاه — نه کارمند و نه حسابدار.
+     * برای پیامک‌های سیستمی (کمبود اعتبار، نتیجهٔ سفارش پکیج پیامک، …).
+     */
+    public static function resolveShopCreatorPhone(int $atelierId): ?string
+    {
+        if ($atelierId <= 0) {
+            return null;
+        }
+
+        $base = User::query()
+            ->where('atelier_id', $atelierId)
+            ->whereNotNull('phone')
+            ->where('phone', '!=', '')
+            ->where(function ($q) {
+                $q->whereNull('shop_staff_role')
+                    ->orWhereNotIn('shop_staff_role', [self::ROLE_STAFF, self::ROLE_AUDITOR]);
+            });
+
+        if (Schema::hasTable('shop_employees') && Schema::hasColumn('shop_employees', 'user_id')) {
+            $base->whereNotExists(function ($sub) {
+                $sub->selectRaw('1')
+                    ->from('shop_employees')
+                    ->whereColumn('shop_employees.user_id', 'users.id');
+            });
+        }
+
+        $phone = (clone $base)
+            ->where('shop_staff_role', self::ROLE_OWNER)
+            ->orderBy('id')
+            ->value('phone');
+        if (is_string($phone) && trim($phone) !== '') {
+            return trim($phone);
+        }
+
+        $phone = (clone $base)
+            ->whereHas('roles', function ($q) {
+                $q->where('id', User::USER_TYPE_KEY['فروشگاه']);
+            })
+            ->orderBy('id')
+            ->value('phone');
+        if (is_string($phone) && trim($phone) !== '') {
+            return trim($phone);
+        }
+
+        // بدون fallback به کارمند/حسابدار: اگر صاحب پیدا نشد، پیامک نرود
+        return null;
+    }
+
     public static function assertStaffMayLogin(User $user): ?string
     {
         if (! self::isShopStaff($user) || self::isOwner($user)) {

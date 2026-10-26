@@ -145,31 +145,6 @@ class SmsPackageOrderService
 
     protected static function resolveShopOwnerPhone(int $atelierId): ?string
     {
-        $base = User::query()
-            ->where('atelier_id', $atelierId)
-            ->whereNotNull('phone')
-            ->where('phone', '!=', '');
-
-        $phone = (clone $base)
-            ->whereHas('roles', function ($q) {
-                $q->where('id', User::USER_TYPE_KEY['فروشگاه']);
-            })
-            ->orderBy('id')
-            ->value('phone');
-        if (is_string($phone) && $phone !== '') {
-            return $phone;
-        }
-
-        $phone = (clone $base)
-            ->where('shop_staff_role', 'owner')
-            ->orderBy('id')
-            ->value('phone');
-        if (is_string($phone) && $phone !== '') {
-            return $phone;
-        }
-
-        $phone = $base->orderBy('id')->value('phone');
-
-        return is_string($phone) && $phone !== '' ? $phone : null;
+        return ShopStaffAccess::resolveShopCreatorPhone($atelierId);
     }
 }
