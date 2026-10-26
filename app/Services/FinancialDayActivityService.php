@@ -25,9 +25,13 @@ class FinancialDayActivityService
      *   events: array<int, array<string, mixed>>
      * }
      */
-    public static function report(int $atelierId, string $filter = 'today'): array
-    {
-        [$start, $end, $filter] = self::rangeForFilter($filter);
+    public static function report(
+        int $atelierId,
+        string $filter = 'today',
+        ?string $fromJalali = null,
+        ?string $toJalali = null
+    ): array {
+        [$start, $end, $filter] = self::rangeForFilter($filter, $fromJalali, $toJalali);
         $startString = $start->format('Y-m-d H:i:s');
         $endString = $end->format('Y-m-d H:i:s');
         $fromDate = $start->toDateString();
@@ -68,8 +72,23 @@ class FinancialDayActivityService
     /**
      * @return array{0: Carbon, 1: Carbon, 2: string}
      */
-    public static function rangeForFilter(string $filter): array
-    {
+    public static function rangeForFilter(
+        string $filter,
+        ?string $fromJalali = null,
+        ?string $toJalali = null
+    ): array {
+        if ($filter === 'custom' || $fromJalali || $toJalali) {
+            $start = self::parseJalaliDayStart($fromJalali) ?? self::parseJalaliDayStart($toJalali);
+            $end = self::parseJalaliDayEnd($toJalali) ?? self::parseJalaliDayEnd($fromJalali);
+            if ($start && $end) {
+                if ($start->gt($end)) {
+                    [$start, $end] = [$end->copy()->startOfDay(), $start->copy()->endOfDay()];
+                }
+
+                return [$start, $end, 'custom'];
+            }
+        }
+
         $filter = in_array($filter, ['today', 'week', 'month'], true) ? $filter : 'today';
         $now = Jalalian::now();
 
@@ -99,6 +118,47 @@ class FinancialDayActivityService
         $day = Carbon::now('Asia/Tehran');
 
         return [$day->copy()->startOfDay(), $day->copy()->endOfDay(), 'today'];
+    }
+
+    protected static function normalizeJalaliYmd(?string $value): ?string
+    {
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return null;
+        }
+        $raw = str_replace(['/', '.'], '-', $raw);
+        if (! preg_match('/^\d{4}-\d{1,2}-\d{1,2}$/', $raw)) {
+            return null;
+        }
+        [$y, $m, $d] = array_map('intval', explode('-', $raw));
+
+        return sprintf('%04d-%02d-%02d', $y, $m, $d);
+    }
+
+    protected static function parseJalaliDayStart(?string $value): ?Carbon
+    {
+        $ymd = self::normalizeJalaliYmd($value);
+        if (! $ymd) {
+            return null;
+        }
+        try {
+            return Jalalian::fromFormat('Y-m-d', $ymd)->toCarbon()->startOfDay()->setTimezone('Asia/Tehran');
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    protected static function parseJalaliDayEnd(?string $value): ?Carbon
+    {
+        $ymd = self::normalizeJalaliYmd($value);
+        if (! $ymd) {
+            return null;
+        }
+        try {
+            return Jalalian::fromFormat('Y-m-d', $ymd)->toCarbon()->endOfDay()->setTimezone('Asia/Tehran');
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     /**
