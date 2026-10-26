@@ -123,10 +123,7 @@ class ShopAccountTransactionService
 
             foreach ($rows as $row) {
                 $recon = $row->reconciliation;
-                $date = $recon?->date;
-                $carbon = $date instanceof Carbon
-                    ? $date->copy()->endOfDay()->setTimezone('Asia/Tehran')
-                    : ($date ? Carbon::parse((string) $date, 'Asia/Tehran')->endOfDay() : null);
+                $carbon = self::toTehranEndOfDay($recon?->date);
                 $amount = round((float) $row->amount, 2);
                 if ($amount < 0.01) {
                     continue;
@@ -138,7 +135,7 @@ class ShopAccountTransactionService
                     'in',
                     $amount,
                     'واریز تطبیق روزانه',
-                    $date ? 'تاریخ '.$date->format('Y-m-d') : null,
+                    $carbon ? 'تاریخ '.$carbon->toDateString() : null,
                     $carbon,
                     '/admin/daily-reconciliation'
                 );
@@ -174,10 +171,6 @@ class ShopAccountTransactionService
             if ($amount < 0.01) {
                 continue;
             }
-            $date = $recon->date;
-            $carbon = $date instanceof Carbon
-                ? $date->copy()->endOfDay()->setTimezone('Asia/Tehran')
-                : Carbon::parse((string) $date, 'Asia/Tehran')->endOfDay();
             $events[] = self::event(
                 'deposit_legacy:'.$recon->id,
                 'deposit',
@@ -186,7 +179,7 @@ class ShopAccountTransactionService
                 $amount,
                 'واریز تطبیق روزانه (قدیمی)',
                 null,
-                $carbon,
+                self::toTehranEndOfDay($recon->date),
                 '/admin/daily-reconciliation'
             );
         }
@@ -580,8 +573,8 @@ class ShopAccountTransactionService
             }
             $direction = $signed >= 0 ? 'in' : 'out';
             $carbon = $row->created_at?->timezone('Asia/Tehran');
-            if (! $carbon && $row->date) {
-                $carbon = Carbon::parse($row->date->format('Y-m-d'), 'Asia/Tehran')->endOfDay();
+            if (! $carbon) {
+                $carbon = self::toTehranEndOfDay($row->date);
             }
             $events[] = self::event(
                 'adjust:'.$row->id,
@@ -596,6 +589,28 @@ class ShopAccountTransactionService
                 $signed
             );
         }
+    }
+
+    /**
+     * تاریخ مدل/رشته را به Carbon پایان‌روز تهران تبدیل می‌کند.
+     */
+    protected static function toTehranEndOfDay($date): ?Carbon
+    {
+        if ($date instanceof Carbon) {
+            return $date->copy()->endOfDay()->setTimezone('Asia/Tehran');
+        }
+        if ($date instanceof \DateTimeInterface) {
+            return Carbon::instance($date)->endOfDay()->setTimezone('Asia/Tehran');
+        }
+        if (is_string($date) && trim($date) !== '') {
+            try {
+                return Carbon::parse($date, 'Asia/Tehran')->endOfDay();
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -616,6 +631,8 @@ class ShopAccountTransactionService
         $carbon = null;
         if ($at instanceof Carbon) {
             $carbon = $at->copy()->setTimezone('Asia/Tehran');
+        } elseif ($at instanceof \DateTimeInterface) {
+            $carbon = Carbon::instance($at)->setTimezone('Asia/Tehran');
         } elseif (is_string($at) && $at !== '') {
             try {
                 $carbon = Carbon::parse($at, 'Asia/Tehran');
