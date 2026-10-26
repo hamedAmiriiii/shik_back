@@ -32,7 +32,7 @@ class ShopAccountTransactionService
      *   events: array<int, array<string, mixed>>
      * }
      */
-    public static function history(ShopAccount $account, int $limit = 500): array
+    public static function history(ShopAccount $account, int $limit = 30, int $offset = 0): array
     {
         $atelierId = (int) $account->atelier_id;
         $accountId = (int) $account->id;
@@ -74,12 +74,13 @@ class ShopAccountTransactionService
         }
         unset($event);
 
-        if (count($events) > $limit) {
-            $events = array_slice($events, -$limit);
-        }
-
-        // نمایش از جدید به قدیم
+        // نمایش از جدید به قدیم + صفحه‌بندی
         $events = array_reverse($events);
+        $total = count($events);
+        $offset = max(0, $offset);
+        $limit = max(1, $limit);
+        $page = array_slice($events, $offset, $limit);
+        $hasMore = ($offset + count($page)) < $total;
 
         $breakdown = ShopAccountBalanceService::breakdown($atelierId, [$accountId]);
         $currentBalance = (float) ($breakdown[$accountId]['balance'] ?? 0);
@@ -97,11 +98,17 @@ class ShopAccountTransactionService
                 'in_total' => $inTotal,
                 'out_total' => $outTotal,
                 'net' => round($inTotal - $outTotal, 2),
-                'events_count' => count($events),
+                'events_count' => $total,
                 'computed_balance' => $running,
                 'current_balance' => round($currentBalance, 2),
             ],
-            'events' => array_values($events),
+            'pagination' => [
+                'limit' => $limit,
+                'offset' => $offset,
+                'total' => $total,
+                'has_more' => $hasMore,
+            ],
+            'events' => array_values($page),
         ];
     }
 

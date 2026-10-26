@@ -27,6 +27,8 @@ class SmsGatewayConfig
 
     public const KEY_MELI_LOW_QUOTA_BODY_ID = 'melipayamak_low_quota_body_id';
 
+    public const KEY_MELI_WELCOME_BODY_ID = 'melipayamak_welcome_body_id';
+
     public const KEY_MELI_PURCHASE_BODY_ID = 'melipayamak_purchase_body_id';
 
     public const KEY_MELI_CATEGORY_RESTOCK_BODY_ID = 'melipayamak_category_restock_body_id';
@@ -123,6 +125,12 @@ class SmsGatewayConfig
         return self::melipayamakBodyId(self::KEY_MELI_LOW_QUOTA_BODY_ID, 'low_quota_body_id');
     }
 
+    /** پترن خوش‌آمد باشگاه: به باشگاه مشتریان {0} خوش آمدید */
+    public static function melipayamakWelcomeBodyId(): ?int
+    {
+        return self::melipayamakBodyId(self::KEY_MELI_WELCOME_BODY_ID, 'welcome_body_id');
+    }
+
     /** پترن تشکر از خرید: {0} با تشکر از خرید شما */
     public static function melipayamakPurchaseBodyId(): ?int
     {
@@ -192,6 +200,7 @@ class SmsGatewayConfig
                 'otp_vars_mode' => self::melipayamakOtpVarsMode(),
                 'credit_body_id' => self::melipayamakCreditBodyId(),
                 'low_quota_body_id' => self::melipayamakLowQuotaBodyId(),
+                'welcome_body_id' => self::melipayamakWelcomeBodyId(),
                 'purchase_body_id' => self::melipayamakPurchaseBodyId(),
                 'category_restock_body_id' => self::melipayamakCategoryRestockBodyId(),
                 'category_link_body_id' => self::melipayamakCategoryLinkBodyId(),
@@ -247,6 +256,11 @@ class SmsGatewayConfig
             if (array_key_exists('melipayamak_low_quota_body_id', $input)) {
                 $id = trim((string) $input['melipayamak_low_quota_body_id']);
                 Setting::set(self::KEY_MELI_LOW_QUOTA_BODY_ID, $id === '' ? '' : (string) (int) $id);
+            }
+
+            if (array_key_exists('melipayamak_welcome_body_id', $input)) {
+                $id = trim((string) $input['melipayamak_welcome_body_id']);
+                Setting::set(self::KEY_MELI_WELCOME_BODY_ID, $id === '' ? '' : (string) (int) $id);
             }
 
             if (array_key_exists('melipayamak_purchase_body_id', $input)) {

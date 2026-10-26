@@ -68,16 +68,8 @@ class CustomerController extends Controller
         $smsQuotaExhausted = false;
         $shopBrand = SmsTools::shopSmsBrand($atelierId);
         if ($userShiksho->wasRecentlyCreated) {
-            $welcomeMessage = "به باشگاه مشتریان {$shopBrand} خوش آمدید";
             try {
-                SmsTools::sendShopSms(
-                    $validated['phone'],
-                    $welcomeMessage,
-                    null,
-                    null,
-                    'customer_register',
-                    $atelierId
-                );
+                SmsTools::sendCustomerWelcomeSms($validated['phone'], $atelierId);
                 $smsSent = true;
             } catch (\App\Exceptions\InsufficientShopSmsQuotaException $e) {
                 $smsSent = false;

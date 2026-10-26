@@ -313,11 +313,13 @@ class ShopAccountController extends Controller
         }
 
         $fields = $request->validate([
-            'limit' => 'sometimes|integer|min:50|max:2000',
+            'limit' => 'sometimes|integer|min:1|max:2000',
+            'offset' => 'sometimes|integer|min:0|max:100000',
         ]);
-        $limit = (int) ($fields['limit'] ?? 500);
+        $limit = (int) ($fields['limit'] ?? 30);
+        $offset = (int) ($fields['offset'] ?? 0);
 
-        return response(ShopAccountTransactionService::history($shopAccount, $limit), 200);
+        return response(ShopAccountTransactionService::history($shopAccount, $limit, $offset), 200);
     }
 
     /**

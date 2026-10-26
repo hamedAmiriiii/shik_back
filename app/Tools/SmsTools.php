@@ -204,6 +204,37 @@ class SmsTools
     }
 
     /**
+     * پیامک خوش‌آمد ثبت در باشگاه مشتریان.
+     * الگوی ۵۶۸۹۵۳: به باشگاه مشتریان {0} خوش آمدید
+     */
+    public static function sendCustomerWelcomeSms(
+        string $phone,
+        ?int $atelierId = null
+    ) {
+        $shopName = self::shopSmsBrand($atelierId);
+        $message = "به باشگاه مشتریان {$shopName} خوش آمدید";
+
+        $bodyId = SmsGatewayConfig::isMelipayamak()
+            ? SmsGatewayConfig::melipayamakWelcomeBodyId()
+            : null;
+
+        if ($bodyId !== null) {
+            return self::dispatchShopPattern(
+                $phone,
+                $message,
+                [$shopName],
+                $bodyId,
+                null,
+                null,
+                'customer_register',
+                $atelierId
+            );
+        }
+
+        return self::sendShopSms($phone, $message, null, null, 'customer_register', $atelierId);
+    }
+
+    /**
      * پیامک تشکر از خرید.
      * الگوی ۵۶۶۹۰۳: {0} با تشکر از خرید شما
      */
