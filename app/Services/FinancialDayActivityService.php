@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Schema;
 use Morilog\Jalali\Jalalian;
 
 /**
- * اتفاقات مالی بازه (روز / هفته / ماه): دریافتی و پرداختی با تفکیک نقد، کارت، ترکیبی، نسیه، چک.
+ * رویدادهای مالی بازه (روز / هفته / ماه): دریافتی و پرداختی با تفکیک نقد، کارت، ترکیبی، نسیه، چک.
  */
 class FinancialDayActivityService
 {

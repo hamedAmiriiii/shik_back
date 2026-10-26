@@ -9,7 +9,7 @@ use Illuminate\Validation\Rule;
 class FinancialDayActivityController extends Controller
 {
     /**
-     * اتفاقات مالی روز / هفته / ماه / بازه دلخواه
+     * رویدادهای مالی روز / هفته / ماه / بازه دلخواه
      * GET /api/financial-day-activity?filter=today|week|month|custom
      * &from_date=1405-08-03&to_date=1405-08-10  (شمسی Y-m-d)
      */

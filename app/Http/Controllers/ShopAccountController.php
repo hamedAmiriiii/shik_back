@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\ShopAccount;
 use App\Models\ShopAccountBalanceAdjustment;
+use App\Models\ShopAccountTransfer;
 use App\Services\ChartOfAccountsSeeder;
 use App\Services\ShopAccountBalanceService;
+use App\Services\ShopAccountTransactionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
@@ -297,6 +299,192 @@ class ShopAccountController extends Controller
         })->values();
 
         return response(['data' => $rows], 200);
+    }
+
+    /**
+     * گردش کامل ورودی/خروجی یک حساب.
+     * GET /api/shop-accounts/{shopAccount}/transactions
+     */
+    public function transactions(Request $request, ShopAccount $shopAccount)
+    {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+        if ((int) $shopAccount->atelier_id !== $atelierId) {
+            return response(['message' => 'یافت نشد'], 404);
+        }
+
+        $fields = $request->validate([
+            'limit' => 'sometimes|integer|min:50|max:2000',
+        ]);
+        $limit = (int) ($fields['limit'] ?? 500);
+
+        return response(ShopAccountTransactionService::history($shopAccount, $limit), 200);
+    }
+
+    /**
+     * لاگ تراکنش‌های تنخواه: شارژ + اصلاح دستی موجودی.
+     * GET /api/shop-accounts/petty-cash-transactions?limit=100&shop_account_id=
+     */
+    public function pettyCashTransactions(Request $request)
+    {
+        $atelierId = $this->shopAtelierIdOrAbort($request);
+
+        $fields = $request->validate([
+            'shop_account_id' => 'sometimes|integer|min:1',
+            'limit' => 'sometimes|integer|min:1|max:500',
+        ]);
+
+        $limit = (int) ($fields['limit'] ?? 100);
+        $accountId = isset($fields['shop_account_id']) ? (int) $fields['shop_account_id'] : 0;
+        $events = [];
+
+        if (Schema::hasTable('shop_account_balance_adjustments')) {
+            $adjustQuery = ShopAccountBalanceAdjustment::query()
+                ->forAtelier($atelierId)
+                ->with(['shopAccount' => fn ($q) => $q->select('id', 'name', 'type')])
+                ->orderByDesc('id')
+                ->limit($limit);
+
+            if ($accountId > 0) {
+                $adjustQuery->where('shop_account_id', $accountId);
+            } elseif (ShopAccount::supportsTypes()) {
+                $adjustQuery->whereHas('shopAccount', function ($q) {
+                    $q->where('type', ShopAccount::TYPE_PETTY_CASH);
+                });
+            }
+
+            foreach ($adjustQuery->get() as $row) {
+                $account = $row->shopAccount;
+                $createdAt = $row->created_at;
+                $createdJalali = null;
+                $sortAt = $createdAt ? $createdAt->getTimestamp() : 0;
+                if ($createdAt) {
+                    try {
+                        $createdJalali = Jalalian::fromDateTime($createdAt)->format('Y/m/d H:i');
+                    } catch (\Throwable $e) {
+                        $createdJalali = null;
+                    }
+                }
+                $date = $row->date;
+                $dateJalali = null;
+                if ($date) {
+                    try {
+                        $dateJalali = Jalalian::fromDateTime($date)->format('Y/m/d');
+                    } catch (\Throwable $e) {
+                        $dateJalali = null;
+                    }
+                }
+
+                $events[] = [
+                    'id' => 'adjust:'.$row->id,
+                    'kind' => 'adjust',
+                    'kind_label' => 'اصلاح موجودی',
+                    'shop_account_id' => (int) $row->shop_account_id,
+                    'account_name' => $account?->name ?? ('تنخواه #'.$row->shop_account_id),
+                    'account_type' => $account?->type ?: ShopAccount::TYPE_PETTY_CASH,
+                    'account_type_label' => $account ? $account->typeLabel() : 'تنخواه',
+                    'amount' => round((float) $row->amount, 2),
+                    'balance_before' => $row->balance_before !== null ? round((float) $row->balance_before, 2) : null,
+                    'balance_after' => $row->balance_after !== null ? round((float) $row->balance_after, 2) : null,
+                    'counterparty_name' => null,
+                    'title' => null,
+                    'date' => $date ? $date->format('Y-m-d') : null,
+                    'date_jalali' => $dateJalali,
+                    'description' => $row->description,
+                    'user_name' => $row->user_name,
+                    'created_at' => $createdAt ? $createdAt->toIso8601String() : null,
+                    'created_at_jalali' => $createdJalali,
+                    '_sort' => $sortAt * 1000 + (int) $row->id,
+                ];
+            }
+        }
+
+        if (Schema::hasTable('shop_account_transfers')) {
+            $transferQuery = ShopAccountTransfer::query()
+                ->forAtelier($atelierId)
+                ->with([
+                    'fromAccount:id,name,type',
+                    'toAccount:id,name,type',
+                ])
+                ->orderByDesc('id')
+                ->limit($limit);
+
+            if ($accountId > 0) {
+                $transferQuery->where('to_shop_account_id', $accountId);
+            } elseif (ShopAccount::supportsTypes()) {
+                $transferQuery->whereHas('toAccount', function ($q) {
+                    $q->where('type', ShopAccount::TYPE_PETTY_CASH);
+                });
+            }
+
+            foreach ($transferQuery->get() as $transfer) {
+                $to = $transfer->toAccount;
+                $from = $transfer->fromAccount;
+                $rawCreated = $transfer->getAttributes()['created_at'] ?? null;
+                $sortAt = 0;
+                $createdJalali = null;
+                $createdIso = null;
+                if ($rawCreated) {
+                    try {
+                        $carbon = \Carbon\Carbon::parse($rawCreated)->setTimezone('Asia/Tehran');
+                        $sortAt = $carbon->getTimestamp();
+                        $createdJalali = Jalalian::fromCarbon($carbon)->format('Y/m/d H:i');
+                        $createdIso = $carbon->toIso8601String();
+                    } catch (\Throwable $e) {
+                        $createdJalali = is_string($transfer->created_at) ? $transfer->created_at : null;
+                    }
+                }
+                $rawDate = $transfer->getAttributes()['date'] ?? null;
+                $dateJalali = null;
+                $dateGregorian = null;
+                if ($rawDate) {
+                    try {
+                        $dateCarbon = \Carbon\Carbon::parse($rawDate);
+                        $dateGregorian = $dateCarbon->format('Y-m-d');
+                        $dateJalali = Jalalian::fromDateTime($dateCarbon)->format('Y/m/d');
+                    } catch (\Throwable $e) {
+                        $dateJalali = is_string($transfer->date) ? str_replace('-', '/', (string) $transfer->date) : null;
+                    }
+                }
+
+                $title = trim((string) ($transfer->title ?? ''));
+                $desc = trim((string) ($transfer->description ?? ''));
+                $fromName = $from?->name;
+
+                $events[] = [
+                    'id' => 'charge:'.$transfer->id,
+                    'kind' => 'charge',
+                    'kind_label' => 'شارژ',
+                    'shop_account_id' => (int) $transfer->to_shop_account_id,
+                    'account_name' => $to?->name ?? ('تنخواه #'.$transfer->to_shop_account_id),
+                    'account_type' => $to?->type ?: ShopAccount::TYPE_PETTY_CASH,
+                    'account_type_label' => $to ? $to->typeLabel() : 'تنخواه',
+                    'amount' => round((float) $transfer->amount, 2),
+                    'balance_before' => null,
+                    'balance_after' => null,
+                    'counterparty_name' => $fromName,
+                    'title' => $title !== '' ? $title : 'شارژ تنخواه',
+                    'date' => $dateGregorian,
+                    'date_jalali' => $dateJalali,
+                    'description' => $desc !== '' ? $desc : null,
+                    'user_name' => $transfer->user_name,
+                    'created_at' => $createdIso,
+                    'created_at_jalali' => $createdJalali,
+                    '_sort' => $sortAt * 1000 + (int) $transfer->id,
+                ];
+            }
+        }
+
+        usort($events, function (array $a, array $b) {
+            return ($b['_sort'] ?? 0) <=> ($a['_sort'] ?? 0);
+        });
+
+        $events = array_slice($events, 0, $limit);
+        foreach ($events as &$event) {
+            unset($event['_sort']);
+        }
+        unset($event);
+
+        return response(['data' => array_values($events)], 200);
     }
 
     /**

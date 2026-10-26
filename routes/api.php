@@ -462,6 +462,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
     Route::get('shop-accounts', [\App\Http\Controllers\ShopAccountController::class, 'index']);
     Route::get('shop-accounts/balance-adjustments', [\App\Http\Controllers\ShopAccountController::class, 'balanceAdjustments']);
+    Route::get('shop-accounts/petty-cash-transactions', [\App\Http\Controllers\ShopAccountController::class, 'pettyCashTransactions']);
+    Route::get('shop-accounts/{shopAccount}/transactions', [\App\Http\Controllers\ShopAccountController::class, 'transactions']);
     Route::post('shop-accounts/set-balances', [\App\Http\Controllers\ShopAccountController::class, 'setBalances']);
     Route::post('shop-accounts', [\App\Http\Controllers\ShopAccountController::class, 'store']);
     Route::put('shop-accounts/{shopAccount}', [\App\Http\Controllers\ShopAccountController::class, 'update']);
