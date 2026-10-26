@@ -15,6 +15,7 @@ use App\Models\ShopAccount;
 use App\Models\ShopAccountBalanceAdjustment;
 use App\Models\ShopAccountTransfer;
 use App\Models\ShopPartnerSettlement;
+use App\Tools\JalaliTools;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Schema;
 use Morilog\Jalali\Jalalian;
@@ -135,7 +136,7 @@ class ShopAccountTransactionService
                     'in',
                     $amount,
                     'واریز تطبیق روزانه',
-                    $carbon ? 'تاریخ '.$carbon->toDateString() : null,
+                    $carbon ? ('تاریخ '.(JalaliTools::format($carbon, 'Y/m/d') ?? $carbon->toDateString())) : null,
                     $carbon,
                     '/admin/daily-reconciliation'
                 );
@@ -593,18 +594,92 @@ class ShopAccountTransactionService
 
     /**
      * تاریخ مدل/رشته را به Carbon پایان‌روز تهران تبدیل می‌کند.
+     * بعضی ردیف‌های قدیمی تطبیق روزانه تاریخ جلالی (مثل 1405-05-06) در ستون date دارند.
      */
     protected static function toTehranEndOfDay($date): ?Carbon
     {
-        if ($date instanceof Carbon) {
-            return $date->copy()->endOfDay()->setTimezone('Asia/Tehran');
-        }
         if ($date instanceof \DateTimeInterface) {
-            return Carbon::instance($date)->endOfDay()->setTimezone('Asia/Tehran');
+            $ymd = $date->format('Y-m-d');
+            $year = (int) $date->format('Y');
+            if (self::looksLikeJalaliYear($year)) {
+                return self::jalaliYmdToTehranEndOfDay($ymd);
+            }
+            $carbon = $date instanceof Carbon ? $date->copy() : Carbon::instance($date);
+
+            return $carbon->endOfDay()->setTimezone('Asia/Tehran');
         }
         if (is_string($date) && trim($date) !== '') {
+            $ymd = self::normalizeYmd($date);
+            if ($ymd) {
+                $year = (int) substr($ymd, 0, 4);
+                if (self::looksLikeJalaliYear($year)) {
+                    return self::jalaliYmdToTehranEndOfDay($ymd);
+                }
+                try {
+                    return Carbon::parse($ymd, 'Asia/Tehran')->endOfDay();
+                } catch (\Throwable $e) {
+                    return null;
+                }
+            }
             try {
                 return Carbon::parse($date, 'Asia/Tehran')->endOfDay();
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    protected static function looksLikeJalaliYear(int $year): bool
+    {
+        // سال شمسی رایج سیستم؛ سال میلادی معتبر خارج از این بازه است
+        return $year >= 1200 && $year <= 1599;
+    }
+
+    protected static function normalizeYmd(string $value): ?string
+    {
+        $raw = trim(str_replace(['/', '.'], '-', $value));
+        if (! preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})/', $raw, $m)) {
+            return null;
+        }
+
+        return sprintf('%04d-%02d-%02d', (int) $m[1], (int) $m[2], (int) $m[3]);
+    }
+
+    protected static function jalaliYmdToTehranEndOfDay(string $ymd): ?Carbon
+    {
+        try {
+            return Jalalian::fromFormat('Y-m-d', $ymd)
+                ->toCarbon()
+                ->endOfDay()
+                ->setTimezone('Asia/Tehran');
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Carbon رویداد: timestamp واقعی، یا تاریخ جلالی ذخیره‌شده در ستون date.
+     */
+    protected static function normalizeEventAt($at): ?Carbon
+    {
+        if ($at instanceof \DateTimeInterface) {
+            $year = (int) $at->format('Y');
+            if (self::looksLikeJalaliYear($year)) {
+                return self::jalaliYmdToTehranEndOfDay($at->format('Y-m-d'));
+            }
+
+            return ($at instanceof Carbon ? $at->copy() : Carbon::instance($at))
+                ->setTimezone('Asia/Tehran');
+        }
+        if (is_string($at) && trim($at) !== '') {
+            $ymd = self::normalizeYmd($at);
+            if ($ymd && self::looksLikeJalaliYear((int) substr($ymd, 0, 4))) {
+                return self::jalaliYmdToTehranEndOfDay($ymd);
+            }
+            try {
+                return Carbon::parse($at, 'Asia/Tehran');
             } catch (\Throwable $e) {
                 return null;
             }
@@ -628,19 +703,7 @@ class ShopAccountTransactionService
         ?string $href,
         ?float $signedAmount = null
     ): array {
-        $carbon = null;
-        if ($at instanceof Carbon) {
-            $carbon = $at->copy()->setTimezone('Asia/Tehran');
-        } elseif ($at instanceof \DateTimeInterface) {
-            $carbon = Carbon::instance($at)->setTimezone('Asia/Tehran');
-        } elseif (is_string($at) && $at !== '') {
-            try {
-                $carbon = Carbon::parse($at, 'Asia/Tehran');
-            } catch (\Throwable $e) {
-                $carbon = null;
-            }
-        }
-
+        $carbon = self::normalizeEventAt($at);
         $signed = $signedAmount ?? ($direction === 'in' ? $amount : -$amount);
 
         return [
@@ -653,9 +716,9 @@ class ShopAccountTransactionService
             'title' => $title,
             'description' => $description,
             'at' => $carbon ? $carbon->toDateTimeString() : null,
-            'at_jalali' => $carbon ? Jalalian::fromCarbon($carbon)->format('Y/m/d H:i') : null,
+            'at_jalali' => JalaliTools::format($carbon, 'Y/m/d H:i'),
             'date' => $carbon ? $carbon->toDateString() : null,
-            'date_jalali' => $carbon ? Jalalian::fromCarbon($carbon)->format('Y/m/d') : null,
+            'date_jalali' => JalaliTools::format($carbon, 'Y/m/d'),
             'href' => $href,
             'balance_after' => null,
         ];
