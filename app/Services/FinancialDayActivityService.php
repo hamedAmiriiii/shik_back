@@ -198,6 +198,7 @@ class FinancialDayActivityService
             $card = round((float) ($purchase->card_amount ?? 0), 2);
             $type = (string) ($purchase->payment_type ?? 'cash');
             $phone = trim((string) ($purchase->phone ?? ''));
+            $party = self::partyFromPhone($phone);
             $titleBase = $phone !== '' ? 'فروش '.$phone : 'فروش #'.$purchase->id;
             $at = optional($purchase->created_at)?->timezone('Asia/Tehran');
 
@@ -213,7 +214,8 @@ class FinancialDayActivityService
                     0,
                     0,
                     $at,
-                    '/admin/purchas'
+                    '/admin/purchas',
+                    $party
                 );
                 continue;
             }
@@ -230,7 +232,8 @@ class FinancialDayActivityService
                     $cash,
                     $card,
                     $at,
-                    '/admin/cheques'
+                    '/admin/cheques',
+                    $party
                 );
                 if ($cash + $card >= 0.01) {
                     $method = self::cashCardMethod($cash, $card);
@@ -245,7 +248,8 @@ class FinancialDayActivityService
                         $cash,
                         $card,
                         $at,
-                        '/admin/purchas'
+                        '/admin/purchas',
+                        $party
                     );
                 }
                 continue;
@@ -266,7 +270,8 @@ class FinancialDayActivityService
                         $cash,
                         $card,
                         $at,
-                        '/admin/installments'
+                        '/admin/installments',
+                        $party
                     );
                 }
                 $events[] = self::event(
@@ -280,7 +285,8 @@ class FinancialDayActivityService
                     $cash,
                     $card,
                     $at,
-                    '/admin/installments'
+                    '/admin/installments',
+                    $party
                 );
                 continue;
             }
@@ -303,7 +309,8 @@ class FinancialDayActivityService
                 $cash,
                 $card,
                 $at,
-                '/admin/purchas'
+                '/admin/purchas',
+                $party
             );
         }
     }
@@ -358,7 +365,8 @@ class FinancialDayActivityService
                     $cash,
                     $card,
                     optional($payment->paid_at)?->timezone('Asia/Tehran'),
-                    $phone !== '' ? '/admin/purchas/customer/'.$phone : '/admin/purchase-debts'
+                    $phone !== '' ? '/admin/purchas/customer/'.$phone : '/admin/purchase-debts',
+                    self::partyFromPhone($phone)
                 );
             }
         }
@@ -394,7 +402,8 @@ class FinancialDayActivityService
                 $cash,
                 $card,
                 optional($purchase->debt_settled_at)?->timezone('Asia/Tehran'),
-                $phone !== '' ? '/admin/purchas/customer/'.$phone : '/admin/purchase-debts'
+                $phone !== '' ? '/admin/purchas/customer/'.$phone : '/admin/purchase-debts',
+                self::partyFromPhone($phone)
             );
         }
     }
@@ -440,7 +449,8 @@ class FinancialDayActivityService
                 $amount,
                 0,
                 optional($row->paid_at)?->timezone('Asia/Tehran'),
-                '/admin/installments'
+                '/admin/installments',
+                self::partyFromPhone($phone)
             );
         }
     }
@@ -473,18 +483,20 @@ class FinancialDayActivityService
                 continue;
             }
             $received = $cheque->type === Cheque::TYPE_RECEIVED;
+            $payee = trim((string) ($cheque->payee ?: ($cheque->title ?: '')));
             $events[] = self::event(
                 'cheque_clear_'.$cheque->id,
                 $received ? 'in' : 'out',
                 $received ? 'cheque_clear_in' : 'cheque_clear_out',
                 'cheque',
                 ($received ? 'وصول چک دریافتی' : 'وصول چک صادره').' — '.$cheque->cheque_number,
-                trim(($cheque->bank_name ? $cheque->bank_name.' · ' : '').($cheque->payee ?: ($cheque->title ?: ''))),
+                trim(($cheque->bank_name ? $cheque->bank_name.' · ' : '').$payee),
                 $amount,
                 $received ? $amount : 0,
                 0,
                 optional($cheque->cleared_at)?->timezone('Asia/Tehran'),
-                '/admin/cheques'
+                '/admin/cheques',
+                $payee !== '' ? $payee : null
             );
         }
 
@@ -503,6 +515,7 @@ class FinancialDayActivityService
             if ($amount < 0.01) {
                 continue;
             }
+            $payee = trim((string) ($cheque->payee ?: ($cheque->title ?: '')));
             $events[] = self::event(
                 'cheque_transfer_'.$cheque->id,
                 'out',
@@ -514,7 +527,8 @@ class FinancialDayActivityService
                 0,
                 0,
                 optional($cheque->transferred_at)?->timezone('Asia/Tehran'),
-                '/admin/cheques'
+                '/admin/cheques',
+                $payee !== '' ? $payee : null
             );
         }
     }
@@ -536,8 +550,10 @@ class FinancialDayActivityService
 
         $payments = DocumentPayment::query()
             ->with([
-                'invoice:id,title,amount,date',
-                'expense:id,title,amount,date,type',
+                'invoice:id,title,amount,date,beneficiary_id,user_name',
+                'invoice.beneficiary:id,phone,name',
+                'expense:id,title,amount,date,type,beneficiary_id,user_name',
+                'expense.beneficiary:id,phone,name',
                 'shopAccount:id,name',
                 'cheque:id,cheque_number,status',
             ])
@@ -607,7 +623,8 @@ class FinancialDayActivityService
                 $method === 'cash' ? $amount : 0,
                 0,
                 $at,
-                $isInvoice ? '/admin/invoices' : '/admin/expenses'
+                $isInvoice ? '/admin/invoices' : '/admin/expenses',
+                self::partyFromDocument($doc)
             );
         }
     }
@@ -622,6 +639,7 @@ class FinancialDayActivityService
         string $toDate
     ): void {
         $expenses = Expense::query()
+            ->with(['beneficiary:id,phone,name'])
             ->where('atelier_id', $atelierId)
             ->where('type', 'جاری')
             ->whereDate('date', '>=', $fromDate)
@@ -646,11 +664,13 @@ class FinancialDayActivityService
                 $amount,
                 0,
                 $expense->date ? Carbon::parse($expense->date, 'Asia/Tehran')->endOfDay() : null,
-                '/admin/expenses'
+                '/admin/expenses',
+                self::partyFromDocument($expense)
             );
         }
 
         $invoices = Invoice::query()
+            ->with(['beneficiary:id,phone,name'])
             ->where('atelier_id', $atelierId)
             ->whereDate('date', '>=', $fromDate)
             ->whereDate('date', '<=', $toDate)
@@ -674,7 +694,8 @@ class FinancialDayActivityService
                 $amount,
                 0,
                 $invoice->date ? Carbon::parse($invoice->date, 'Asia/Tehran')->endOfDay() : null,
-                '/admin/invoices'
+                '/admin/invoices',
+                self::partyFromDocument($invoice)
             );
         }
     }
@@ -782,6 +803,35 @@ class FinancialDayActivityService
     /**
      * @return array<string, mixed>
      */
+    /**
+     * نام طرف‌حساب از ذینفع فاکتور/هزینه.
+     */
+    protected static function partyFromDocument($doc): ?string
+    {
+        if (! $doc) {
+            return null;
+        }
+        $beneficiary = $doc->relationLoaded('beneficiary') ? $doc->beneficiary : null;
+        $name = trim((string) ($beneficiary->name ?? ''));
+        if ($name !== '') {
+            return $name;
+        }
+        $phone = trim((string) ($beneficiary->phone ?? ''));
+        if ($phone !== '') {
+            return $phone;
+        }
+        $userName = trim((string) ($doc->user_name ?? ''));
+
+        return $userName !== '' ? $userName : null;
+    }
+
+    protected static function partyFromPhone(?string $phone): ?string
+    {
+        $phone = trim((string) $phone);
+
+        return $phone !== '' ? $phone : null;
+    }
+
     protected static function event(
         string $id,
         string $direction,
@@ -793,7 +843,8 @@ class FinancialDayActivityService
         float $cash,
         float $card,
         $at,
-        ?string $href
+        ?string $href,
+        ?string $party = null
     ): array {
         $carbon = null;
         if ($at instanceof Carbon) {
@@ -806,6 +857,8 @@ class FinancialDayActivityService
             }
         }
 
+        $partyLabel = trim((string) $party);
+
         return [
             'id' => $id,
             'direction' => $direction,
@@ -814,6 +867,7 @@ class FinancialDayActivityService
             'method_label' => self::methodLabel($method),
             'title' => $title,
             'subtitle' => $subtitle,
+            'party' => $partyLabel !== '' ? $partyLabel : null,
             'amount' => round($amount, 2),
             'cash_amount' => round($cash, 2),
             'card_amount' => round($card, 2),
