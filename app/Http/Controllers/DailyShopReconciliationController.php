@@ -205,22 +205,19 @@ class DailyShopReconciliationController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        $shopAccounts = DailyShopReconciliationService::activeAccounts($atelierId);
-        $balances = DailyShopReconciliationService::balancesByAccountId(
+        $jalali = Jalalian::fromCarbon(Carbon::parse($dateKey, 'Asia/Tehran'));
+        $grid = DailyShopReconciliationService::gridForMonth(
             $atelierId,
-            $shopAccounts->pluck('id')->all()
+            (int) $jalali->getYear(),
+            (int) $jalali->getMonth()
         );
+        $row = collect($grid['daily'])->firstWhere('date', $dateKey);
 
         return response([
             'message' => 'تطبیق روز با موفقیت ثبت شد.',
-            'reconciliation' => $recon->fresh(['accountDeposits']),
-            'shop_accounts' => $shopAccounts->map(fn ($a) => [
-                'id' => $a->id,
-                'name' => $a->name,
-                'sort_order' => (int) $a->sort_order,
-                'legacy_slot' => $a->legacy_slot,
-                'balance' => round((float) ($balances[$a->id] ?? 0), 2),
-            ])->values(),
+            'reconciliation' => $recon,
+            'row' => $row,
+            'shop_accounts' => $grid['shop_accounts'] ?? [],
         ], 201);
     }
 
