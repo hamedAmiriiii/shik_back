@@ -134,14 +134,10 @@ class AccountingSalePoster
             return null;
         }
 
+        // مثل فروش: نقد→صندوق، کارت→کارتخوان؛ واریز به حساب بانکی فقط با تطبیق روزانه
         $lines = [];
-        $shopAccountId = (int) ($purchase->settlement_shop_account_id ?? 0);
-        if ($shopAccountId > 0) {
-            AccountingLedger::push($lines, AccountingLedger::shopCashAccountId($atelierId, $shopAccountId), $amount, 0, 'وصول نسیه');
-        } else {
-            AccountingLedger::push($lines, AccountingLedger::mapped($atelierId, 'debt_settle.cash'), $cash, 0, 'وصول نقد نسیه');
-            AccountingLedger::push($lines, AccountingLedger::mapped($atelierId, 'debt_settle.card'), $card, 0, 'وصول کارت نسیه');
-        }
+        AccountingLedger::push($lines, AccountingLedger::mapped($atelierId, 'debt_settle.cash'), $cash, 0, 'وصول نقد نسیه');
+        AccountingLedger::push($lines, AccountingLedger::mapped($atelierId, 'debt_settle.card'), $card, 0, 'وصول کارت نسیه');
         AccountingLedger::push($lines, AccountingLedger::mapped($atelierId, 'debt_settle.ar'), 0, $amount, 'بستن طلب مشتری');
 
         return AccountingVoucherService::post(
@@ -170,14 +166,10 @@ class AccountingSalePoster
             return null;
         }
 
+        // مثل فروش: نقد→صندوق، کارت→کارتخوان؛ حساب انتخاب‌شده فقط مقصد واریز بعد از تطبیق است
         $lines = [];
-        $shopAccountId = (int) ($payment->shop_account_id ?? 0);
-        if ($shopAccountId > 0) {
-            AccountingLedger::push($lines, AccountingLedger::shopCashAccountId($atelierId, $shopAccountId), $amount, 0, 'وصول نسیه');
-        } else {
-            AccountingLedger::push($lines, AccountingLedger::mapped($atelierId, 'debt_payment.cash'), $cash, 0, 'وصول نقد نسیه');
-            AccountingLedger::push($lines, AccountingLedger::mapped($atelierId, 'debt_payment.card'), $card, 0, 'وصول کارت نسیه');
-        }
+        AccountingLedger::push($lines, AccountingLedger::mapped($atelierId, 'debt_payment.cash'), $cash, 0, 'وصول نقد نسیه');
+        AccountingLedger::push($lines, AccountingLedger::mapped($atelierId, 'debt_payment.card'), $card, 0, 'وصول کارت نسیه');
         AccountingLedger::push($lines, AccountingLedger::mapped($atelierId, 'debt_payment.ar'), 0, $amount, 'کاهش طلب مشتری');
 
         return AccountingVoucherService::post(
@@ -203,10 +195,8 @@ class AccountingSalePoster
             return null;
         }
 
-        $shopAccountId = (int) ($cheque->shop_account_id ?? 0);
-        $debitAccountId = $shopAccountId > 0
-            ? AccountingLedger::shopCashAccountId($atelierId, $shopAccountId)
-            : AccountingLedger::mapped($atelierId, 'cheque_clear_received.cash_fallback');
+        // وصول چک دریافتی ابتدا به صندوق می‌رود؛ شارژ حساب بانکی فقط با تطبیق/واریز
+        $debitAccountId = AccountingLedger::mapped($atelierId, 'cheque_clear_received.cash_fallback');
 
         return AccountingVoucherService::post(
             $atelierId,

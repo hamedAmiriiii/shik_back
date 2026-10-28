@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\AccountingAccount;
+use App\Models\AccountingVoucher;
 use App\Models\DailyShopReconciliationAccountDeposit;
 use App\Models\DocumentPayment;
 use App\Models\Expense;
@@ -24,6 +26,7 @@ use Illuminate\Support\Facades\Schema;
  *
  * حساب فروشگاه: واریزهای تطبیق روزانه − شارژ تنخواه − هزینه/فاکتور پرداخت‌شده از آن
  *               − برگشت فروش از حساب − تقسیم سود شرکا + اصلاح مانده واقعی
+ * وصول نسیه و چک دریافتی مستقیم حساب را شارژ نمی‌کنند؛ اول صندوق/کارتخوان، بعد از تطبیق واریز.
  * تنخواه: شارژ دریافتی − هزینه/فاکتور پرداخت‌شده از آن − برگشت/برداشت‌های مشابه + اصلاح مانده
  * صندوق نقد: مانده دفتر حسابداری (۱۱۱۰۱)
  */
@@ -102,6 +105,7 @@ class ShopAccountBalanceService
             }
         }
 
+        // فقط وصول‌های قدیمی که مستقیم به حساب خورده‌اند؛ وصول جدید از صندوق/تطبیق می‌آید.
         foreach (self::receivedChequeClearTotals($atelierId, $accountIds) as $id => $total) {
             if (isset($result[$id])) {
                 $result[$id]['cheque_clears'] = $total;
@@ -540,7 +544,8 @@ class ShopAccountBalanceService
     }
 
     /**
-     * وصول نسیه به حساب بانکی/تنخواه. صندوق از دفتر ۱۱۱۰۱ می‌آید و اینجا جمع نمی‌شود.
+     * وصول نسیهٔ قدیمی که مستقیم به حساب خورده (نه صندوق/کارتخوان).
+     * وصول جدید فقط از واریز تطبیق به موجودی حساب می‌آید.
      *
      * @param  array<int>  $accountIds
      * @return array<int, float>
@@ -566,18 +571,40 @@ class ShopAccountBalanceService
             return [];
         }
 
-        return PurchaseDebtPayment::query()
+        $payments = PurchaseDebtPayment::query()
             ->whereIn('shop_account_id', $nonTillIds)
             ->whereHas('purchase', fn ($q) => $q->where('atelier_id', $atelierId))
-            ->selectRaw('shop_account_id, SUM(COALESCE(card_amount, 0) + COALESCE(cash_amount, 0)) as total')
-            ->groupBy('shop_account_id')
-            ->pluck('total', 'shop_account_id')
-            ->mapWithKeys(fn ($v, $k) => [(int) $k => (float) $v])
-            ->all();
+            ->get(['id', 'shop_account_id', 'card_amount', 'cash_amount']);
+
+        if ($payments->isEmpty()) {
+            return [];
+        }
+
+        $directFilter = self::sourcesThatDebitedShopAccount(
+            $atelierId,
+            AccountingVoucher::SOURCE_DEBT_PAYMENT,
+            $payments->pluck('id')->map(fn ($id) => (int) $id)->all()
+        );
+
+        $totals = [];
+        foreach ($payments as $payment) {
+            $sourceId = (int) $payment->id;
+            $shopAccountId = (int) $payment->shop_account_id;
+            if ($directFilter !== null && ! self::countsAsDirectShopCredit($directFilter, $sourceId, $shopAccountId)) {
+                continue;
+            }
+            $amount = round((float) $payment->card_amount + (float) $payment->cash_amount, 2);
+            if ($amount < 0.01) {
+                continue;
+            }
+            $totals[$shopAccountId] = round(($totals[$shopAccountId] ?? 0) + $amount, 2);
+        }
+
+        return $totals;
     }
 
     /**
-     * وصول چک دریافتی به حساب بانکی/تنخواه (صندوق از دفتر حسابداری می‌آید).
+     * وصول چک دریافتی قدیمی که مستقیم به حساب خورده.
      *
      * @param  array<int>  $accountIds
      * @return array<int, float>
@@ -601,15 +628,100 @@ class ShopAccountBalanceService
             return [];
         }
 
-        return Cheque::query()
+        $cheques = Cheque::query()
             ->where('atelier_id', $atelierId)
             ->where('type', Cheque::TYPE_RECEIVED)
             ->where('status', Cheque::STATUS_CLEARED)
             ->whereIn('shop_account_id', $nonTillIds)
-            ->selectRaw('shop_account_id, SUM(amount) as total')
-            ->groupBy('shop_account_id')
-            ->pluck('total', 'shop_account_id')
-            ->mapWithKeys(fn ($v, $k) => [(int) $k => (float) $v])
-            ->all();
+            ->get(['id', 'shop_account_id', 'amount']);
+
+        if ($cheques->isEmpty()) {
+            return [];
+        }
+
+        $directFilter = self::sourcesThatDebitedShopAccount(
+            $atelierId,
+            AccountingVoucher::SOURCE_CHEQUE_CLEAR,
+            $cheques->pluck('id')->map(fn ($id) => (int) $id)->all()
+        );
+
+        $totals = [];
+        foreach ($cheques as $cheque) {
+            $sourceId = (int) $cheque->id;
+            $shopAccountId = (int) $cheque->shop_account_id;
+            if ($directFilter !== null && ! self::countsAsDirectShopCredit($directFilter, $sourceId, $shopAccountId)) {
+                continue;
+            }
+            $amount = round((float) $cheque->amount, 2);
+            if ($amount < 0.01) {
+                continue;
+            }
+            $totals[$shopAccountId] = round(($totals[$shopAccountId] ?? 0) + $amount, 2);
+        }
+
+        return $totals;
+    }
+
+    /**
+     * @param  array{with_voucher: array<int, true>, shop_debits: array<int, array<int, true>>}  $filter
+     */
+    protected static function countsAsDirectShopCredit(array $filter, int $sourceId, int $shopAccountId): bool
+    {
+        // بدون سند حسابداری: مثل قبل در موجودی حساب می‌ماند
+        if (! isset($filter['with_voucher'][$sourceId])) {
+            return true;
+        }
+
+        // سند قدیمی که مستقیم همان حساب را بدهکار کرده
+        return (bool) ($filter['shop_debits'][$sourceId][$shopAccountId] ?? false);
+    }
+
+    /**
+     * null یعنی جدول اسناد نیست → رفتار قدیمی (همه را در موجودی حساب کن).
+     *
+     * @param  array<int>  $sourceIds
+     * @return array{with_voucher: array<int, true>, shop_debits: array<int, array<int, true>>}|null
+     */
+    protected static function sourcesThatDebitedShopAccount(
+        int $atelierId,
+        string $sourceType,
+        array $sourceIds
+    ): ?array {
+        if ($sourceIds === [] || ! AccountingVoucher::tablesReady()) {
+            return null;
+        }
+
+        $vouchers = AccountingVoucher::query()
+            ->forAtelier($atelierId)
+            ->posted()
+            ->where('source_type', $sourceType)
+            ->whereIn('source_id', $sourceIds)
+            ->with(['lines.account:id,linked_type,linked_id'])
+            ->get(['id', 'source_id']);
+
+        $withVoucher = [];
+        $shopDebits = [];
+        foreach ($vouchers as $voucher) {
+            $sourceId = (int) $voucher->source_id;
+            $withVoucher[$sourceId] = true;
+            foreach ($voucher->lines as $line) {
+                if ((float) $line->debit < 0.01) {
+                    continue;
+                }
+                $account = $line->account;
+                if (
+                    $account
+                    && $account->linked_type === AccountingAccount::LINK_SHOP_ACCOUNT
+                    && (int) $account->linked_id > 0
+                ) {
+                    $shopDebits[$sourceId][(int) $account->linked_id] = true;
+                }
+            }
+        }
+
+        return [
+            'with_voucher' => $withVoucher,
+            'shop_debits' => $shopDebits,
+        ];
     }
 }

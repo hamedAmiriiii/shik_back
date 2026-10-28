@@ -82,7 +82,7 @@ class AccountingPostingMapRegistry
             self::row('income.other_income', 'cheque', 'چک و پیش‌پرداخت', 'درآمد متفرقه چک', $c::CODE_OTHER_INCOME, ''),
             self::row('cheque_clear_issued.payable', 'cheque', 'چک و پیش‌پرداخت', 'وصول چک صادره', $c::CODE_CHEQUE_PAYABLE, ''),
             self::row('cheque_clear_received.cheque_receivable', 'cheque', 'چک و پیش‌پرداخت', 'وصول چک دریافتی', $c::CODE_CHEQUE_RECEIVABLE, ''),
-            self::row('cheque_clear_received.cash_fallback', 'cheque', 'چک و پیش‌پرداخت', 'نقد وصول چک دریافتی', $c::CODE_TILL, 'اگر حساب فروشگاه مشخص نباشد'),
+            self::row('cheque_clear_received.cash_fallback', 'cheque', 'چک و پیش‌پرداخت', 'صندوق تا تطبیق (وصول چک)', $c::CODE_TILL, 'بعد از وصول چک دریافتی؛ واریز به بانک با تطبیق'),
             self::row('cheque_transfer.ap', 'cheque', 'چک و پیش‌پرداخت', 'ظهرنویسی به بدهی', $c::CODE_AP, ''),
             self::row('cheque_transfer.supplier_advance', 'cheque', 'چک و پیش‌پرداخت', 'ظهرنویسی مازاد (پیش‌پرداخت)', $c::CODE_SUPPLIER_ADVANCE, ''),
             self::row('cheque_transfer.cheque_receivable', 'cheque', 'چک و پیش‌پرداخت', 'خروج چک ظهرنویسی', $c::CODE_CHEQUE_RECEIVABLE, ''),
