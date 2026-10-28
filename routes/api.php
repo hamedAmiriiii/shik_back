@@ -354,6 +354,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::post('cheques/{cheque}/transfer', [\App\Http\Controllers\ChequeController::class, 'transfer']);
     Route::post('cheques/{cheque}/untransfer', [\App\Http\Controllers\ChequeController::class, 'untransfer']);
     Route::resource('cheques', \App\Http\Controllers\ChequeController::class)->except(['create', 'edit']);
+
+    // دسته چک (برگه‌های متوالی برای پرداخت چکی)
+    Route::get('cheque-books/{chequeBook}/unused-leaves', [\App\Http\Controllers\ChequeBookController::class, 'unusedLeaves']);
+    Route::post('cheque-books/{chequeBook}/leaves/{leaf}/void', [\App\Http\Controllers\ChequeBookController::class, 'voidLeaf']);
+    Route::resource('cheque-books', \App\Http\Controllers\ChequeBookController::class)->except(['create', 'edit']);
     Route::get('pos-catalog', [\App\Http\Controllers\PosCatalogController::class, 'index']);
     Route::resource('raw-materials', \App\Http\Controllers\RawMaterialController::class)->except(['create', 'edit']);
     Route::post('raw-materials/{rawMaterial}/layer-image', [\App\Http\Controllers\RawMaterialController::class, 'uploadLayerImage']);

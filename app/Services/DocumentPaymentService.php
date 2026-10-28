@@ -49,7 +49,8 @@ class DocumentPaymentService
     {
         $chequeShape = [
             'cheque' => 'nullable|array',
-            'cheque.cheque_number' => 'required_with:cheque|string|max:64',
+            'cheque.cheque_number' => 'nullable|string|max:64',
+            'cheque.cheque_book_leaf_id' => 'nullable|integer',
             'cheque.bank_name' => 'nullable|string|max:255',
             'cheque.payee' => 'nullable|string|max:255',
             'cheque.title' => 'nullable|string|max:255',
@@ -73,7 +74,8 @@ class DocumentPaymentService
             'payments.*.shop_account_id' => 'nullable|integer',
             'payments.*.cheque_id' => 'nullable|integer',
             'payments.*.cheque' => 'nullable|array',
-            'payments.*.cheque.cheque_number' => 'required_with:payments.*.cheque|string|max:64',
+            'payments.*.cheque.cheque_number' => 'nullable|string|max:64',
+            'payments.*.cheque.cheque_book_leaf_id' => 'nullable|integer',
             'payments.*.cheque.bank_name' => 'nullable|string|max:255',
             'payments.*.cheque.payee' => 'nullable|string|max:255',
             'payments.*.cheque.title' => 'nullable|string|max:255',
@@ -1019,11 +1021,30 @@ class DocumentPaymentService
 
     public static function attachIssuedCheque(Model $model, array $chequeFields, string $userName, ?float $amount = null): Cheque
     {
-        $cheque = Cheque::create([
-            'atelier_id' => (int) $model->atelier_id,
+        $atelierId = (int) $model->atelier_id;
+        $leafId = isset($chequeFields['cheque_book_leaf_id']) ? (int) $chequeFields['cheque_book_leaf_id'] : 0;
+        $leaf = null;
+        $chequeNumber = trim((string) ($chequeFields['cheque_number'] ?? ''));
+        $bankName = $chequeFields['bank_name'] ?? null;
+
+        if ($leafId > 0) {
+            $consumed = ChequeBookService::consumeLeaf($atelierId, $leafId);
+            $leaf = $consumed['leaf'];
+            $chequeNumber = $consumed['cheque_number'];
+            if ($bankName === null || $bankName === '') {
+                $bankName = $consumed['bank_name'];
+            }
+        }
+
+        if ($chequeNumber === '') {
+            throw new RuntimeException('شماره چک یا برگه دسته چک الزامی است.');
+        }
+
+        $payload = [
+            'atelier_id' => $atelierId,
             'type' => Cheque::TYPE_ISSUED,
-            'cheque_number' => $chequeFields['cheque_number'],
-            'bank_name' => $chequeFields['bank_name'] ?? null,
+            'cheque_number' => $chequeNumber,
+            'bank_name' => $bankName,
             'payee' => $chequeFields['payee'] ?? null,
             'amount' => $amount !== null ? $amount : $model->amount,
             'issue_date' => $chequeFields['issue_date'] ?? null,
@@ -1036,7 +1057,16 @@ class DocumentPaymentService
             'shop_account_id' => $model->shop_account_id,
             'user_name' => $userName,
             'note' => $chequeFields['note'] ?? null,
-        ]);
+        ];
+        if ($leaf && Schema::hasColumn('cheques', 'cheque_book_leaf_id')) {
+            $payload['cheque_book_leaf_id'] = $leaf->id;
+        }
+
+        $cheque = Cheque::create($payload);
+
+        if ($leaf) {
+            ChequeBookService::markLeafUsed($leaf, $cheque);
+        }
 
         if (Schema::hasColumn($model->getTable(), 'cheque_id') && ! $model->cheque_id) {
             $model->update(['cheque_id' => $cheque->id]);

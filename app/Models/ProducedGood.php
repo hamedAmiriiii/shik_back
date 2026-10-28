@@ -15,6 +15,8 @@ class ProducedGood extends Model
 
     public const UNIT_KG = 'kg';
 
+    public const UNIT_LITER = 'liter';
+
     public const UNIT_PIECE = 'piece';
 
     /** لایه‌ها مثل ساندویچ از نمای کنار روی هم می‌نشینند */
@@ -178,18 +180,43 @@ class ProducedGood extends Model
     }
 
     /**
-     * واحد کالا: kg یا piece. رکوردهای قدیمی کیلو حساب می‌شوند.
+     * واحد کالا: kg، liter یا piece. رکوردهای قدیمی کیلو حساب می‌شوند.
+     * لیتری از نظر محاسبات مصرف مثل کیلویی است (مقدار فرمول ÷ ۱۰۰۰).
      */
     public function unitType(): string
     {
-        return ($this->attributes['unit_type'] ?? null) === self::UNIT_PIECE
-            ? self::UNIT_PIECE
-            : self::UNIT_KG;
+        $value = $this->attributes['unit_type'] ?? null;
+        if ($value === self::UNIT_PIECE) {
+            return self::UNIT_PIECE;
+        }
+        if ($value === self::UNIT_LITER) {
+            return self::UNIT_LITER;
+        }
+
+        return self::UNIT_KG;
     }
 
     public function isPieceUnit(): bool
     {
         return $this->unitType() === self::UNIT_PIECE;
+    }
+
+    public function isLiterUnit(): bool
+    {
+        return $this->unitType() === self::UNIT_LITER;
+    }
+
+    /** برچسب فارسی واحد برای پیام‌ها و UI */
+    public function unitLabelFa(): string
+    {
+        if ($this->isPieceUnit()) {
+            return 'عدد';
+        }
+        if ($this->isLiterUnit()) {
+            return 'لیتر';
+        }
+
+        return 'کیلو';
     }
 
     public function getSalePriceModeAttribute(): string

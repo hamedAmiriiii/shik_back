@@ -463,6 +463,7 @@ class ChequeController extends Controller
         }
 
         \App\Services\AccountingMiscPoster::reverseReceivedCheque($cheque);
+        \App\Services\ChequeBookService::releaseLeafForCheque($cheque);
         $cheque->delete();
 
         return response(['message' => 'چک با موفقیت حذف شد'], 200);

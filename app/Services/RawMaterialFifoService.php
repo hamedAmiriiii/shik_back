@@ -22,7 +22,7 @@ class RawMaterialFifoService
 
     /**
      * مقدار مصرف ماده / کالای تولیدی برای تولید.
-     * کیلویی: مقدار فرمول «گرم در هر واحد کالا» است.
+     * کیلویی / لیتری: مقدار فرمول «گرم (یا میلی‌لیتر) در هر واحد کالا» است و بر ۱۰۰۰ تقسیم می‌شود.
      * تعدادی: مقدار فرمول «عدد در هر واحد کالا» است (بدون تقسیم بر ۱۰۰۰).
      *
      * @param  RawMaterial|ProducedGood|null  $unitSource
@@ -45,11 +45,11 @@ class RawMaterialFifoService
 
     private function unitLabel($unitSource): string
     {
-        if ($unitSource instanceof RawMaterial && $unitSource->isPieceUnit()) {
-            return 'عدد';
+        if ($unitSource instanceof RawMaterial) {
+            return $unitSource->unitLabelFa();
         }
-        if ($unitSource instanceof ProducedGood && $unitSource->isPieceUnit()) {
-            return 'عدد';
+        if ($unitSource instanceof ProducedGood) {
+            return $unitSource->unitLabelFa();
         }
 
         return 'کیلو';

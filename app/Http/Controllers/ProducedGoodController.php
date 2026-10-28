@@ -35,12 +35,8 @@ class ProducedGoodController extends Controller
 
         $query = ProducedGood::query()
             ->where('atelier_id', $atelierId)
-            ->with($with);
-        if (Schema::hasColumn('produced_goods', 'display_order')) {
-            $query->orderBy('display_order')->orderBy('name');
-        } else {
-            $query->orderBy('name');
-        }
+            ->with($with)
+            ->orderByDesc('id');
 
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         if ($searchDataModel) {
@@ -88,7 +84,7 @@ class ProducedGoodController extends Controller
 
         $unitType = $fields['unit_type'] ?? ProducedGood::UNIT_KG;
         $hasUnitColumn = Schema::hasColumn('produced_goods', 'unit_type');
-        if ($unitType === ProducedGood::UNIT_PIECE && ! $hasUnitColumn) {
+        if (in_array($unitType, [ProducedGood::UNIT_PIECE, ProducedGood::UNIT_LITER], true) && ! $hasUnitColumn) {
             return response()->json([
                 'message' => 'ستون unit_type در جدول produced_goods وجود ندارد. migration یا SQL مربوط را اجرا کنید.',
             ], 503);
@@ -483,7 +479,7 @@ class ProducedGoodController extends Controller
         return $request->validate([
             'name' => $nameRule,
             'display_order' => 'nullable|integer|min:0|max:9999',
-            'unit_type' => ['sometimes', Rule::in([ProducedGood::UNIT_KG, ProducedGood::UNIT_PIECE])],
+            'unit_type' => ['sometimes', Rule::in([ProducedGood::UNIT_KG, ProducedGood::UNIT_LITER, ProducedGood::UNIT_PIECE])],
             'is_final' => 'sometimes|boolean',
             'sale_price' => 'nullable|numeric|min:0',
             'markup_percent' => 'nullable|numeric|min:0|max:9999',

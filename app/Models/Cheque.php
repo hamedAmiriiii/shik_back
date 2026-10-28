@@ -37,6 +37,7 @@ class Cheque extends Model
         'shop_account_id',
         'type',
         'cheque_number',
+        'cheque_book_leaf_id',
         'bank_name',
         'payee',
         'amount',
@@ -96,6 +97,11 @@ class Cheque extends Model
     public function purchase(): BelongsTo
     {
         return $this->belongsTo(Purchase::class);
+    }
+
+    public function chequeBookLeaf(): BelongsTo
+    {
+        return $this->belongsTo(ChequeBookLeaf::class, 'cheque_book_leaf_id');
     }
 
     public function transferredToBeneficiary(): BelongsTo

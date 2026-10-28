@@ -41,7 +41,7 @@ class RawMaterialController extends Controller
         $query = RawMaterial::query()
             ->where('atelier_id', $atelierId)
             ->with($with)
-            ->orderBy('name');
+            ->orderByDesc('id');
 
         $searchDataModel = json_decode($request->input('searchFilterModel'));
         if ($searchDataModel) {
@@ -94,7 +94,7 @@ class RawMaterialController extends Controller
                     Rule::unique('raw_materials', 'name')->where('atelier_id', $atelierId),
                 ],
                 'note' => 'nullable|string',
-                'unit_type' => ['nullable', Rule::in([RawMaterial::UNIT_KG, RawMaterial::UNIT_PIECE])],
+                'unit_type' => ['nullable', Rule::in([RawMaterial::UNIT_KG, RawMaterial::UNIT_LITER, RawMaterial::UNIT_PIECE])],
                 'sale_price' => 'nullable|numeric|min:0',
                 'quantity_kg' => 'nullable|numeric|min:0.001',
                 'price_per_kg' => 'nullable|numeric|min:0|required_with:quantity_kg',
@@ -106,7 +106,8 @@ class RawMaterialController extends Controller
         $fields = $this->prepareRawMaterialPurchase($fields);
 
         $unitType = $fields['unit_type'] ?? RawMaterial::UNIT_KG;
-        if ($unitType === RawMaterial::UNIT_PIECE && ! Schema::hasColumn('raw_materials', 'unit_type')) {
+        if (in_array($unitType, [RawMaterial::UNIT_PIECE, RawMaterial::UNIT_LITER], true)
+            && ! Schema::hasColumn('raw_materials', 'unit_type')) {
             return response()->json([
                 'message' => 'ستون unit_type در جدول raw_materials وجود ندارد. migration یا SQL مربوط را اجرا کنید.',
             ], 503);
@@ -187,7 +188,7 @@ class RawMaterialController extends Controller
             ],
             'sale_price' => 'nullable|numeric|min:0',
             'note' => 'nullable|string',
-            'unit_type' => ['sometimes', Rule::in([RawMaterial::UNIT_KG, RawMaterial::UNIT_PIECE])],
+            'unit_type' => ['sometimes', Rule::in([RawMaterial::UNIT_KG, RawMaterial::UNIT_LITER, RawMaterial::UNIT_PIECE])],
         ]);
 
         if (array_key_exists('unit_type', $fields)) {

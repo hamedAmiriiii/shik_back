@@ -397,7 +397,7 @@ class ShopPosSaleService
         $material = RawMaterial::findOrFail($rawMaterialId);
         $plan = $this->fifo->plan($material, $needKg, true);
         if ($plan['shortage_kg'] > 0) {
-            throw new RuntimeException('موجودی «'.$material->name.'» کافی نیست. کمبود: '.$plan['shortage_kg'].' '.($material->isPieceUnit() ? 'عدد' : 'کیلو').'.');
+            throw new RuntimeException('موجودی «'.$material->name.'» کافی نیست. کمبود: '.$plan['shortage_kg'].' '.$material->unitLabel().'.');
         }
 
         foreach ($plan['slices'] as $slice) {

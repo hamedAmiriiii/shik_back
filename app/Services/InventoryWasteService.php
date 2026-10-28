@@ -36,7 +36,7 @@ class InventoryWasteService
         return DB::transaction(function () use ($material, $quantityKg, $note, $wastedAt) {
             $plan = $this->fifo->plan($material, $quantityKg, true);
             if ($plan['shortage_kg'] > 0) {
-                $unit = $material->isPieceUnit() ? 'عدد' : 'کیلو';
+                $unit = $material->unitLabelFa();
                 throw new RuntimeException(
                     'موجودی «'.$material->name.'» کافی نیست. کمبود: '.$plan['shortage_kg'].' '.$unit.'.'
                 );
@@ -98,7 +98,7 @@ class InventoryWasteService
         return DB::transaction(function () use ($good, $quantityKg, $note, $wastedAt) {
             $plan = $this->fifo->planProducedGood($good, $quantityKg, true);
             if ($plan['shortage_kg'] > 0) {
-                $unit = $good->isPieceUnit() ? 'عدد' : 'کیلو';
+                $unit = $good->unitLabelFa();
                 throw new RuntimeException(
                     'موجودی «'.$good->name.'» کافی نیست. کمبود: '.$plan['shortage_kg'].' '.$unit.'.'
                 );
