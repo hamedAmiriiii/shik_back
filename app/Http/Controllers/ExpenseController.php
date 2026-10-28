@@ -10,6 +10,7 @@ use App\Services\AccountingDocumentPoster;
 use App\Services\ChartOfAccountsSeeder;
 use App\Services\CustomerCreditExpenseService;
 use App\Services\DocumentPaymentService;
+use App\Services\PurchaseVatService;
 use App\Services\ShopBeneficiaryService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -221,7 +222,7 @@ class ExpenseController extends Controller
             'title' => 'required|string|max:255',
             'type' => 'nullable|in:جاری,سرمایه',
             'accounting_account_id' => 'nullable|integer',
-        ], $this->paymentAccountRules('expenses'), DocumentPaymentService::requestRules(), ShopBeneficiaryService::requestRules('expenses')));
+        ], PurchaseVatService::requestRules(), $this->paymentAccountRules('expenses'), DocumentPaymentService::requestRules(), ShopBeneficiaryService::requestRules('expenses')));
 
         $accountLinkError = $this->applyExpenseAccount($atelierId, $fields);
         if ($accountLinkError) {
@@ -253,12 +254,14 @@ class ExpenseController extends Controller
         $fields['atelier_id'] = $atelierId;
 
         try {
-            $expense = DB::transaction(function () use ($fields, $atelierId, $request) {
+            PurchaseVatService::applyToCreateFields($atelierId, $fields, 'expenses');
+            $payable = round((float) $fields['amount'] + (float) ($fields['vat_amount'] ?? 0), 2);
+            $expense = DB::transaction(function () use ($fields, $atelierId, $request, $payable) {
                 $paymentSource = $fields;
                 $payment = DocumentPaymentService::resolveOnCreate(
                     $atelierId,
                     $fields,
-                    (float) $fields['amount'],
+                    $payable,
                     'expenses'
                 );
                 DocumentPaymentService::unsetPaymentRequestFields($fields);
@@ -297,7 +300,7 @@ class ExpenseController extends Controller
         $this->mergeRequestPayload($request, [
             'user_name', 'amount', 'title', 'type', 'shop_account_id', 'payment_method', 'cheque', 'cheque_id',
             'payments', 'cash_amount', 'cheque_amount', 'credit_amount', 'beneficiary_id', 'user_shiksho_id',
-            'accounting_account_id',
+            'accounting_account_id', 'vat_mode', 'vat_percent', 'vat_amount',
         ]);
         $paymentsRaw = $request->input('payments');
         if (is_string($paymentsRaw) && $paymentsRaw !== '') {
@@ -313,7 +316,7 @@ class ExpenseController extends Controller
             'title' => 'sometimes|required|string|max:255',
             'type' => 'sometimes|required|in:جاری,سرمایه',
             'accounting_account_id' => 'nullable|integer',
-        ], $this->paymentAccountRules('expenses'), ShopBeneficiaryService::requestRules('expenses'), DocumentPaymentService::requestRules()));
+        ], PurchaseVatService::requestRules(), $this->paymentAccountRules('expenses'), ShopBeneficiaryService::requestRules('expenses'), DocumentPaymentService::requestRules()));
 
         $accountLinkError = $this->applyExpenseAccount((int) $expense->atelier_id, $fields);
         if ($accountLinkError) {
@@ -334,23 +337,34 @@ class ExpenseController extends Controller
 
         try {
             $newAmount = (float) ($fields['amount'] ?? $expense->amount);
+            $vatFields = array_merge([
+                'vat_mode' => $expense->vat_mode ?? PurchaseVatService::MODE_NONE,
+                'vat_percent' => $expense->vat_percent,
+                'vat_amount' => $expense->vat_amount,
+            ], array_intersect_key($fields, array_flip(['vat_mode', 'vat_percent', 'vat_amount'])));
+            $vatNorm = PurchaseVatService::normalize((int) $expense->atelier_id, $newAmount, $vatFields, 'expenses');
+            $fields['vat_mode'] = $vatNorm['vat_mode'];
+            $fields['vat_percent'] = $vatNorm['vat_percent'];
+            $fields['vat_amount'] = $vatNorm['vat_amount'];
+            $newPayable = round($newAmount + (float) $vatNorm['vat_amount'], 2);
+            $oldPayable = PurchaseVatService::payableAmount($expense);
             $paymentsSent = DocumentPaymentService::requestHasPaymentSplits($request);
             if (
-                abs($newAmount - (float) $expense->amount) > 0.01
+                abs($newPayable - $oldPayable) > 0.01
                 && ($expense->payment_method === DocumentPaymentService::METHOD_MIXED)
                 && ! $paymentsSent
             ) {
                 throw new RuntimeException('مبلغ هزینه عوض شد؛ سهم نقد، چک و نسیه را دوباره ارسال کنید.');
             }
             if ($paymentsSent) {
-                $splits = DocumentPaymentService::splitsFromFields($fields, $newAmount, $expense);
+                $splits = DocumentPaymentService::splitsFromFields($fields, $newPayable, $expense);
                 DocumentPaymentService::assertAccountSplits((int) $expense->atelier_id, $splits, $expense);
             } else {
                 $accountId = $fields['shop_account_id'] ?? $expense->shop_account_id;
                 if ($accountId && DocumentPaymentService::settledAmountOnAccount($expense, (int) $accountId) > 0) {
                     $debit = ($expense->payment_method === DocumentPaymentService::METHOD_MIXED)
                         ? DocumentPaymentService::settledAmountOnAccount($expense, (int) $accountId)
-                        : $newAmount;
+                        : $newPayable;
                     DocumentPaymentService::assertCanDebit(
                         (int) $expense->atelier_id,
                         (int) $accountId,

@@ -26,13 +26,13 @@ class AccountingProductionPoster
                 (int) $production->id,
                 [
                     [
-                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_INV_FINISHED),
+                        'account_id' => AccountingLedger::mapped($atelierId, 'production.inv_finished'),
                         'debit' => $amount,
                         'credit' => 0,
                         'description' => 'کالای ساخته‌شده',
                     ],
                     [
-                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_INV_RAW),
+                        'account_id' => AccountingLedger::mapped($atelierId, 'production.inv_raw'),
                         'debit' => 0,
                         'credit' => $amount,
                         'description' => 'مصرف مواد',

@@ -71,6 +71,7 @@ class Setting extends Model
             'restaurant_cafe_enabled' => '0',
             'produced_goods_enabled' => '0',
             'accounting_enabled' => '0',
+            \App\Services\PurchaseVatService::SETTING_ENABLED => '0',
             'customer_club_enabled' => \App\Services\ShopFeatureFlags::customerClubDefaultForAtelier($atelierId) ? '1' : '0',
             'smart_customer_club_enabled' => \App\Services\ShopFeatureFlags::customerClubDefaultForAtelier($atelierId) ? '1' : '0',
             'receipt_print_settings' => '',

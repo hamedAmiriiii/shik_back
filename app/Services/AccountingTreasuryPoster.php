@@ -61,7 +61,7 @@ class AccountingTreasuryPoster
         $fromTill = round($amount - $fromPos, 2);
         if ($fromPos >= 0.01) {
             $credits[] = [
-                'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_POS),
+                'account_id' => AccountingLedger::mapped($atelierId, 'recon_deposit.pos'),
                 'debit' => 0,
                 'credit' => $fromPos,
                 'description' => 'واریز کارتخوان به حساب',
@@ -69,7 +69,7 @@ class AccountingTreasuryPoster
         }
         if ($fromTill >= 0.01) {
             $credits[] = [
-                'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL),
+                'account_id' => AccountingLedger::mapped($atelierId, 'recon_deposit.till'),
                 'debit' => 0,
                 'credit' => $fromTill,
                 'description' => 'خروج نقد از صندوق',
@@ -77,7 +77,7 @@ class AccountingTreasuryPoster
         }
         if ($credits === []) {
             $credits[] = [
-                'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL),
+                'account_id' => AccountingLedger::mapped($atelierId, 'recon_deposit.till'),
                 'debit' => 0,
                 'credit' => $amount,
                 'description' => 'خروج از صندوق فروش',

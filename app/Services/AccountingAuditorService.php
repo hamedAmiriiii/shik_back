@@ -232,7 +232,7 @@ class AccountingAuditorService
             return null;
         }
 
-        $retainedId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_RETAINED);
+        $retainedId = AccountingLedger::mapped($atelierId, 'year_close.retained');
         $toRetained = round($toRetained, 2);
         AccountingLedger::push(
             $lines,
@@ -277,7 +277,7 @@ class AccountingAuditorService
             ->get();
         $byId = $accounts->keyBy('id');
         $byCode = $accounts->keyBy('code');
-        $retainedId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_RETAINED);
+        $retainedId = AccountingLedger::mapped($atelierId, 'year_close.retained');
 
         $out = [];
         foreach ($lines as $line) {

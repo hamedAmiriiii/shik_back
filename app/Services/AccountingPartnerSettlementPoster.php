@@ -22,7 +22,7 @@ class AccountingPartnerSettlementPoster
             $lines = [];
             AccountingLedger::push(
                 $lines,
-                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_EQUITY),
+                AccountingLedger::mapped($atelierId, 'partner_settlement.equity'),
                 $amount,
                 0,
                 'تقسیم سود شرکا'

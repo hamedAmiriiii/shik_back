@@ -17,9 +17,9 @@ class AccountingInventoryWastePoster
             return null;
         }
 
-        $inventoryCode = $waste->isProducedGood()
-            ? ChartOfAccountsSeeder::CODE_INV_FINISHED
-            : ChartOfAccountsSeeder::CODE_INV_RAW;
+        $inventoryEvent = $waste->isProducedGood()
+            ? 'inventory_waste.inv_finished'
+            : 'inventory_waste.inv_raw';
 
         try {
             return AccountingVoucherService::post(
@@ -30,13 +30,13 @@ class AccountingInventoryWastePoster
                 (int) $waste->id,
                 [
                     [
-                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_COGS),
+                        'account_id' => AccountingLedger::mapped($atelierId, 'inventory_waste.cogs'),
                         'debit' => $amount,
                         'credit' => 0,
                         'description' => 'ضایعات انبار',
                     ],
                     [
-                        'account_id' => AccountingLedger::accountId($atelierId, $inventoryCode),
+                        'account_id' => AccountingLedger::mapped($atelierId, $inventoryEvent),
                         'debit' => 0,
                         'credit' => $amount,
                         'description' => $waste->isProducedGood() ? 'کاهش کالای ساخته‌شده' : 'کاهش مواد اولیه',

@@ -34,6 +34,10 @@ class ChartOfAccountsSeeder
 
     public const CODE_CHEQUE_RECEIVABLE = '11401';
 
+    public const CODE_VAT_INPUT = '11501';
+
+    public const CODE_VAT_OUTPUT = '21301';
+
     public const CODE_INV_CATALOG = '11301';
 
     public const CODE_INV_RAW = '11302';
@@ -97,6 +101,8 @@ class ChartOfAccountsSeeder
             ['code' => '11303', 'parent' => '113', 'name' => 'کالای ساخته‌شده', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '114', 'parent' => '11', 'name' => 'اسناد دریافتنی (چک)', 'level' => $m, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '11401', 'parent' => '114', 'name' => 'چک‌های دریافتنی', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
+            ['code' => '115', 'parent' => '11', 'name' => 'مالیات دریافتنی', 'level' => $m, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
+            ['code' => '11501', 'parent' => '115', 'name' => 'ارزش افزوده خرید', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '121', 'parent' => '12', 'name' => 'اموال و تجهیزات', 'level' => $m, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '12101', 'parent' => '121', 'name' => 'دارایی سرمایه‌ای', 'level' => $t, 'nature' => $d, 'kind' => AccountingAccount::KIND_ASSET],
             ['code' => '2', 'parent' => null, 'name' => 'بدهی‌ها', 'level' => $g, 'nature' => $c, 'kind' => AccountingAccount::KIND_LIABILITY],
@@ -105,6 +111,8 @@ class ChartOfAccountsSeeder
             ['code' => '21101', 'parent' => '211', 'name' => 'تأمین‌کنندگان / ذی‌نفعان', 'level' => $t, 'nature' => $c, 'kind' => AccountingAccount::KIND_LIABILITY],
             ['code' => '212', 'parent' => '21', 'name' => 'اسناد پرداختنی (چک صادره)', 'level' => $m, 'nature' => $c, 'kind' => AccountingAccount::KIND_LIABILITY],
             ['code' => '21201', 'parent' => '212', 'name' => 'چک‌های پرداختنی', 'level' => $t, 'nature' => $c, 'kind' => AccountingAccount::KIND_LIABILITY],
+            ['code' => '213', 'parent' => '21', 'name' => 'مالیات پرداختنی', 'level' => $m, 'nature' => $c, 'kind' => AccountingAccount::KIND_LIABILITY],
+            ['code' => '21301', 'parent' => '213', 'name' => 'ارزش افزوده فروش', 'level' => $t, 'nature' => $c, 'kind' => AccountingAccount::KIND_LIABILITY],
             ['code' => '3', 'parent' => null, 'name' => 'حقوق مالکانه', 'level' => $g, 'nature' => $c, 'kind' => AccountingAccount::KIND_EQUITY],
             ['code' => '31', 'parent' => '3', 'name' => 'سرمایه', 'level' => $k, 'nature' => $c, 'kind' => AccountingAccount::KIND_EQUITY],
             ['code' => '311', 'parent' => '31', 'name' => 'سرمایه صاحب فروشگاه', 'level' => $m, 'nature' => $c, 'kind' => AccountingAccount::KIND_EQUITY],

@@ -25,7 +25,7 @@ class RawMaterialInvoiceService
             'invoice_title' => 'nullable|string|max:255',
             'date' => 'nullable',
             'invoice_date' => 'nullable',
-        ], DocumentPaymentService::requestRules(), ShopBeneficiaryService::requestRules('invoices'));
+        ], PurchaseVatService::requestRules(), DocumentPaymentService::requestRules(), ShopBeneficiaryService::requestRules('invoices'));
     }
 
     public function wantsInvoice(array $fields): bool
@@ -189,6 +189,7 @@ class RawMaterialInvoiceService
             );
         }
         $invoice->update(['amount' => $newAmount]);
+        PurchaseVatService::refreshForBaseChange($invoice->fresh());
         // ردیف نسیه را با مبلغ جدید فاکتور هم‌تراز کن (در غیر این صورت فقط amount عوض می‌شود)
         DocumentPaymentService::alignSplitsToDocumentAmount($invoice->fresh(['payments']));
 
@@ -210,10 +211,15 @@ class RawMaterialInvoiceService
         }
 
         $title = $fields['invoice_title'] ?? ('خرید ماده اولیه: '.$material->name);
+        $vatNorm = PurchaseVatService::normalize($atelierId, $amount, $fields, 'invoices');
+        $payable = round($amount + (float) $vatNorm['vat_amount'], 2);
         $payload = [
             'amount' => $amount,
+            'vat_mode' => $vatNorm['vat_mode'],
+            'vat_percent' => $vatNorm['vat_percent'],
+            'vat_amount' => $vatNorm['vat_amount'],
             'title' => $title,
-            'description' => $fields['note'] ?? null,
+            'description' => $fields['note'] ?? ($fields['invoice_description'] ?? null),
             'date' => $this->resolveInvoiceDate($fields) ?: Carbon::now()->format('Y-m-d'),
             'user_name' => $userName,
             'atelier_id' => $atelierId,
@@ -229,7 +235,7 @@ class RawMaterialInvoiceService
         }
 
         $paymentSource = $fields;
-        $payment = DocumentPaymentService::resolveOnCreate($atelierId, $fields, $amount, 'invoices');
+        $payment = DocumentPaymentService::resolveOnCreate($atelierId, $fields, $payable, 'invoices');
         $payload = array_merge($payload, $payment);
 
         $invoice = Invoice::create($payload);

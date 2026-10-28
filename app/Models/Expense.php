@@ -12,7 +12,8 @@ class Expense extends Model
     use HasFactory;
 
     protected $fillable = [
-        'user_name', 'date', 'amount', 'title', 'type', 'credit_source', 'credit_source_id',
+        'user_name', 'date', 'amount', 'vat_mode', 'vat_percent', 'vat_amount',
+        'title', 'type', 'credit_source', 'credit_source_id',
         'atelier_id', 'accounting_account_id', 'beneficiary_id', 'shop_account_id',
         'payment_method', 'payment_status', 'paid_at', 'cheque_id',
     ];
@@ -20,6 +21,8 @@ class Expense extends Model
     protected $casts = [
         'date' => 'date',
         'amount' => 'decimal:2',
+        'vat_percent' => 'decimal:2',
+        'vat_amount' => 'decimal:2',
         'paid_at' => 'datetime',
     ];
 
@@ -27,7 +30,13 @@ class Expense extends Model
         'payment_method_label',
         'payment_status_label',
         'is_customer_credit',
+        'payable_amount',
     ];
+
+    public function getPayableAmountAttribute(): float
+    {
+        return \App\Services\PurchaseVatService::payableAmount($this);
+    }
 
     /**
      * حسابی (فروشگاه یا تنخواه) که مبلغ از آن برداشت شده است.

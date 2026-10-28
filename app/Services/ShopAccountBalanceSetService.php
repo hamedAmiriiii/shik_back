@@ -163,7 +163,7 @@ class ShopAccountBalanceSetService
                     $net += (float) $line['debit'] - (float) $line['credit'];
                 }
                 $net = round($net, 2);
-                $equityId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_EQUITY);
+                $equityId = AccountingLedger::mapped($atelierId, 'balance_adjust.equity');
                 if ($net > 0.009) {
                     AccountingLedger::push($lines, $equityId, 0, $net, 'سرمایه — اصلاح مانده واقعی');
                 } elseif ($net < -0.009) {

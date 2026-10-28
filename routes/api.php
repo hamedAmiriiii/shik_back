@@ -491,6 +491,9 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::post('accounting/accounts', [\App\Http\Controllers\AccountingAccountController::class, 'store']);
     Route::get('accounting/accounts/{accountingAccount}/next-code', [\App\Http\Controllers\AccountingAccountController::class, 'nextCode']);
     Route::put('accounting/accounts/{accountingAccount}', [\App\Http\Controllers\AccountingAccountController::class, 'update']);
+    Route::get('accounting/posting-maps', [\App\Http\Controllers\AccountingPostingMapController::class, 'index']);
+    Route::put('accounting/posting-maps/{eventKey}', [\App\Http\Controllers\AccountingPostingMapController::class, 'update'])
+        ->where('eventKey', '[A-Za-z0-9_.\-]+');
 
     Route::get('accounting/vouchers', [\App\Http\Controllers\AccountingVoucherController::class, 'index']);
     Route::post('accounting/vouchers/self-test', [\App\Http\Controllers\AccountingVoucherController::class, 'selfTest']);

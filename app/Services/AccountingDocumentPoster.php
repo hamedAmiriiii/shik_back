@@ -22,7 +22,7 @@ class AccountingDocumentPoster
         DocumentPaymentService::alignSplitsToDocumentAmount($invoice);
         $invoice->loadMissing(['payments', 'rawMaterialLots']);
 
-        return self::syncDocument(
+        $main = self::syncDocument(
             (int) $invoice->atelier_id,
             AccountingVoucher::SOURCE_INVOICE,
             (int) $invoice->id,
@@ -31,11 +31,19 @@ class AccountingDocumentPoster
             },
             $invoice
         );
+        self::syncVatVoucher($invoice);
+
+        return $main;
     }
 
     public static function reverseInvoice(Invoice $invoice): void
     {
         self::reverseDocumentPayments($invoice);
+        AccountingVoucherService::reversePostedIfAny(
+            (int) $invoice->atelier_id,
+            AccountingVoucher::SOURCE_INVOICE_VAT,
+            (int) $invoice->id
+        );
         AccountingVoucherService::reversePostedIfAny(
             (int) $invoice->atelier_id,
             AccountingVoucher::SOURCE_INVOICE,
@@ -47,7 +55,7 @@ class AccountingDocumentPoster
     {
         $expense->loadMissing(['payments']);
 
-        return self::syncDocument(
+        $main = self::syncDocument(
             (int) $expense->atelier_id,
             AccountingVoucher::SOURCE_EXPENSE,
             (int) $expense->id,
@@ -56,11 +64,19 @@ class AccountingDocumentPoster
             },
             $expense
         );
+        self::syncVatVoucher($expense);
+
+        return $main;
     }
 
     public static function reverseExpense(Expense $expense): void
     {
         self::reverseDocumentPayments($expense);
+        AccountingVoucherService::reversePostedIfAny(
+            (int) $expense->atelier_id,
+            AccountingVoucher::SOURCE_EXPENSE_VAT,
+            (int) $expense->id
+        );
         AccountingVoucherService::reversePostedIfAny(
             (int) $expense->atelier_id,
             AccountingVoucher::SOURCE_EXPENSE,
@@ -86,7 +102,7 @@ class AccountingDocumentPoster
                 (int) $payment->id,
                 [
                     [
-                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AP),
+                        'account_id' => AccountingLedger::mapped($atelierId, 'document_payment.ap'),
                         'debit' => $amount,
                         'credit' => 0,
                         'description' => 'بستن حساب پرداختنی',
@@ -111,8 +127,8 @@ class AccountingDocumentPoster
     public static function postInvoice(Invoice $invoice): ?AccountingVoucher
     {
         $atelierId = (int) $invoice->atelier_id;
-        $amount = round((float) $invoice->amount, 2);
-        if ($atelierId <= 0 || (int) $invoice->id <= 0 || $amount < 0.01 || ! AccountingLedger::ready()) {
+        $payable = PurchaseVatService::payableAmount($invoice);
+        if ($atelierId <= 0 || (int) $invoice->id <= 0 || $payable < 0.01 || ! AccountingLedger::ready()) {
             return null;
         }
 
@@ -120,23 +136,24 @@ class AccountingDocumentPoster
 
         try {
             $lines = [];
+            // مبلغ پایه + ارزش افزوده موقتاً به موجودی می‌رود؛ سند VAT جداگانه مالیات را به ۱۱۵۰۱ منتقل می‌کند
             $raw = self::lotCost($invoice);
-            $catalog = round(max(0, $amount - $raw), 2);
+            $catalog = round(max(0, $payable - $raw), 2);
             AccountingLedger::push(
                 $lines,
-                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_INV_RAW),
+                AccountingLedger::mapped($atelierId, 'invoice.inv_raw'),
                 $raw,
                 0,
                 'مواد اولیه'
             );
             AccountingLedger::push(
                 $lines,
-                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_INV_CATALOG),
+                AccountingLedger::mapped($atelierId, 'invoice.inv_catalog'),
                 $catalog,
                 0,
                 'خرید کالا'
             );
-            self::appendPaymentCredits($lines, $atelierId, $invoice, $amount);
+            self::appendPaymentCredits($lines, $atelierId, $invoice, $payable);
 
             if (count($lines) < 2) {
                 return null;
@@ -162,8 +179,9 @@ class AccountingDocumentPoster
     public static function postExpense(Expense $expense, ?string $payrollType = null): ?AccountingVoucher
     {
         $atelierId = (int) $expense->atelier_id;
-        $amount = round((float) $expense->amount, 2);
-        if ($atelierId <= 0 || (int) $expense->id <= 0 || $amount < 0.01 || ! AccountingLedger::ready()) {
+        $base = round((float) $expense->amount, 2);
+        $payable = PurchaseVatService::payableAmount($expense);
+        if ($atelierId <= 0 || (int) $expense->id <= 0 || $payable < 0.01 || ! AccountingLedger::ready()) {
             return null;
         }
 
@@ -180,27 +198,27 @@ class AccountingDocumentPoster
             if ($source === CustomerCreditExpenseService::SOURCE_MANUAL) {
                 AccountingLedger::push(
                     $lines,
-                    AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_LOYALTY),
-                    $amount,
+                    AccountingLedger::mapped($atelierId, 'expense.manual_credit_grant.loyalty'),
+                    $base,
                     0,
                     'اعطای اعتبار دستی'
                 );
                 AccountingLedger::push(
                     $lines,
-                    AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AR),
+                    AccountingLedger::mapped($atelierId, 'expense.manual_credit_grant.ar'),
                     0,
-                    $amount,
+                    $base,
                     'بدهی به مشتری'
                 );
             } else {
                 AccountingLedger::push(
                     $lines,
                     self::expenseDebitAccountId($expense, $payrollType),
-                    $amount,
+                    $payable,
                     0,
                     $expense->title ?: 'هزینه'
                 );
-                self::appendPaymentCredits($lines, $atelierId, $expense, $amount);
+                self::appendPaymentCredits($lines, $atelierId, $expense, $payable);
             }
 
             if (count($lines) < 2) {
@@ -218,6 +236,71 @@ class AccountingDocumentPoster
         } catch (RuntimeException $e) {
             Log::error('سند هزینه ثبت نشد', [
                 'expense_id' => $expense->id,
+                'message' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * سند جدا برای ارزش افزوده خرید: بدهکار ۱۱۵۰۱ / بستانکار موجودی یا هزینه.
+     *
+     * @param  Invoice|Expense  $document
+     */
+    protected static function syncVatVoucher(Model $document): void
+    {
+        if (! ($document instanceof Invoice || $document instanceof Expense)) {
+            return;
+        }
+
+        $atelierId = (int) $document->atelier_id;
+        $sourceType = $document instanceof Invoice
+            ? AccountingVoucher::SOURCE_INVOICE_VAT
+            : AccountingVoucher::SOURCE_EXPENSE_VAT;
+        $sourceId = (int) $document->id;
+
+        if ($atelierId <= 0 || $sourceId <= 0 || ! AccountingLedger::ready()) {
+            return;
+        }
+
+        AccountingVoucherService::reversePostedIfAny($atelierId, $sourceType, $sourceId);
+
+        $vat = PurchaseVatService::vatAmount($document);
+        if ($vat < 0.01) {
+            return;
+        }
+
+        try {
+            $creditAccountId = $document instanceof Invoice
+                ? AccountingLedger::mapped($atelierId, 'invoice_vat.credit_inventory')
+                : self::expenseDebitAccountId($document, null);
+            $vatEventKey = $document instanceof Invoice ? 'invoice_vat.vat_input' : 'expense_vat.vat_input';
+
+            AccountingVoucherService::post(
+                $atelierId,
+                self::documentDate($document),
+                'ارزش افزوده '.($document instanceof Invoice ? 'فاکتور' : 'هزینه').' #'.$document->id,
+                $sourceType,
+                $sourceId,
+                [
+                    [
+                        'account_id' => AccountingLedger::mapped($atelierId, $vatEventKey),
+                        'debit' => $vat,
+                        'credit' => 0,
+                        'description' => 'ارزش افزوده خرید',
+                    ],
+                    [
+                        'account_id' => $creditAccountId,
+                        'debit' => 0,
+                        'credit' => $vat,
+                        'description' => 'جداسازی ارزش افزوده از '.($document instanceof Invoice ? 'موجودی' : 'هزینه'),
+                    ],
+                ]
+            );
+        } catch (RuntimeException $e) {
+            Log::error('سند ارزش افزوده ثبت نشد', [
+                'source_type' => $sourceType,
+                'source_id' => $sourceId,
                 'message' => $e->getMessage(),
             ]);
             throw $e;
@@ -304,6 +387,7 @@ class AccountingDocumentPoster
                     }
                 }
                 // نسیهٔ تسویه‌شده بدون حساب = جایگزین شده با چک/اعتبار
+                $isExpense = $model instanceof Expense;
                 if ($method === DocumentPaymentService::METHOD_CREDIT && $payment->settled) {
                     if ($payment->shop_account_id) {
                         self::pushCreditForSplit(
@@ -311,21 +395,22 @@ class AccountingDocumentPoster
                             $atelierId,
                             DocumentPaymentService::METHOD_ACCOUNT,
                             $part,
-                            $payment->shop_account_id
+                            $payment->shop_account_id,
+                            $isExpense
                         );
                         $credited += $part;
                     }
                     continue;
                 }
 
-                self::pushCreditForSplit($lines, $atelierId, $method, $part, $payment->shop_account_id);
+                self::pushCreditForSplit($lines, $atelierId, $method, $part, $payment->shop_account_id, $isExpense);
                 $credited += $part;
             }
             $gap = round($amount - $credited, 2);
             if (abs($gap) >= 0.01) {
                 AccountingLedger::push(
                     $lines,
-                    AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AP),
+                    AccountingLedger::mapped($atelierId, $model instanceof Expense ? 'expense.ap' : 'invoice.ap'),
                     0,
                     $gap,
                     'مانده پرداختنی'
@@ -339,7 +424,14 @@ class AccountingDocumentPoster
             ?: (($model->shop_account_id && DocumentPaymentService::isPaid($model))
                 ? DocumentPaymentService::METHOD_ACCOUNT
                 : DocumentPaymentService::METHOD_CREDIT);
-        self::pushCreditForSplit($lines, $atelierId, $method, $amount, $model->shop_account_id ?? null);
+        self::pushCreditForSplit(
+            $lines,
+            $atelierId,
+            $method,
+            $amount,
+            $model->shop_account_id ?? null,
+            $model instanceof Expense
+        );
     }
 
     /**
@@ -350,7 +442,8 @@ class AccountingDocumentPoster
         int $atelierId,
         string $method,
         float $amount,
-        $shopAccountId
+        $shopAccountId,
+        bool $forExpense = false
     ): void {
         $method = DocumentPaymentService::normalizeMethod($method) ?: $method;
         if ($method === DocumentPaymentService::METHOD_ACCOUNT && $shopAccountId) {
@@ -367,7 +460,7 @@ class AccountingDocumentPoster
         if ($method === DocumentPaymentService::METHOD_CHEQUE) {
             AccountingLedger::push(
                 $lines,
-                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_CHEQUE_PAYABLE),
+                AccountingLedger::mapped($atelierId, $forExpense ? 'expense.cheque_payable' : 'invoice.cheque_payable'),
                 0,
                 $amount,
                 'چک پرداختنی'
@@ -378,7 +471,7 @@ class AccountingDocumentPoster
 
         AccountingLedger::push(
             $lines,
-            AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AP),
+            AccountingLedger::mapped($atelierId, $forExpense ? 'expense.ap' : 'invoice.ap'),
             0,
             $amount,
             'حساب پرداختنی'
@@ -406,13 +499,13 @@ class AccountingDocumentPoster
             }
         }
 
-        return AccountingLedger::accountId($atelierId, self::expenseDebitCode($expense, $payrollType));
+        return AccountingLedger::mapped($atelierId, self::expenseDebitEventKey($expense, $payrollType));
     }
 
-    protected static function expenseDebitCode(Expense $expense, ?string $payrollType = null): string
+    protected static function expenseDebitEventKey(Expense $expense, ?string $payrollType = null): string
     {
         if (($expense->type ?? '') === 'سرمایه') {
-            return ChartOfAccountsSeeder::CODE_CAPEX;
+            return 'expense.debit_capex';
         }
 
         $type = $payrollType;
@@ -422,15 +515,15 @@ class AccountingDocumentPoster
                 ->value('payment_type');
         }
         if (in_array($type, [EmployeePayrollPayment::TYPE_SALARY, EmployeePayrollPayment::TYPE_ADVANCE], true)) {
-            return ChartOfAccountsSeeder::CODE_PAYROLL;
+            return 'expense.debit_payroll';
         }
 
         $title = (string) ($expense->title ?? '');
         if ($title !== '' && preg_match('/پرداخت حقوق|مساعده/u', $title)) {
-            return ChartOfAccountsSeeder::CODE_PAYROLL;
+            return 'expense.debit_payroll';
         }
 
-        return ChartOfAccountsSeeder::CODE_EXPENSE;
+        return 'expense.debit_opex';
     }
 
     protected static function documentDate(Model $model): string

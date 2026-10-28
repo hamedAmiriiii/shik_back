@@ -6,6 +6,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Services\AccountingDocumentPoster;
 use App\Services\DocumentPaymentService;
+use App\Services\PurchaseVatService;
 use App\Services\ShopBeneficiaryService;
 use App\Tools\ImageTools;
 use Carbon\Carbon;
@@ -189,7 +190,7 @@ class InvoiceController extends Controller
             'description' => 'nullable|string',
             'image' => 'nullable',
             'image_base64' => 'nullable|string',
-        ], $this->paymentAccountRules('invoices'), DocumentPaymentService::requestRules(), ShopBeneficiaryService::requestRules('invoices')));
+        ], PurchaseVatService::requestRules(), $this->paymentAccountRules('invoices'), DocumentPaymentService::requestRules(), ShopBeneficiaryService::requestRules('invoices')));
 
         $amountConflict = $this->amountConflictWithItems($request, $itemRows);
         if ($amountConflict !== null) {
@@ -221,12 +222,14 @@ class InvoiceController extends Controller
         unset($fields['invoice_date']);
 
         try {
-            $invoice = DB::transaction(function () use ($fields, $atelierId, $itemRows, $request) {
+            PurchaseVatService::applyToCreateFields($atelierId, $fields, 'invoices');
+            $payable = round((float) $fields['amount'] + (float) ($fields['vat_amount'] ?? 0), 2);
+            $invoice = DB::transaction(function () use ($fields, $atelierId, $itemRows, $request, $payable) {
                 $paymentSource = $fields;
                 $payment = DocumentPaymentService::resolveOnCreate(
                     $atelierId,
                     $fields,
-                    (float) $fields['amount'],
+                    $payable,
                     'invoices'
                 );
                 DocumentPaymentService::unsetPaymentRequestFields($fields);
@@ -285,7 +288,7 @@ class InvoiceController extends Controller
             'image' => 'nullable',
             'image_base64' => 'nullable|string',
             'remove_image' => 'nullable|boolean',
-        ], $this->paymentAccountRules('invoices'), ShopBeneficiaryService::requestRules('invoices'), DocumentPaymentService::requestRules()));
+        ], PurchaseVatService::requestRules(), $this->paymentAccountRules('invoices'), ShopBeneficiaryService::requestRules('invoices'), DocumentPaymentService::requestRules()));
 
         $beneficiaryError = ShopBeneficiaryService::applyToFields((int) $invoice->atelier_id, $fields, true, 'invoices');
         if ($beneficiaryError) {
@@ -334,23 +337,34 @@ class InvoiceController extends Controller
             } elseif (! $itemsSent && $invoice->hasLineItems()) {
                 $newAmount = $invoice->itemsSum();
             }
+            $vatFields = array_merge([
+                'vat_mode' => $invoice->vat_mode ?? PurchaseVatService::MODE_NONE,
+                'vat_percent' => $invoice->vat_percent,
+                'vat_amount' => $invoice->vat_amount,
+            ], array_intersect_key($fields, array_flip(['vat_mode', 'vat_percent', 'vat_amount'])));
+            $vatNorm = PurchaseVatService::normalize((int) $invoice->atelier_id, $newAmount, $vatFields, 'invoices');
+            $fields['vat_mode'] = $vatNorm['vat_mode'];
+            $fields['vat_percent'] = $vatNorm['vat_percent'];
+            $fields['vat_amount'] = $vatNorm['vat_amount'];
+            $newPayable = round($newAmount + (float) $vatNorm['vat_amount'], 2);
+            $oldPayable = PurchaseVatService::payableAmount($invoice);
             $paymentsSent = DocumentPaymentService::requestHasPaymentSplits($request);
             if (
-                abs($newAmount - (float) $invoice->amount) > 0.01
+                abs($newPayable - $oldPayable) > 0.01
                 && ($invoice->payment_method === DocumentPaymentService::METHOD_MIXED)
                 && ! $paymentsSent
             ) {
                 throw new RuntimeException('مبلغ فاکتور عوض شد؛ سهم نقد، چک و نسیه را دوباره ارسال کنید.');
             }
             if ($paymentsSent) {
-                $splits = DocumentPaymentService::splitsFromFields($fields, $newAmount, $invoice);
+                $splits = DocumentPaymentService::splitsFromFields($fields, $newPayable, $invoice);
                 DocumentPaymentService::assertAccountSplits((int) $invoice->atelier_id, $splits, $invoice);
             } else {
                 $accountId = $fields['shop_account_id'] ?? $invoice->shop_account_id;
                 if ($accountId && DocumentPaymentService::settledAmountOnAccount($invoice, (int) $accountId) > 0) {
                     $debit = ($invoice->payment_method === DocumentPaymentService::METHOD_MIXED)
                         ? DocumentPaymentService::settledAmountOnAccount($invoice, (int) $accountId)
-                        : $newAmount;
+                        : $newPayable;
                     DocumentPaymentService::assertCanDebit(
                         (int) $invoice->atelier_id,
                         (int) $accountId,

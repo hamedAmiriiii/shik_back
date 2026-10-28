@@ -36,6 +36,10 @@ class AccountingVoucher extends Model
 
     public const SOURCE_INVOICE = 'invoice';
 
+    public const SOURCE_INVOICE_VAT = 'invoice_vat';
+
+    public const SOURCE_EXPENSE_VAT = 'expense_vat';
+
     public const SOURCE_DOCUMENT_PAYMENT = 'document_payment';
 
     public const SOURCE_PRODUCTION = 'production';

@@ -34,13 +34,13 @@ class AccountingMiscPoster
                 (int) $cheque->id,
                 [
                     [
-                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_CHEQUE_RECEIVABLE),
+                        'account_id' => AccountingLedger::mapped($atelierId, 'income.cheque_receivable'),
                         'debit' => $amount,
                         'credit' => 0,
                         'description' => 'چک دریافتنی',
                     ],
                     [
-                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_OTHER_INCOME),
+                        'account_id' => AccountingLedger::mapped($atelierId, 'income.other_income'),
                         'debit' => 0,
                         'credit' => $amount,
                         'description' => 'درآمد متفرقه',
@@ -105,7 +105,7 @@ class AccountingMiscPoster
                 (int) $cheque->id,
                 [
                     [
-                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_CHEQUE_PAYABLE),
+                        'account_id' => AccountingLedger::mapped($atelierId, 'cheque_clear_issued.payable'),
                         'debit' => $amount,
                         'credit' => 0,
                         'description' => 'بستن چک پرداختنی',
@@ -174,7 +174,7 @@ class AccountingMiscPoster
         $lines = [];
         if ($settledAmount >= 0.01) {
             $lines[] = [
-                'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AP),
+                'account_id' => AccountingLedger::mapped($atelierId, 'cheque_transfer.ap'),
                 'debit' => $settledAmount,
                 'credit' => 0,
                 'description' => 'بستن بدهی با ظهرنویسی چک',
@@ -182,14 +182,14 @@ class AccountingMiscPoster
         }
         if ($advanceAmount >= 0.01) {
             $lines[] = [
-                'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_SUPPLIER_ADVANCE),
+                'account_id' => AccountingLedger::mapped($atelierId, 'cheque_transfer.supplier_advance'),
                 'debit' => $advanceAmount,
                 'credit' => 0,
                 'description' => 'پیش‌پرداخت ذینفع از مابقی چک',
             ];
         }
         $lines[] = [
-            'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_CHEQUE_RECEIVABLE),
+            'account_id' => AccountingLedger::mapped($atelierId, 'cheque_transfer.cheque_receivable'),
             'debit' => 0,
             'credit' => $chequeAmount,
             'description' => 'خروج چک دریافتنی (ظهرنویسی)',
@@ -253,13 +253,13 @@ class AccountingMiscPoster
                 (int) $application->id,
                 [
                     [
-                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AP),
+                        'account_id' => AccountingLedger::mapped($atelierId, 'beneficiary_advance.ap'),
                         'debit' => $amount,
                         'credit' => 0,
                         'description' => 'بستن بدهی با اعتبار ظهرنویسی',
                     ],
                     [
-                        'account_id' => AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_SUPPLIER_ADVANCE),
+                        'account_id' => AccountingLedger::mapped($atelierId, 'beneficiary_advance.supplier_advance'),
                         'debit' => 0,
                         'credit' => $amount,
                         'description' => 'کاهش پیش‌پرداخت ذینفع',
@@ -286,9 +286,9 @@ class AccountingMiscPoster
 
         $cashId = AccountingLedger::shopCashAccountId($atelierId, $shopAccountId);
         $isPurchase = $trade->type === ManualTrade::TYPE_PURCHASE;
-        $otherId = AccountingLedger::accountId(
+        $otherId = AccountingLedger::mapped(
             $atelierId,
-            $isPurchase ? ChartOfAccountsSeeder::CODE_EXPENSE : ChartOfAccountsSeeder::CODE_OTHER_INCOME
+            $isPurchase ? 'manual_trade.purchase_expense' : 'manual_trade.sale_income'
         );
 
         try {

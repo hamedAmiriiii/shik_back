@@ -552,14 +552,14 @@ class AccountingPeriodCloseService
      */
     protected static function buildLines(int $atelierId, array $pnl): array
     {
-        $revenueId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_REVENUE);
-        $otherId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_OTHER_INCOME);
-        $discountId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_DISCOUNT);
-        $cogsId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_COGS);
-        $opexId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_EXPENSE);
-        $payrollId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_PAYROLL);
-        $loyaltyId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_LOYALTY);
-        $retainedId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_RETAINED);
+        $revenueId = AccountingLedger::mapped($atelierId, 'purchase.revenue');
+        $otherId = AccountingLedger::mapped($atelierId, 'income.other_income');
+        $discountId = AccountingLedger::mapped($atelierId, 'purchase.discount');
+        $cogsId = AccountingLedger::mapped($atelierId, 'purchase.cogs');
+        $opexId = AccountingLedger::mapped($atelierId, 'expense.debit_opex');
+        $payrollId = AccountingLedger::mapped($atelierId, 'expense.debit_payroll');
+        $loyaltyId = AccountingLedger::mapped($atelierId, 'purchase.loyalty');
+        $retainedId = AccountingLedger::mapped($atelierId, 'year_close.retained');
 
         $lines = [];
         $toRetained = 0.0;

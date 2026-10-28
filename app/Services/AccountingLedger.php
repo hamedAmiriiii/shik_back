@@ -31,6 +31,14 @@ class AccountingLedger
         return (int) $id;
     }
 
+    /**
+     * حساب مرتبط با یک رویداد نرم‌افزار (با امکان تغییر در تنظیمات حسابداری).
+     */
+    public static function mapped(int $atelierId, string $eventKey): int
+    {
+        return AccountingPostingMapService::accountId($atelierId, $eventKey);
+    }
+
     public static function shopCashAccountId(int $atelierId, int $shopAccountId): int
     {
         ChartOfAccountsSeeder::ensureForAtelier($atelierId);

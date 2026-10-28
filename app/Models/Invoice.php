@@ -14,13 +14,16 @@ class Invoice extends Model
     use HasFactory;
 
     protected $fillable = [
-        'amount', 'title', 'description', 'date', 'user_name', 'atelier_id', 'beneficiary_id', 'shop_account_id',
+        'amount', 'vat_mode', 'vat_percent', 'vat_amount',
+        'title', 'description', 'date', 'user_name', 'atelier_id', 'beneficiary_id', 'shop_account_id',
         'payment_method', 'payment_status', 'paid_at', 'cheque_id', 'image_path',
     ];
 
     protected $casts = [
         'date' => 'date',
         'amount' => 'decimal:2',
+        'vat_percent' => 'decimal:2',
+        'vat_amount' => 'decimal:2',
         'paid_at' => 'datetime',
     ];
 
@@ -30,6 +33,7 @@ class Invoice extends Model
         'image_url',
         'has_items',
         'amount_source',
+        'payable_amount',
     ];
 
     /**
@@ -148,7 +152,13 @@ class Invoice extends Model
         $sum = $this->itemsSum();
         if (round((float) $this->amount, 2) !== $sum) {
             $this->update(['amount' => $sum]);
+            \App\Services\PurchaseVatService::refreshForBaseChange($this->fresh());
         }
+    }
+
+    public function getPayableAmountAttribute(): float
+    {
+        return \App\Services\PurchaseVatService::payableAmount($this);
     }
 
     public function getCreatedAtAttribute($value): string

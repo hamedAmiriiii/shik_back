@@ -46,11 +46,11 @@ class AccountingReturnPoster
             return null;
         }
 
-        $invCode = ChartOfAccountsSeeder::CODE_INV_CATALOG;
+        $invEventKey = 'purchase_return.inv_catalog';
         if ($log->produced_good_id) {
-            $invCode = ChartOfAccountsSeeder::CODE_INV_FINISHED;
+            $invEventKey = 'purchase_return.inv_finished';
         } elseif ($log->raw_material_id) {
-            $invCode = ChartOfAccountsSeeder::CODE_INV_RAW;
+            $invEventKey = 'purchase_return.inv_raw';
         }
 
         $loyalty = round((float) ($settlement['loyalty'] ?? 0), 2);
@@ -80,35 +80,35 @@ class AccountingReturnPoster
             $lines = [];
             AccountingLedger::push(
                 $lines,
-                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_DISCOUNT),
+                AccountingLedger::mapped($atelierId, 'purchase_return.discount'),
                 $credits > 0 ? $credits : $sale,
                 0,
                 'برگشت از فروش'
             );
             AccountingLedger::push(
                 $lines,
-                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_LOYALTY),
+                AccountingLedger::mapped($atelierId, 'purchase_return.loyalty'),
                 0,
                 $loyalty,
                 'برگشت اعتبار مصرف‌شده'
             );
             AccountingLedger::push(
                 $lines,
-                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_TILL),
+                AccountingLedger::mapped($atelierId, 'purchase_return.cash'),
                 0,
                 $cash,
                 'برگشت نقد از صندوق'
             );
             AccountingLedger::push(
                 $lines,
-                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_POS),
+                AccountingLedger::mapped($atelierId, 'purchase_return.pos'),
                 0,
                 $pos,
                 'برگشت کارت از کارتخوان'
             );
             AccountingLedger::push(
                 $lines,
-                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_AR),
+                AccountingLedger::mapped($atelierId, 'purchase_return.ar'),
                 0,
                 round($cardCredit + $ar, 2),
                 $ar >= 0.01 ? 'بستن طلب / اعتبار مشتری' : 'برگشت به اعتبار مشتری'
@@ -116,7 +116,7 @@ class AccountingReturnPoster
             if ($cardAccount >= 0.01) {
                 $accountId = $shopAccountId > 0
                     ? AccountingLedger::shopCashAccountId($atelierId, $shopAccountId)
-                    : AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_ACCOUNT_1);
+                    : AccountingLedger::mapped($atelierId, 'purchase_return.cash');
                 AccountingLedger::push(
                     $lines,
                     $accountId,
@@ -127,21 +127,21 @@ class AccountingReturnPoster
             }
             AccountingLedger::push(
                 $lines,
-                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_CHEQUE_RECEIVABLE),
+                AccountingLedger::mapped($atelierId, 'purchase_return.cheque_receivable'),
                 0,
                 $cheque,
                 'کاهش چک دریافتنی'
             );
             AccountingLedger::push(
                 $lines,
-                AccountingLedger::accountId($atelierId, $invCode),
+                AccountingLedger::mapped($atelierId, $invEventKey),
                 $cost,
                 0,
                 'بازگشت موجودی'
             );
             AccountingLedger::push(
                 $lines,
-                AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_COGS),
+                AccountingLedger::mapped($atelierId, 'purchase_return.cogs'),
                 0,
                 $cost,
                 'برگشت بها'

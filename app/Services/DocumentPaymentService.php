@@ -770,7 +770,7 @@ class DocumentPaymentService
         $isPaid = ! Schema::hasColumn($model->getTable(), 'payment_status')
             || ($model->payment_status ?? self::STATUS_PAID) === self::STATUS_PAID;
         if ($isPaid && (int) $model->shop_account_id === $accountId) {
-            return round((float) $model->amount, 2);
+            return PurchaseVatService::payableAmount($model);
         }
 
         return 0.0;
@@ -785,7 +785,7 @@ class DocumentPaymentService
                 ->sum('amount'), 2);
         }
         if (($model->payment_method ?? '') === self::METHOD_CREDIT && ($model->payment_status ?? '') === self::STATUS_UNPAID) {
-            return round((float) $model->amount, 2);
+            return PurchaseVatService::payableAmount($model);
         }
 
         return 0.0;
@@ -808,7 +808,7 @@ class DocumentPaymentService
             return;
         }
 
-        $amount = round((float) $model->amount, 2);
+        $amount = PurchaseVatService::payableAmount($model);
         $sum = round((float) $model->payments()->sum('amount'), 2);
         $delta = round($amount - $sum, 2);
         if (abs($delta) < 0.01) {

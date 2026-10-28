@@ -78,7 +78,7 @@ class AccountingOpeningService
             $credit += (float) $line['credit'];
         }
         $net = round($debit - $credit, 2);
-        $equityId = AccountingLedger::accountId($atelierId, ChartOfAccountsSeeder::CODE_EQUITY);
+        $equityId = AccountingLedger::mapped($atelierId, 'opening.equity');
         if ($net > 0.009) {
             AccountingLedger::push($lines, $equityId, 0, $net, 'سرمایه اول دوره');
         } elseif ($net < -0.009) {
