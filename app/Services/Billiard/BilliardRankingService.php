@@ -33,7 +33,7 @@ class BilliardRankingService
 
             $regs = BilliardRegistration::query()
                 ->whereIn('tournament_id', $tournamentIds)
-                ->where('status', BilliardRegistration::STATUS_CONFIRMED)
+                ->activeInTournament()
                 ->get();
 
             $byPlayer = [];

@@ -46,6 +46,8 @@ Route::prefix('billiard')->name('billiard.')->group(function () {
 
         Route::get('players', [BilliardAdminController::class, 'players']);
         Route::post('players', [BilliardAdminController::class, 'storePlayer']);
+        Route::post('players/bulk', [BilliardAdminController::class, 'bulkStorePlayers'])
+            ->middleware('throttle:10,1');
         Route::patch('players/{player}', [BilliardAdminController::class, 'updatePlayer']);
 
         Route::get('tournaments', [BilliardAdminController::class, 'tournaments']);

@@ -23,7 +23,7 @@ SQL دستی: `database/sql/create_billiard_tables_manual.sql`
 ```
 BILLIARD_ADMIN_PHONES=09xxxxxxxxx
 BILLIARD_FRONTEND_URL=https://billiard.webinoplus.ir
-BILLIARD_BRAND_NAME=هیأت بیلیارد
+BILLIARD_BRAND_NAME=هیأت بیلیارد شهرستان کرمان
 ```
 
 ## migrate

@@ -25,25 +25,37 @@ class BilliardRegistrationService
             ->where('tournament_id', $tournament->id)
             ->where('player_id', $player->id)
             ->first();
-        if ($existing && $existing->status !== BilliardRegistration::STATUS_CANCELLED
+
+        // فقط بعد از پرداخت/رایگان، ثبت‌نام قطعی است
+        if ($existing && $existing->hasSettledPayment()
+            && $existing->status !== BilliardRegistration::STATUS_CANCELLED
             && $existing->status !== BilliardRegistration::STATUS_REJECTED) {
             throw new RuntimeException('قبلاً در این مسابقه ثبت‌نام کرده‌اید.');
         }
 
         $fee = (int) $tournament->fee_toman;
+        $free = $fee <= 0;
 
-        return DB::transaction(function () use ($tournament, $player, $fee, $existing) {
+        return DB::transaction(function () use ($tournament, $player, $fee, $free, $existing) {
+            // تا پرداخت نشده در مسابقه قطعی نمی‌شود؛ فقط پیش‌نویس برای درگاه
             $payload = [
                 'tournament_id' => $tournament->id,
                 'player_id' => $player->id,
-                'status' => BilliardRegistration::STATUS_PENDING,
-                'payment_status' => $fee <= 0
+                'status' => $free
+                    ? BilliardRegistration::STATUS_CONFIRMED
+                    : BilliardRegistration::STATUS_PENDING,
+                'payment_status' => $free
                     ? BilliardRegistration::PAYMENT_WAIVED
                     : BilliardRegistration::PAYMENT_UNPAID,
                 'fee_toman' => $fee,
+                'confirmed_at' => $free ? now() : null,
+                'paid_at' => null,
+                'gateway_payment_id' => null,
+                'payment_ref' => null,
             ];
 
             if ($existing) {
+                // تلاش ناتمام / رد شده / لغو شده → از همان رکورد دوباره پرداخت
                 $existing->update($payload);
 
                 return $existing->fresh(['player', 'tournament']);
@@ -98,7 +110,7 @@ class BilliardRegistrationService
             'gateway_payment_id' => $payment->id,
             'payment_ref' => $refId,
             'paid_at' => now(),
-            // بعد از پرداخت موفق به‌صورت پیش‌فرض تأیید می‌شود؛ ادمین می‌تواند رد کند
+            // بعد از پرداخت موفق ثبت‌نام در مسابقه قطعی می‌شود
             'status' => BilliardRegistration::STATUS_CONFIRMED,
             'confirmed_at' => now(),
         ]);
@@ -106,6 +118,10 @@ class BilliardRegistrationService
 
     public function confirm(BilliardRegistration $registration): BilliardRegistration
     {
+        if (! $registration->hasSettledPayment()) {
+            throw new RuntimeException('تا قبل از پرداخت، ثبت‌نام قابل تأیید نیست.');
+        }
+
         $registration->update([
             'status' => BilliardRegistration::STATUS_CONFIRMED,
             'confirmed_at' => now(),

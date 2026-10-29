@@ -125,9 +125,7 @@ class BilliardTournament extends Model
             return false;
         }
         if ($this->capacity) {
-            $count = $this->registrations()
-                ->whereIn('status', [BilliardRegistration::STATUS_PENDING, BilliardRegistration::STATUS_CONFIRMED])
-                ->count();
+            $count = $this->registrations()->activeInTournament()->count();
             if ($count >= $this->capacity) {
                 return false;
             }

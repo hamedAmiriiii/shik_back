@@ -22,12 +22,12 @@ class BilliardBracketService
         }
 
         $regs = $tournament->registrations()
-            ->where('status', BilliardRegistration::STATUS_CONFIRMED)
+            ->activeInTournament()
             ->with('player')
             ->get();
 
         if ($regs->count() < 2) {
-            throw new RuntimeException('حداقل دو بازیکن تأییدشده لازم است.');
+            throw new RuntimeException('حداقل دو بازیکن پرداخت‌کرده لازم است.');
         }
 
         if ($orderedPlayerIds !== null) {

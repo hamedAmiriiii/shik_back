@@ -63,10 +63,36 @@ class BilliardRegistration extends Model
         return $this->belongsTo(BilliardUser::class, 'player_id');
     }
 
+    public function hasSettledPayment(): bool
+    {
+        return in_array($this->payment_status, [self::PAYMENT_PAID, self::PAYMENT_WAIVED], true);
+    }
+
+    /** ثبت‌نام قطعی در مسابقه فقط بعد از پرداخت (یا رایگان بودن) */
+    public function isActiveInTournament(): bool
+    {
+        return $this->status === self::STATUS_CONFIRMED && $this->hasSettledPayment();
+    }
+
+    public function isIncompletePayment(): bool
+    {
+        return ! in_array($this->status, [self::STATUS_CANCELLED, self::STATUS_REJECTED], true)
+            && ! $this->hasSettledPayment();
+    }
+
     public function isEligibleForDraw(): bool
     {
-        return $this->status === self::STATUS_CONFIRMED
-            && in_array($this->payment_status, [self::PAYMENT_PAID, self::PAYMENT_WAIVED, self::PAYMENT_UNPAID], true);
+        return $this->isActiveInTournament();
+    }
+
+    /**
+     * ظرفیت و شمارش بازیکن‌های مسابقه فقط ثبت‌نام‌های پرداخت‌شده/رایگان.
+     */
+    public function scopeActiveInTournament($query)
+    {
+        return $query
+            ->where('status', self::STATUS_CONFIRMED)
+            ->whereIn('payment_status', [self::PAYMENT_PAID, self::PAYMENT_WAIVED]);
     }
 
     /**

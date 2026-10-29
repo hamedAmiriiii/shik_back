@@ -30,7 +30,23 @@ class BilliardAdminController extends Controller
             'players' => BilliardUser::query()->where('role', BilliardUser::ROLE_PLAYER)->count(),
             'tournaments_live' => BilliardTournament::query()->where('status', BilliardTournament::STATUS_LIVE)->count(),
             'tournaments_open' => BilliardTournament::query()->where('status', BilliardTournament::STATUS_REGISTRATION_OPEN)->count(),
-            'pending_registrations' => BilliardRegistration::query()->where('status', BilliardRegistration::STATUS_PENDING)->count(),
+            'pending_registrations' => BilliardRegistration::query()
+                ->where('status', BilliardRegistration::STATUS_PENDING)
+                ->whereIn('payment_status', [
+                    BilliardRegistration::PAYMENT_PAID,
+                    BilliardRegistration::PAYMENT_WAIVED,
+                ])
+                ->count(),
+            'awaiting_payment' => BilliardRegistration::query()
+                ->whereNotIn('status', [
+                    BilliardRegistration::STATUS_CANCELLED,
+                    BilliardRegistration::STATUS_REJECTED,
+                ])
+                ->whereNotIn('payment_status', [
+                    BilliardRegistration::PAYMENT_PAID,
+                    BilliardRegistration::PAYMENT_WAIVED,
+                ])
+                ->count(),
         ]);
     }
 
@@ -177,6 +193,80 @@ class BilliardAdminController extends Controller
         }
 
         return response(['player' => $user->fresh()->toAdminArray()], 201);
+    }
+
+    /**
+     * ورود گروهی بازیکن از اکسل — مثل bulk کالا:
+     * اگر موبایل وجود داشته باشد به‌روزرسانی، وگرنه ثبت جدید.
+     */
+    public function bulkStorePlayers(Request $request)
+    {
+        $data = $request->validate([
+            'players' => 'required|array|min:1|max:2000',
+            'players.*.first_name' => 'required|string|max:100',
+            'players.*.last_name' => 'required|string|max:100',
+            'players.*.phone' => 'required|string|max:20',
+            'players.*.city' => 'nullable|string|max:100',
+            'players.*.club' => 'nullable|string|max:150',
+            'players.*.national_id' => 'nullable|string|max:20',
+        ]);
+
+        $created = 0;
+        $updated = 0;
+        $errors = [];
+
+        foreach ($data['players'] as $index => $row) {
+            $rowNum = $index + 1;
+            $phone = PhoneTools::normalizeIranPhone($row['phone'] ?? '');
+            if (! PhoneTools::isValidIranMobile($phone)) {
+                $errors[] = "ردیف {$rowNum}: شماره موبایل معتبر نیست.";
+                continue;
+            }
+
+            $nid = isset($row['national_id'])
+                ? (preg_replace('/\D/', '', (string) $row['national_id']) ?: null)
+                : null;
+
+            $payload = [
+                'first_name' => trim((string) $row['first_name']),
+                'last_name' => trim((string) $row['last_name']),
+                'city' => isset($row['city']) ? (trim((string) $row['city']) ?: null) : null,
+                'club' => isset($row['club']) ? (trim((string) $row['club']) ?: null) : null,
+                'national_id' => $nid,
+            ];
+
+            $existing = BilliardUser::query()->where('phone', $phone)->first();
+            if ($existing) {
+                // ادمین/اپراتور را با ایمپورت بازیکن بازنویسی نکن
+                if ($existing->isStaff()) {
+                    $errors[] = "ردیف {$rowNum}: شماره {$phone} متعلق به کاربر سیستمی است.";
+                    continue;
+                }
+                $existing->update($payload + [
+                    'role' => BilliardUser::ROLE_PLAYER,
+                    'is_active' => true,
+                ]);
+                $updated++;
+                continue;
+            }
+
+            BilliardUser::create($payload + [
+                'phone' => $phone,
+                'role' => BilliardUser::ROLE_PLAYER,
+                'membership_at' => now(),
+                'is_active' => true,
+            ]);
+            $created++;
+        }
+
+        return response([
+            'message' => "پردازش شد: {$created} ثبت جدید، {$updated} به‌روزرسانی"
+                .($errors !== [] ? ' — '.count($errors).' خطا' : ''),
+            'created_count' => $created,
+            'updated_count' => $updated,
+            'error_count' => count($errors),
+            'errors' => array_slice($errors, 0, 50),
+        ]);
     }
 
     public function updatePlayer(Request $request, BilliardUser $player)
@@ -343,7 +433,11 @@ class BilliardAdminController extends Controller
 
     public function confirmRegistration(BilliardRegistration $registration, BilliardRegistrationService $service)
     {
-        return response(['registration' => $service->confirm($registration)->toApiArray()]);
+        try {
+            return response(['registration' => $service->confirm($registration)->toApiArray()]);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
     }
 
     public function rejectRegistration(BilliardRegistration $registration, BilliardRegistrationService $service)

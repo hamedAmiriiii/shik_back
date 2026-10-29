@@ -85,10 +85,7 @@ class BilliardPublicController extends Controller
     {
         $q = BilliardTournament::query()->with('discipline')->withCount([
             'registrations as registrations_count' => function ($query) {
-                $query->whereIn('status', [
-                    BilliardRegistration::STATUS_PENDING,
-                    BilliardRegistration::STATUS_CONFIRMED,
-                ]);
+                $query->activeInTournament();
             },
         ]);
 
@@ -120,10 +117,7 @@ class BilliardPublicController extends Controller
             ->with(['discipline', 'placePoints'])
             ->withCount([
                 'registrations as registrations_count' => function ($query) {
-                    $query->whereIn('status', [
-                        BilliardRegistration::STATUS_PENDING,
-                        BilliardRegistration::STATUS_CONFIRMED,
-                    ]);
+                    $query->activeInTournament();
                 },
             ])
             ->where('slug', $slug)
@@ -132,7 +126,7 @@ class BilliardPublicController extends Controller
         $players = BilliardRegistration::query()
             ->with('player')
             ->where('tournament_id', $tournament->id)
-            ->where('status', BilliardRegistration::STATUS_CONFIRMED)
+            ->activeInTournament()
             ->orderBy('seed')
             ->get()
             ->map(fn (BilliardRegistration $r) => $r->toApiArray());
@@ -311,7 +305,7 @@ class BilliardPublicController extends Controller
         $history = BilliardRegistration::query()
             ->with('tournament.discipline')
             ->where('player_id', $player->id)
-            ->where('status', BilliardRegistration::STATUS_CONFIRMED)
+            ->activeInTournament()
             ->orderByDesc('id')
             ->get()
             ->map(function (BilliardRegistration $r) use ($player) {

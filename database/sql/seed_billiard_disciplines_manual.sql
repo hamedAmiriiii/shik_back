@@ -1,4 +1,4 @@
--- رشته‌های اولیه هیأت بیلیارد
+-- رشته‌های اولیه هیأت بیلیارد شهرستان کرمان
 INSERT INTO `billiard_disciplines` (`name`, `slug`, `is_active`, `sort_order`, `created_at`, `updated_at`)
 SELECT 'اسنوکر', 'snooker', 1, 1, NOW(), NOW()
 FROM DUAL
