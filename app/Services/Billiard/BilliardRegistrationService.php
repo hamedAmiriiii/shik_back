@@ -116,6 +116,77 @@ class BilliardRegistrationService
         ]);
     }
 
+    /**
+     * افزودن دستی بازیکن توسط ادمین — بلافاصله در مسابقه قطعی می‌شود.
+     * به‌صورت پیش‌فرض هزینه رایگان (waived) ثبت می‌شود.
+     */
+    public function adminAddPlayer(
+        BilliardTournament $tournament,
+        BilliardUser $player,
+        bool $waiveFee = true
+    ): BilliardRegistration {
+        if ($player->isStaff()) {
+            throw new RuntimeException('کاربر سیستمی را نمی‌توان به‌عنوان بازیکن اضافه کرد.');
+        }
+        if (! $player->is_active) {
+            throw new RuntimeException('این بازیکن غیرفعال است.');
+        }
+        if (! $player->first_name || ! $player->last_name || ! $player->phone) {
+            throw new RuntimeException('نام، نام خانوادگی و موبایل بازیکن الزامی است.');
+        }
+        if (in_array($tournament->status, [
+            BilliardTournament::STATUS_FINISHED,
+            BilliardTournament::STATUS_CANCELLED,
+        ], true)) {
+            throw new RuntimeException('این مسابقه پایان یافته یا لغو شده است.');
+        }
+
+        $existing = BilliardRegistration::query()
+            ->where('tournament_id', $tournament->id)
+            ->where('player_id', $player->id)
+            ->first();
+
+        if ($existing && $existing->isActiveInTournament()) {
+            throw new RuntimeException('این بازیکن از قبل در مسابقه ثبت است.');
+        }
+
+        if ($tournament->capacity) {
+            $count = $tournament->registrations()->activeInTournament()->count();
+            if ($count >= (int) $tournament->capacity) {
+                throw new RuntimeException('ظرفیت مسابقه تکمیل شده است.');
+            }
+        }
+
+        $fee = (int) $tournament->fee_toman;
+        $settled = $waiveFee || $fee <= 0;
+
+        return DB::transaction(function () use ($tournament, $player, $fee, $settled, $existing) {
+            $payload = [
+                'tournament_id' => $tournament->id,
+                'player_id' => $player->id,
+                'status' => $settled
+                    ? BilliardRegistration::STATUS_CONFIRMED
+                    : BilliardRegistration::STATUS_PENDING,
+                'payment_status' => $settled
+                    ? BilliardRegistration::PAYMENT_WAIVED
+                    : BilliardRegistration::PAYMENT_UNPAID,
+                'fee_toman' => $fee,
+                'confirmed_at' => $settled ? now() : null,
+                'paid_at' => null,
+                'gateway_payment_id' => null,
+                'payment_ref' => null,
+            ];
+
+            if ($existing) {
+                $existing->update($payload);
+
+                return $existing->fresh(['player', 'tournament']);
+            }
+
+            return BilliardRegistration::create($payload)->fresh(['player', 'tournament']);
+        });
+    }
+
     public function confirm(BilliardRegistration $registration): BilliardRegistration
     {
         if (! $registration->hasSettledPayment()) {

@@ -138,7 +138,8 @@ class BilliardAdminController extends Controller
                     ->orWhere('national_id', 'like', "%{$search}%");
             });
         }
-        $items = $q->paginate(30);
+        $perPage = min(200, max(10, (int) $request->query('per_page', 30)));
+        $items = $q->paginate($perPage);
 
         return response([
             'data' => collect($items->items())->map(fn (BilliardUser $u) => $u->toAdminArray())->values(),
@@ -429,6 +430,31 @@ class BilliardAdminController extends Controller
                 'total' => $items->total(),
             ],
         ]);
+    }
+
+    public function addTournamentPlayer(
+        Request $request,
+        BilliardTournament $tournament,
+        BilliardRegistrationService $service
+    ) {
+        $data = $request->validate([
+            'player_id' => 'required|integer|exists:billiard_users,id',
+            'waive_fee' => 'boolean',
+        ]);
+
+        $player = BilliardUser::query()->findOrFail((int) $data['player_id']);
+
+        try {
+            $registration = $service->adminAddPlayer(
+                $tournament,
+                $player,
+                (bool) ($data['waive_fee'] ?? true)
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response(['registration' => $registration->toApiArray()], 201);
     }
 
     public function confirmRegistration(BilliardRegistration $registration, BilliardRegistrationService $service)

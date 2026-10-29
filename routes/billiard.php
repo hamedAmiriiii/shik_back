@@ -62,6 +62,7 @@ Route::prefix('billiard')->name('billiard.')->group(function () {
         Route::delete('tables/{table}', [BilliardAdminController::class, 'destroyTable']);
 
         Route::get('registrations', [BilliardAdminController::class, 'registrations']);
+        Route::post('tournaments/{tournament}/registrations', [BilliardAdminController::class, 'addTournamentPlayer']);
         Route::post('registrations/{registration}/confirm', [BilliardAdminController::class, 'confirmRegistration']);
         Route::post('registrations/{registration}/reject', [BilliardAdminController::class, 'rejectRegistration']);
         Route::patch('registrations/{registration}/seed', [BilliardAdminController::class, 'updateRegistrationSeed']);
