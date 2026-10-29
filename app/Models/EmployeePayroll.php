@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\AccountingPeriodCloseService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Morilog\Jalali\Jalalian;
@@ -191,8 +192,7 @@ class EmployeePayroll extends Model
     }
 
     /**
-     * تاریخ سند هزینه/حسابداری برای این ماه حقوقی (آخرین روز همان ماه شمسی).
-     * حتی اگر پرداخت در ماه بعد ثبت شود، هزینه در ماه حقوق می‌نشیند.
+     * تاریخ اسمی ماه حقوقی (آخرین روز همان ماه شمسی).
      */
     public function periodExpenseDate(): string
     {
@@ -208,5 +208,30 @@ class EmployeePayroll extends Model
             ->toCarbon()
             ->timezone('Asia/Tehran')
             ->format('Y-m-d');
+    }
+
+    /**
+     * تاریخ ثبت هزینه/سند پرداخت حقوق.
+     * اگر ماه فیش داخل دورهٔ بسته‌شده باشد، روی امروز (دورهٔ باز) می‌نشیند تا پرداخت ممکن شود.
+     */
+    public function expenseDateForPosting(): string
+    {
+        $periodDate = $this->periodExpenseDate();
+        $atelierId = (int) $this->atelier_id;
+        if ($atelierId <= 0) {
+            return $periodDate;
+        }
+
+        $closed = AccountingPeriodCloseService::closedThrough($atelierId);
+        if ($closed && $periodDate <= $closed) {
+            return now('Asia/Tehran')->format('Y-m-d');
+        }
+
+        return $periodDate;
+    }
+
+    public function expenseDateFellBackToOpenPeriod(): bool
+    {
+        return $this->expenseDateForPosting() !== $this->periodExpenseDate();
     }
 }

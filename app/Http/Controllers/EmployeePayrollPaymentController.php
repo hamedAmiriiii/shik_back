@@ -372,7 +372,7 @@ class EmployeePayrollPaymentController extends Controller
 
     /**
      * هر پرداخت حقوق/مساعده یک ردیف در هزینه‌ها می‌سازد.
-     * تاریخ هزینه = آخرین روز ماه شمسی فیش (نه روز ثبت پرداخت).
+     * تاریخ: آخرین روز ماه فیش؛ اگر آن بازه بسته باشد، امروز (دورهٔ باز).
      *
      * @param  array<string, mixed>  $fields
      */
@@ -384,9 +384,15 @@ class EmployeePayrollPaymentController extends Controller
         array $fields
     ): Expense {
         $atelierId = (int) $payroll->atelier_id;
+        $expenseDate = $payroll->expenseDateForPosting();
+        if ($payroll->expenseDateFellBackToOpenPeriod()) {
+            $periodLabel = $payroll->payroll_year.'/'.str_pad((string) $payroll->payroll_month, 2, '0', STR_PAD_LEFT);
+            $title = trim($title).' (پرداخت پس از بستن — دوره '.$periodLabel.')';
+        }
+
         $payload = [
             'user_name' => $userName,
-            'date' => $payroll->periodExpenseDate(),
+            'date' => $expenseDate,
             'amount' => $amount,
             'title' => $title,
             'type' => 'جاری',
