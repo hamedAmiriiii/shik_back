@@ -486,7 +486,7 @@ class DocumentPaymentService
             throw new RuntimeException('این سند قبلاً از حساب پرداخت شده است.');
         }
 
-        self::assertCanDebit($atelierId, $shopAccountId, (float) $model->amount, $model);
+        self::assertCanDebit($atelierId, $shopAccountId, self::documentPayableAmount($model), $model);
 
         $payload = [
             'shop_account_id' => $shopAccountId,
@@ -687,7 +687,7 @@ class DocumentPaymentService
         ];
         if (! self::supportsSplits()) {
             $method = self::normalizeMethod($model->payment_method) ?: self::METHOD_ACCOUNT;
-            $amount = round((float) $model->amount, 2);
+            $amount = self::documentPayableAmount($model);
             $empty['methods'] = [$method];
             $empty['method_labels'] = [self::methodLabel($method)];
             if ($method === self::METHOD_ACCOUNT) {
@@ -906,7 +906,7 @@ class DocumentPaymentService
                 'invoice_id' => $model instanceof Invoice ? $model->id : null,
                 'expense_id' => $model instanceof Expense ? $model->id : null,
                 'method' => self::METHOD_CREDIT,
-                'amount' => round((float) $model->amount, 2),
+                'amount' => self::documentPayableAmount($model),
                 'shop_account_id' => null,
                 'cheque_id' => null,
                 'settled' => false,
@@ -1046,7 +1046,7 @@ class DocumentPaymentService
             'cheque_number' => $chequeNumber,
             'bank_name' => $bankName,
             'payee' => $chequeFields['payee'] ?? null,
-            'amount' => $amount !== null ? $amount : $model->amount,
+            'amount' => $amount !== null ? $amount : self::documentPayableAmount($model),
             'issue_date' => $chequeFields['issue_date'] ?? null,
             'due_date' => $chequeFields['due_date'],
             'title' => $chequeFields['title'] ?? $model->title,
@@ -1119,7 +1119,7 @@ class DocumentPaymentService
 
         $payload = [
             'shop_account_id' => $model->shop_account_id ?: $cheque->shop_account_id,
-            'amount' => $amount !== null ? $amount : $model->amount,
+            'amount' => $amount !== null ? $amount : self::documentPayableAmount($model),
         ];
         if ($model instanceof Expense) {
             $payload['expense_id'] = $model->id;
@@ -1164,7 +1164,7 @@ class DocumentPaymentService
 
     public static function persistSplits(Model $model, array $fields, string $userName): ?Cheque
     {
-        $splits = self::splitsFromFields($fields, (float) $model->amount, $model);
+        $splits = self::splitsFromFields($fields, self::documentPayableAmount($model), $model);
         $firstCheque = null;
 
         foreach ($splits as $index => $split) {
@@ -1218,7 +1218,7 @@ class DocumentPaymentService
         }
 
         $model->loadMissing('payments.cheque');
-        $upcoming = self::splitsFromFields($fields, (float) $model->amount, $model);
+        $upcoming = self::splitsFromFields($fields, self::documentPayableAmount($model), $model);
         $keepChequeIds = [];
         foreach ($upcoming as $split) {
             if (! empty($split['cheque_id'])) {
@@ -1267,12 +1267,24 @@ class DocumentPaymentService
             'invoice_id' => $model instanceof Invoice ? $model->id : null,
             'expense_id' => $model instanceof Expense ? $model->id : null,
             'method' => $method,
-            'amount' => $model->amount,
+            'amount' => self::documentPayableAmount($model),
             'shop_account_id' => $model->shop_account_id,
             'cheque_id' => $model->cheque_id ?? null,
             'settled' => $settled,
             'sort_order' => 0,
         ]);
+    }
+
+    /**
+     * مبلغ قابل پرداخت سند = پایه + ارزش افزوده (نه فقط amount پایه).
+     */
+    public static function documentPayableAmount(Model $model): float
+    {
+        if ($model instanceof Invoice || $model instanceof Expense) {
+            return PurchaseVatService::payableAmount($model);
+        }
+
+        return round((float) ($model->amount ?? 0), 2);
     }
 
     /**
