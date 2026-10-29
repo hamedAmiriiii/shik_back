@@ -2,9 +2,11 @@
 
 namespace App\Models;
 
+use App\Tools\ImageTools;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 class BilliardNews extends Model
 {
@@ -27,6 +29,43 @@ class BilliardNews extends Model
     public function coverUrl(): ?string
     {
         return $this->cover_path ? url(Storage::url($this->cover_path)) : null;
+    }
+
+    public function storeCover(string $dataUrl): void
+    {
+        $raw = $dataUrl;
+        if (strpos($raw, ',') !== false) {
+            $raw = substr($raw, strpos($raw, ',') + 1);
+        }
+        $content = base64_decode($raw, true);
+        if ($content === false || $content === '') {
+            throw new RuntimeException('عکس خبر را ارسال کنید.');
+        }
+        if (strlen($content) > 5 * 1024 * 1024) {
+            throw new RuntimeException('حجم عکس نباید بیشتر از ۵ مگابایت باشد.');
+        }
+        $info = @getimagesizefromstring($content);
+        $ext = [IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png', IMAGETYPE_WEBP => 'webp'][$info[2] ?? 0] ?? null;
+        if ($ext === null) {
+            throw new RuntimeException('فایل ارسالی تصویر معتبر نیست.');
+        }
+
+        $oldPath = $this->cover_path;
+        $path = ImageTools::saveFile("/billiard-news/{$this->id}/cover_".time().'.'.$ext, $content);
+        $this->forceFill(['cover_path' => $path])->save();
+
+        if ($oldPath && $oldPath !== $path && Storage::exists('public/'.$oldPath)) {
+            Storage::delete('public/'.$oldPath);
+        }
+    }
+
+    public function clearCover(): void
+    {
+        $oldPath = $this->cover_path;
+        $this->forceFill(['cover_path' => null])->save();
+        if ($oldPath && Storage::exists('public/'.$oldPath)) {
+            Storage::delete('public/'.$oldPath);
+        }
     }
 
     public static function makeUniqueSlug(string $title, ?int $ignoreId = null): string

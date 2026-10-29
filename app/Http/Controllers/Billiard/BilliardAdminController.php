@@ -50,7 +50,12 @@ class BilliardAdminController extends Controller
             'is_active' => 'boolean',
             'sort_order' => 'integer|min:0',
         ]);
-        $data['slug'] = $data['slug'] ?? Str::slug($data['name']);
+        $data['slug'] = $this->disciplineSlug($data['slug'] ?? null, $data['name']);
+        if (BilliardDiscipline::query()->where('slug', $data['slug'])->exists()) {
+            return response()->json(['message' => 'این رشته قبلاً ثبت شده است.'], 422);
+        }
+        $data['is_active'] = $data['is_active'] ?? true;
+        $data['sort_order'] = $data['sort_order'] ?? ((int) BilliardDiscipline::query()->max('sort_order') + 1);
         $item = BilliardDiscipline::create($data);
 
         return response(['discipline' => $item->toApiArray()], 201);
@@ -64,9 +69,40 @@ class BilliardAdminController extends Controller
             'is_active' => 'boolean',
             'sort_order' => 'integer|min:0',
         ]);
+        if (array_key_exists('slug', $data) || array_key_exists('name', $data)) {
+            $data['slug'] = $this->disciplineSlug(
+                $data['slug'] ?? $discipline->slug,
+                $data['name'] ?? $discipline->name
+            );
+            if (BilliardDiscipline::query()->where('slug', $data['slug'])->where('id', '!=', $discipline->id)->exists()) {
+                return response()->json(['message' => 'این اسلاگ قبلاً استفاده شده است.'], 422);
+            }
+        }
         $discipline->update($data);
 
         return response(['discipline' => $discipline->fresh()->toApiArray()]);
+    }
+
+    private function disciplineSlug(?string $slug, string $name): string
+    {
+        $slug = trim((string) $slug);
+        if ($slug !== '') {
+            return Str::slug($slug) ?: $slug;
+        }
+        $fromName = Str::slug($name);
+        if ($fromName !== '') {
+            return $fromName;
+        }
+        $map = [
+            'اسنوکر' => 'snooker',
+            'پاکت' => 'pocket',
+            '۸ توپ' => 'eight-ball',
+            '8 توپ' => 'eight-ball',
+            '۹ توپ' => 'nine-ball',
+            '9 توپ' => 'nine-ball',
+        ];
+
+        return $map[$name] ?? ('discipline-'.Str::lower(Str::random(6)));
     }
 
     // ——— Players / Users ———
@@ -443,16 +479,25 @@ class BilliardAdminController extends Controller
             'body' => 'required|string',
             'is_published' => 'boolean',
             'published_at' => 'nullable|date',
+            'cover_base64' => 'nullable|string',
         ]);
         $item = BilliardNews::create([
             'title' => $data['title'],
             'slug' => BilliardNews::makeUniqueSlug($data['title']),
             'body' => $data['body'],
-            'is_published' => $data['is_published'] ?? true,
+            'is_published' => array_key_exists('is_published', $data) ? (bool) $data['is_published'] : true,
             'published_at' => $data['published_at'] ?? now(),
         ]);
 
-        return response(['news' => $item->toApiArray(true)], 201);
+        if ($request->filled('cover_base64')) {
+            try {
+                $item->storeCover($request->input('cover_base64'));
+            } catch (RuntimeException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+        }
+
+        return response(['news' => $item->fresh()->toApiArray(true)], 201);
     }
 
     public function updateNews(Request $request, BilliardNews $news)
@@ -462,17 +507,28 @@ class BilliardAdminController extends Controller
             'body' => 'sometimes|string',
             'is_published' => 'boolean',
             'published_at' => 'nullable|date',
+            'cover_base64' => 'nullable|string',
+            'remove_cover' => 'boolean',
         ]);
-        if (isset($data['title'])) {
-            // keep slug stable unless you want regenerate — keep
-        }
+        unset($data['cover_base64'], $data['remove_cover']);
         $news->update($data);
+
+        if ($request->boolean('remove_cover')) {
+            $news->clearCover();
+        } elseif ($request->filled('cover_base64')) {
+            try {
+                $news->storeCover($request->input('cover_base64'));
+            } catch (RuntimeException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+        }
 
         return response(['news' => $news->fresh()->toApiArray(true)]);
     }
 
     public function destroyNews(BilliardNews $news)
     {
+        $news->clearCover();
         $news->delete();
 
         return response(['message' => 'حذف شد.']);
