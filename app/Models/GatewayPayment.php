@@ -20,6 +20,8 @@ class GatewayPayment extends Model
 
     public const TYPE_TABLE_ORDER = 'table_order';
 
+    public const TYPE_BILLIARD_REGISTRATION = 'billiard_registration';
+
     public const STATUS_PENDING = 'pending';
 
     public const STATUS_PAID = 'paid';

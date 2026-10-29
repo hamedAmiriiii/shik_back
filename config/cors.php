@@ -64,6 +64,11 @@ if ($rawOrigins !== null && trim((string) $rawOrigins) === '*') {
     if ($repairUrl !== '') {
         $allowedOrigins = $mergeUnique($allowedOrigins, [$repairUrl]);
     }
+
+    $billiardUrl = rtrim((string) env('BILLIARD_FRONTEND_URL', 'https://billiard.webinoplus.ir'), '/');
+    if ($billiardUrl !== '') {
+        $allowedOrigins = $mergeUnique($allowedOrigins, [$billiardUrl]);
+    }
 }
 
 $rawPatterns = env('CORS_ALLOWED_ORIGIN_PATTERNS');

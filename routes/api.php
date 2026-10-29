@@ -196,6 +196,8 @@ Route::prefix('repair')->name('repair.')->group(function () {
     });
 });
 
+require __DIR__.'/billiard.php';
+
 Route::name('geo.')->prefix('geo')->group(function (){
     Route::get('cities' , [\App\Http\Controllers\CityController::class,'index']);
     Route::get('states' , [\App\Http\Controllers\StateController::class,'index']);

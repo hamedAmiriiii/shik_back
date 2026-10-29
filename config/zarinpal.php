@@ -12,6 +12,10 @@ return [
             'ZARINPAL_RETURN_HOSTS',
             'webinoplus.ir,www.webinoplus.ir,webinoo-plus.ir,www.webinoo-plus.ir,api.webinoplus.ir,localhost'
         )),
-        [(string) parse_url((string) env('REPAIR_FRONTEND_URL', ''), PHP_URL_HOST)]
+        [
+            (string) parse_url((string) env('REPAIR_FRONTEND_URL', ''), PHP_URL_HOST),
+            (string) parse_url((string) env('BILLIARD_FRONTEND_URL', 'https://billiard.webinoplus.ir'), PHP_URL_HOST),
+            'billiard.webinoplus.ir',
+        ]
     ))))),
 ];

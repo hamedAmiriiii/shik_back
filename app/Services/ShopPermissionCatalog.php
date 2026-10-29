@@ -40,6 +40,8 @@ class ShopPermissionCatalog
         'confirmation-code',
         'agency-requests',
         'oil',
+        'repair',
+        'billiard',
     ];
 
     /**

@@ -11,6 +11,8 @@ use App\Models\Setting;
 use App\Models\ShopPlan;
 use App\Models\TableOrder;
 use App\Models\User;
+use App\Models\BilliardRegistration;
+use App\Services\Billiard\BilliardRegistrationService;
 use App\Services\Repair\RepairRequestService;
 use App\Services\Repair\RepairSms;
 use Illuminate\Support\Facades\DB;
@@ -484,6 +486,8 @@ class GatewayPaymentService
                 $this->fulfillRepairSms($locked);
             } elseif ($locked->type === GatewayPayment::TYPE_TABLE_ORDER) {
                 app(TableOrderCheckoutService::class)->fulfillOnlinePayment($locked, $refId);
+            } elseif ($locked->type === GatewayPayment::TYPE_BILLIARD_REGISTRATION) {
+                app(BilliardRegistrationService::class)->fulfillOnlinePayment($locked, $refId);
             } else {
                 throw new RuntimeException('نوع خرید پشتیبانی نمی‌شود.');
             }
@@ -685,6 +689,33 @@ class GatewayPaymentService
                 (int) $package->price_rial,
                 'شارژ پنل پیامک تعمیرات - '.$package->name,
                 ['sms_count' => $package->sms_count, 'name' => $package->name],
+            ];
+        }
+
+        if ($type === GatewayPayment::TYPE_BILLIARD_REGISTRATION) {
+            $registration = BilliardRegistration::query()->find($itemId);
+            if (! $registration) {
+                throw new RuntimeException('ثبت‌نام مسابقه یافت نشد.');
+            }
+            if (in_array($registration->payment_status, [
+                BilliardRegistration::PAYMENT_PAID,
+                BilliardRegistration::PAYMENT_WAIVED,
+            ], true)) {
+                throw new RuntimeException('این ثبت‌نام قبلاً پرداخت شده است.');
+            }
+            $amountRial = (int) $registration->fee_toman * 10;
+            if ($amountRial < 1000) {
+                throw new RuntimeException('مبلغ ثبت‌نام برای پرداخت آنلاین معتبر نیست.');
+            }
+
+            return [
+                $amountRial,
+                'ثبت‌نام مسابقه #'.$registration->tournament_id.' - بازیکن #'.$registration->player_id,
+                [
+                    'registration_id' => (int) $registration->id,
+                    'tournament_id' => (int) $registration->tournament_id,
+                    'fee_toman' => (int) $registration->fee_toman,
+                ],
             ];
         }
 
