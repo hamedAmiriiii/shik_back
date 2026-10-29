@@ -117,9 +117,40 @@ class RawMaterialInvoiceService
             'invoice_item_id' => $item?->id,
         ]);
 
+        // فاکتور: مبلغ پایه + VAT جدا؛ لات/بهای تمام‌شده: واحد شامل VAT
+        $this->absorbInvoiceVatIntoLotPrice($lot->fresh(), $invoice);
+
         AccountingDocumentPoster::syncInvoice($invoice->fresh(['payments', 'rawMaterialLots']));
 
         return $lot->fresh(['invoice', 'invoiceItem']);
+    }
+
+    /**
+     * سهم ارزش افزوده فاکتور را روی قیمت واحد لات پخش می‌کند
+     * (مثلاً ۱۰۰ + ۱۰٪ → قیمت لات ۱۱۰ برای بهای تمام‌شده/تولید).
+     */
+    protected function absorbInvoiceVatIntoLotPrice(RawMaterialLot $lot, Invoice $invoice): void
+    {
+        $vat = PurchaseVatService::vatAmount($invoice);
+        $qty = round((float) $lot->quantity_kg, 3);
+        if ($vat < 0.01 || $qty < 0.001) {
+            return;
+        }
+
+        $baseUnit = round((float) $lot->price_per_kg, 2);
+        $lotBase = round($qty * $baseUnit, 2);
+        $invoiceBase = round((float) $invoice->amount, 2);
+        if ($invoiceBase < 0.01 || $lotBase < 0.01) {
+            return;
+        }
+
+        $vatShare = round($vat * ($lotBase / $invoiceBase), 2);
+        $newUnit = round($baseUnit + ($vatShare / $qty), 2);
+        if ($newUnit <= $baseUnit) {
+            return;
+        }
+
+        $lot->update(['price_per_kg' => $newUnit]);
     }
 
     /**
