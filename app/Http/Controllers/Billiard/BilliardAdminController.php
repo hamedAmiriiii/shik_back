@@ -754,6 +754,9 @@ class BilliardAdminController extends Controller
             'slot2.match_id' => 'nullable|integer',
             'slot2.match_no' => 'nullable|integer|min:1',
             'slot2.outcome' => 'nullable|in:winner,loser',
+            'table_id' => 'nullable|integer',
+            'scheduled_on' => 'nullable|date',
+            'scheduled_at' => 'nullable|date_format:H:i',
         ]);
 
         try {
@@ -764,7 +767,12 @@ class BilliardAdminController extends Controller
                 $data['slot1'],
                 $data['slot2'],
                 $data['match_id'] ?? null,
-                $data['round_label'] ?? null
+                $data['round_label'] ?? null,
+                [
+                    'table_id' => array_key_exists('table_id', $data) ? ($data['table_id'] !== null ? (int) $data['table_id'] : null) : null,
+                    'scheduled_on' => $data['scheduled_on'] ?? null,
+                    'scheduled_at' => $data['scheduled_at'] ?? null,
+                ]
             );
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);

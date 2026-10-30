@@ -54,6 +54,14 @@ class BilliardBracketService
             throw new RuntimeException('حداقل دو جایگاه لازم است.');
         }
 
+        $groupCount = BilliardMatch::query()
+            ->where('tournament_id', $tournament->id)
+            ->where('phase', BilliardMatch::PHASE_GROUP)
+            ->count();
+        if ($groupCount < 1) {
+            throw new RuntimeException('اول همه بازی‌های گروهی را بسازید، بعد جدول حذفی را ایجاد کنید.');
+        }
+
         $size = 1;
         while ($size < $bracketSize) {
             $size *= 2;
@@ -188,6 +196,9 @@ class BilliardBracketService
      * @param  array{type:string,player_id?:int|null,match_id?:int|null,outcome?:string|null}  $slot1
      * @param  array{type:string,player_id?:int|null,match_id?:int|null,outcome?:string|null}  $slot2
      */
+    /**
+     * @param  array{table_id?:int|null,scheduled_on?:string|null,scheduled_at?:string|null}|null  $schedule
+     */
     public function saveGroupMatch(
         BilliardTournament $tournament,
         string $groupCode,
@@ -195,14 +206,15 @@ class BilliardBracketService
         array $slot1,
         array $slot2,
         ?int $matchId = null,
-        ?string $roundLabel = null
+        ?string $roundLabel = null,
+        ?array $schedule = null
     ): BilliardMatch {
         $groupCode = strtoupper(trim($groupCode));
         if ($groupCode === '') {
             throw new RuntimeException('کد گروه لازم است.');
         }
 
-        return DB::transaction(function () use ($tournament, $groupCode, $position, $slot1, $slot2, $matchId, $roundLabel) {
+        return DB::transaction(function () use ($tournament, $groupCode, $position, $slot1, $slot2, $matchId, $roundLabel, $schedule) {
             if ($matchId) {
                 $match = BilliardMatch::query()
                     ->where('tournament_id', $tournament->id)
@@ -231,7 +243,7 @@ class BilliardBracketService
             }
 
             $matchNo = (int) $match->match_no;
-            $match->fill([
+            $fill = [
                 'group_code' => $groupCode,
                 'phase' => BilliardMatch::PHASE_GROUP,
                 'round' => 1,
@@ -243,7 +255,21 @@ class BilliardBracketService
                 'slot1_source_outcome' => $resolved1['source_outcome'],
                 'slot2_source_match_id' => $resolved2['source_match_id'],
                 'slot2_source_outcome' => $resolved2['source_outcome'],
-            ]);
+            ];
+
+            if (is_array($schedule)) {
+                if (array_key_exists('table_id', $schedule)) {
+                    $fill['table_id'] = $schedule['table_id'] !== null ? (int) $schedule['table_id'] : null;
+                }
+                if (array_key_exists('scheduled_on', $schedule)) {
+                    $fill['scheduled_on'] = $schedule['scheduled_on'] ?: null;
+                }
+                if (array_key_exists('scheduled_at', $schedule)) {
+                    $fill['scheduled_at'] = $schedule['scheduled_at'] ?: null;
+                }
+            }
+
+            $match->fill($fill);
             $match->save();
 
             if ($tournament->status === BilliardTournament::STATUS_REGISTRATION_CLOSED
