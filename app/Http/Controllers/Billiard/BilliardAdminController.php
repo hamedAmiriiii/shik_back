@@ -578,6 +578,31 @@ class BilliardAdminController extends Controller
         return response(['registration' => $service->reject($registration)->toApiArray()]);
     }
 
+    public function destroyRegistration(BilliardRegistration $registration)
+    {
+        $registration->delete();
+
+        return response(['message' => 'ثبت‌نام حذف شد.']);
+    }
+
+    public function bulkRemoveRegistrations(Request $request, BilliardTournament $tournament)
+    {
+        $data = $request->validate([
+            'registration_ids' => 'required|array|min:1|max:500',
+            'registration_ids.*' => 'integer',
+        ]);
+        $ids = array_values(array_unique(array_map('intval', $data['registration_ids'])));
+        $deleted = BilliardRegistration::query()
+            ->where('tournament_id', $tournament->id)
+            ->whereIn('id', $ids)
+            ->delete();
+
+        return response([
+            'message' => $deleted.' ثبت‌نام حذف شد.',
+            'deleted' => $deleted,
+        ]);
+    }
+
     public function updateRegistrationSeed(Request $request, BilliardRegistration $registration)
     {
         $data = $request->validate(['seed' => 'nullable|integer|min:1|max:256']);

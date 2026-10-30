@@ -189,12 +189,11 @@ class BilliardRegistrationService
 
     public function confirm(BilliardRegistration $registration): BilliardRegistration
     {
-        if (! $registration->hasSettledPayment()) {
-            throw new RuntimeException('تا قبل از پرداخت، ثبت‌نام قابل تأیید نیست.');
-        }
-
         $registration->update([
             'status' => BilliardRegistration::STATUS_CONFIRMED,
+            'payment_status' => $registration->hasSettledPayment()
+                ? $registration->payment_status
+                : BilliardRegistration::PAYMENT_WAIVED,
             'confirmed_at' => now(),
         ]);
 
