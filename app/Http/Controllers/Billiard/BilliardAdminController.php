@@ -449,6 +449,10 @@ class BilliardAdminController extends Controller
 
     public function destroyTable(BilliardTable $table)
     {
+        BilliardMatch::query()
+            ->where('table_id', $table->id)
+            ->update(['table_id' => null]);
+
         $table->delete();
 
         return response(['message' => 'حذف شد.']);
