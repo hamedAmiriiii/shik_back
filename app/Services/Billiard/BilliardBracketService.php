@@ -122,6 +122,65 @@ class BilliardBracketService
     }
 
     /**
+     * نشاندن برنده/بازنده یک بازی دیگر در جایگاه (برای حذفی بعد از گروه یا بازی‌های گروهی).
+     */
+    public function assignSlotSource(
+        BilliardMatch $match,
+        int $slot,
+        ?int $sourceMatchId = null,
+        ?int $sourceMatchNo = null,
+        string $outcome = BilliardMatch::SOURCE_WINNER
+    ): BilliardMatch {
+        if (! in_array($slot, [1, 2], true)) {
+            throw new RuntimeException('جایگاه باید ۱ یا ۲ باشد.');
+        }
+        if (in_array($match->status, [BilliardMatch::STATUS_FINISHED, BilliardMatch::STATUS_WALKOVER], true)) {
+            throw new RuntimeException('بازی تمام‌شده قابل ویرایش نیست.');
+        }
+        if (! in_array($outcome, [BilliardMatch::SOURCE_WINNER, BilliardMatch::SOURCE_LOSER], true)) {
+            throw new RuntimeException('نتیجه مرجع باید winner یا loser باشد.');
+        }
+
+        $src = null;
+        if ($sourceMatchId) {
+            $src = BilliardMatch::query()
+                ->where('tournament_id', $match->tournament_id)
+                ->where('id', $sourceMatchId)
+                ->first();
+        } elseif ($sourceMatchNo) {
+            $src = BilliardMatch::query()
+                ->where('tournament_id', $match->tournament_id)
+                ->where('match_no', $sourceMatchNo)
+                ->first();
+        }
+
+        if (! $src) {
+            throw new RuntimeException('بازی مرجع یافت نشد.');
+        }
+        if ((int) $src->id === (int) $match->id) {
+            throw new RuntimeException('بازی نمی‌تواند به خودش ارجاع دهد.');
+        }
+
+        $resolved = $this->resolveSlotInput($match->tournament, [
+            'type' => 'source',
+            'match_id' => (int) $src->id,
+            'outcome' => $outcome,
+        ]);
+
+        $field = $slot === 1 ? 'player1_id' : 'player2_id';
+        $sourceMatchField = $slot === 1 ? 'slot1_source_match_id' : 'slot2_source_match_id';
+        $sourceOutcomeField = $slot === 1 ? 'slot1_source_outcome' : 'slot2_source_outcome';
+
+        $match->update([
+            $field => $resolved['player_id'],
+            $sourceMatchField => $resolved['source_match_id'],
+            $sourceOutcomeField => $resolved['source_outcome'],
+        ]);
+
+        return $match->fresh(['player1', 'player2', 'poolTable']);
+    }
+
+    /**
      * افزودن یا به‌روزرسانی بازی گروهی با اسلات بازیکن / برنده / بازنده.
      *
      * @param  array{type:string,player_id?:int|null,match_id?:int|null,outcome?:string|null}  $slot1
@@ -158,18 +217,24 @@ class BilliardBracketService
                 ]);
                 if (! $match->exists) {
                     $match->status = BilliardMatch::STATUS_SCHEDULED;
+                    $match->match_no = BilliardMatch::nextMatchNo((int) $tournament->id);
                 }
             }
 
             $resolved1 = $this->resolveSlotInput($tournament, $slot1);
             $resolved2 = $this->resolveSlotInput($tournament, $slot2);
 
+            if (! $match->match_no) {
+                $match->match_no = BilliardMatch::nextMatchNo((int) $tournament->id);
+            }
+
+            $matchNo = (int) $match->match_no;
             $match->fill([
                 'group_code' => $groupCode,
                 'phase' => BilliardMatch::PHASE_GROUP,
                 'round' => 1,
                 'position' => $position,
-                'round_label' => $roundLabel ?: ('گروه '.$groupCode.' · بازی '.$position),
+                'round_label' => $roundLabel ?: ('گروه '.$groupCode.' · بازی '.$matchNo),
                 'player1_id' => $resolved1['player_id'],
                 'player2_id' => $resolved2['player_id'],
                 'slot1_source_match_id' => $resolved1['source_match_id'],
@@ -265,6 +330,7 @@ class BilliardBracketService
     {
         $rounds = (int) log($bracketSize, 2);
         $matchesByRound = [];
+        $matchNo = BilliardMatch::nextMatchNo((int) $tournament->id);
 
         for ($round = 1; $round <= $rounds; $round++) {
             $count = (int) ($bracketSize / (2 ** $round));
@@ -273,6 +339,7 @@ class BilliardBracketService
             for ($pos = 1; $pos <= $count; $pos++) {
                 $match = BilliardMatch::create([
                     'tournament_id' => $tournament->id,
+                    'match_no' => $matchNo,
                     'phase' => BilliardMatch::PHASE_KNOCKOUT,
                     'group_code' => '',
                     'round' => $round,
@@ -281,6 +348,7 @@ class BilliardBracketService
                     'status' => BilliardMatch::STATUS_SCHEDULED,
                 ]);
                 $matchesByRound[$round][$pos] = $match;
+                $matchNo++;
             }
         }
 
@@ -288,10 +356,24 @@ class BilliardBracketService
             foreach ($matchesByRound[$round] as $pos => $match) {
                 $nextPos = (int) ceil($pos / 2);
                 $slot = ($pos % 2 === 1) ? 1 : 2;
+                $next = $matchesByRound[$round + 1][$nextPos];
                 $match->update([
-                    'next_match_id' => $matchesByRound[$round + 1][$nextPos]->id,
+                    'next_match_id' => $next->id,
                     'next_slot' => $slot,
                 ]);
+
+                // جایگاه بعدی را به «برنده این بازی» وصل کن تا کل درخت از اول چیده باشد
+                if ($slot === 1) {
+                    $next->update([
+                        'slot1_source_match_id' => $match->id,
+                        'slot1_source_outcome' => BilliardMatch::SOURCE_WINNER,
+                    ]);
+                } else {
+                    $next->update([
+                        'slot2_source_match_id' => $match->id,
+                        'slot2_source_outcome' => BilliardMatch::SOURCE_WINNER,
+                    ]);
+                }
             }
         }
     }
@@ -326,20 +408,23 @@ class BilliardBracketService
 
         if ($type === 'source') {
             $matchId = (int) ($slot['match_id'] ?? 0);
+            $matchNo = (int) ($slot['match_no'] ?? 0);
             $outcome = $slot['outcome'] ?? BilliardMatch::SOURCE_WINNER;
-            if (! $matchId) {
-                throw new RuntimeException('شناسه بازی مرجع لازم است.');
+            if (! $matchId && ! $matchNo) {
+                throw new RuntimeException('شماره بازی مرجع لازم است.');
             }
             if (! in_array($outcome, [BilliardMatch::SOURCE_WINNER, BilliardMatch::SOURCE_LOSER], true)) {
                 throw new RuntimeException('نتیجه مرجع باید winner یا loser باشد.');
             }
             $src = BilliardMatch::query()
                 ->where('tournament_id', $tournament->id)
-                ->where('id', $matchId)
+                ->when($matchId, fn ($q) => $q->where('id', $matchId))
+                ->when(! $matchId && $matchNo, fn ($q) => $q->where('match_no', $matchNo))
                 ->first();
             if (! $src) {
                 throw new RuntimeException('بازی مرجع یافت نشد.');
             }
+            $matchId = (int) $src->id;
 
             $playerId = null;
             if (in_array($src->status, [BilliardMatch::STATUS_FINISHED, BilliardMatch::STATUS_WALKOVER], true) && $src->winner_id) {

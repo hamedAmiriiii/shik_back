@@ -146,6 +146,7 @@ class BilliardPublicController extends Controller
         $matches = BilliardMatch::query()
             ->with(['player1', 'player2', 'winner', 'poolTable'])
             ->where('tournament_id', $tournament->id)
+            ->orderBy('match_no')
             ->orderBy('round')
             ->orderBy('position')
             ->get()

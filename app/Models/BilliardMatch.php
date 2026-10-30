@@ -29,6 +29,7 @@ class BilliardMatch extends Model
 
     protected $fillable = [
         'tournament_id',
+        'match_no',
         'phase',
         'group_code',
         'round',
@@ -56,6 +57,7 @@ class BilliardMatch extends Model
     ];
 
     protected $casts = [
+        'match_no' => 'integer',
         'round' => 'integer',
         'position' => 'integer',
         'score1' => 'integer',
@@ -65,6 +67,16 @@ class BilliardMatch extends Model
         'started_at' => 'datetime',
         'finished_at' => 'datetime',
     ];
+
+    public static function nextMatchNo(int $tournamentId): int
+    {
+        return (int) static::query()->where('tournament_id', $tournamentId)->max('match_no') + 1;
+    }
+
+    public function displayNo(): int
+    {
+        return (int) ($this->match_no ?: $this->id);
+    }
 
     public function tournament(): BelongsTo
     {
@@ -131,11 +143,14 @@ class BilliardMatch extends Model
             if (! $matchId || ! $outcome) {
                 return null;
             }
+            $src = self::query()->find($matchId);
+            $no = $src ? $src->displayNo() : $matchId;
 
             return [
                 'match_id' => (int) $matchId,
+                'match_no' => (int) $no,
                 'outcome' => $outcome,
-                'label' => ($outcome === self::SOURCE_LOSER ? 'بازنده' : 'برنده').' بازی #'.$matchId,
+                'label' => ($outcome === self::SOURCE_LOSER ? 'بازنده' : 'برنده').' بازی '.$no,
             ];
         };
 
@@ -144,6 +159,7 @@ class BilliardMatch extends Model
         return [
             'id' => (int) $this->id,
             'tournament_id' => (int) $this->tournament_id,
+            'match_no' => $this->displayNo(),
             'phase' => $this->phase ?: self::PHASE_KNOCKOUT,
             'group_code' => $this->group_code ?: null,
             'round' => (int) $this->round,

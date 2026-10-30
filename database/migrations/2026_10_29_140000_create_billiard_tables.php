@@ -112,6 +112,7 @@ class CreateBilliardTables extends Migration
             Schema::create('billiard_matches', function (Blueprint $table) {
                 $table->id();
                 $table->unsignedBigInteger('tournament_id');
+                $table->unsignedInteger('match_no')->nullable();
                 $table->string('phase', 20)->default('knockout'); // group|knockout
                 $table->string('group_code', 16)->default('');
                 $table->unsignedInteger('round')->default(1);
@@ -139,6 +140,7 @@ class CreateBilliardTables extends Migration
                 $table->timestamps();
 
                 $table->unique(['tournament_id', 'phase', 'group_code', 'round', 'position'], 'billiard_matches_phase_unique');
+                $table->unique(['tournament_id', 'match_no'], 'billiard_matches_tournament_match_no_unique');
                 $table->index(['tournament_id', 'status']);
                 $table->index(['scheduled_on', 'scheduled_at']);
             });

@@ -633,18 +633,106 @@ class BilliardAdminController extends Controller
     {
         $data = $request->validate([
             'slot' => 'required|integer|in:1,2',
+            'type' => 'nullable|in:player,source,empty',
             'player_id' => 'nullable|integer',
+            'match_id' => 'nullable|integer',
+            'match_no' => 'nullable|integer|min:1',
+            'outcome' => 'nullable|in:winner,loser',
         ]);
         try {
-            $playerId = array_key_exists('player_id', $data)
-                ? ($data['player_id'] !== null ? (int) $data['player_id'] : null)
-                : null;
-            $updated = $bracket->assignSlot($match, (int) $data['slot'], $playerId);
+            $type = $data['type'] ?? 'player';
+            if ($type === 'source') {
+                $updated = $bracket->assignSlotSource(
+                    $match,
+                    (int) $data['slot'],
+                    isset($data['match_id']) ? (int) $data['match_id'] : null,
+                    isset($data['match_no']) ? (int) $data['match_no'] : null,
+                    $data['outcome'] ?? 'winner'
+                );
+            } elseif ($type === 'empty') {
+                $updated = $bracket->assignSlot($match, (int) $data['slot'], null);
+            } else {
+                $playerId = array_key_exists('player_id', $data)
+                    ? ($data['player_id'] !== null ? (int) $data['player_id'] : null)
+                    : null;
+                $updated = $bracket->assignSlot($match, (int) $data['slot'], $playerId);
+            }
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
         return response(['match' => $updated->toApiArray()]);
+    }
+
+    /** تعداد گروه‌ها را ست می‌کند. */
+    public function setTournamentGroups(Request $request, BilliardTournament $tournament)
+    {
+        $data = $request->validate([
+            'group_count' => 'required|integer|min:1|max:16',
+        ]);
+        $tournament->update([
+            'group_count' => (int) $data['group_count'],
+            'format' => BilliardTournament::FORMAT_GROUP_THEN_ELIMINATION,
+        ]);
+
+        // بازیکن‌هایی که گروهشان خارج از محدوده جدید است را خالی کن
+        $codes = [];
+        for ($i = 0; $i < (int) $data['group_count']; $i++) {
+            $codes[] = chr(65 + $i);
+        }
+        BilliardRegistration::query()
+            ->where('tournament_id', $tournament->id)
+            ->whereNotNull('group_code')
+            ->whereNotIn('group_code', $codes)
+            ->update(['group_code' => null]);
+
+        return response([
+            'tournament' => $tournament->fresh(['discipline', 'placePoints'])->toApiArray(true),
+            'group_codes' => $codes,
+        ]);
+    }
+
+    /** تخصیص بازیکنان به یک گروه (جایگزینی لیست همان گروه). */
+    public function assignGroupPlayers(Request $request, BilliardTournament $tournament)
+    {
+        $data = $request->validate([
+            'group_code' => 'required|string|max:8',
+            'player_ids' => 'present|array',
+            'player_ids.*' => 'integer',
+        ]);
+        $code = strtoupper(trim($data['group_code']));
+        $ids = array_values(array_unique(array_map('intval', $data['player_ids'])));
+
+        // اول همه اعضای این گروه را خالی کن، بعد لیست جدید را بنشان
+        BilliardRegistration::query()
+            ->where('tournament_id', $tournament->id)
+            ->where('group_code', $code)
+            ->update(['group_code' => null]);
+
+        if ($ids !== []) {
+            $updated = BilliardRegistration::query()
+                ->where('tournament_id', $tournament->id)
+                ->whereIn('player_id', $ids)
+                ->activeInTournament()
+                ->update(['group_code' => $code]);
+
+            if ($updated < count($ids)) {
+                // بعضی idها ثبت‌نام قطعی ندارند — فقط موجودها ست شدند
+            }
+        }
+
+        $regs = BilliardRegistration::query()
+            ->with('player')
+            ->where('tournament_id', $tournament->id)
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (BilliardRegistration $r) => $r->toApiArray())
+            ->values();
+
+        return response([
+            'message' => 'اعضای گروه '.$code.' به‌روز شد.',
+            'data' => $regs,
+        ]);
     }
 
     public function saveGroupMatch(Request $request, BilliardTournament $tournament, BilliardBracketService $bracket)
@@ -658,11 +746,13 @@ class BilliardAdminController extends Controller
             'slot1.type' => 'required|in:player,source,empty',
             'slot1.player_id' => 'nullable|integer',
             'slot1.match_id' => 'nullable|integer',
+            'slot1.match_no' => 'nullable|integer|min:1',
             'slot1.outcome' => 'nullable|in:winner,loser',
             'slot2' => 'required|array',
             'slot2.type' => 'required|in:player,source,empty',
             'slot2.player_id' => 'nullable|integer',
             'slot2.match_id' => 'nullable|integer',
+            'slot2.match_no' => 'nullable|integer|min:1',
             'slot2.outcome' => 'nullable|in:winner,loser',
         ]);
 
@@ -753,6 +843,7 @@ class BilliardAdminController extends Controller
             ->with(['player1', 'player2', 'poolTable'])
             ->where('tournament_id', $tournamentId)
             ->orderByRaw("FIELD(phase, 'group', 'knockout')")
+            ->orderBy('match_no')
             ->orderBy('group_code')
             ->orderBy('round')
             ->orderBy('position')
@@ -868,6 +959,7 @@ class BilliardAdminController extends Controller
             'slug' => 'nullable|string|max:200',
             'discipline_id' => ($creating ? 'required' : 'sometimes').'|integer|exists:billiard_disciplines,id',
             'format' => 'nullable|in:'.implode(',', BilliardTournament::formats()),
+            'group_count' => 'nullable|integer|min:1|max:16',
             'venue' => 'nullable|string|max:200',
             'host_club' => 'nullable|string|max:200',
             'starts_on' => 'nullable|date',

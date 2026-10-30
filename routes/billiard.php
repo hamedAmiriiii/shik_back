@@ -72,6 +72,8 @@ Route::prefix('billiard')->name('billiard.')->group(function () {
         Route::get('tournaments/{tournament}/matches', [BilliardAdminController::class, 'tournamentMatches']);
         Route::post('tournaments/{tournament}/bracket', [BilliardAdminController::class, 'buildBracket']);
         Route::post('tournaments/{tournament}/draw', [BilliardAdminController::class, 'draw']); // سازگاری قدیمی → جدول خالی
+        Route::put('tournaments/{tournament}/groups', [BilliardAdminController::class, 'setTournamentGroups']);
+        Route::put('tournaments/{tournament}/group-players', [BilliardAdminController::class, 'assignGroupPlayers']);
         Route::post('tournaments/{tournament}/group-matches', [BilliardAdminController::class, 'saveGroupMatch']);
         Route::patch('matches/{match}/slot', [BilliardAdminController::class, 'assignMatchSlot']);
         Route::patch('matches/{match}/schedule', [BilliardAdminController::class, 'scheduleMatch']);

@@ -44,6 +44,7 @@ class BilliardTournament extends Model
         'poster_path',
         'discipline_id',
         'format',
+        'group_count',
         'venue',
         'host_club',
         'starts_on',
@@ -62,6 +63,7 @@ class BilliardTournament extends Model
         'starts_on' => 'date',
         'ends_on' => 'date',
         'capacity' => 'integer',
+        'group_count' => 'integer',
         'fee_toman' => 'integer',
         'registration_deadline' => 'datetime',
         'drawn_at' => 'datetime',
@@ -161,6 +163,7 @@ class BilliardTournament extends Model
                 ? $this->discipline->toApiArray()
                 : null,
             'format' => $this->format,
+            'group_count' => $this->group_count !== null ? (int) $this->group_count : null,
             'venue' => $this->venue,
             'host_club' => $this->host_club,
             'starts_on' => optional($this->starts_on)->format('Y-m-d'),

@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS `billiard_tables` (
 CREATE TABLE IF NOT EXISTS `billiard_matches` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `tournament_id` bigint unsigned NOT NULL,
+  `match_no` int unsigned NULL,
   `phase` varchar(20) NOT NULL DEFAULT 'knockout' COMMENT 'group|knockout',
   `group_code` varchar(16) NOT NULL DEFAULT '',
   `round` int unsigned NOT NULL DEFAULT 1,
@@ -132,6 +133,7 @@ CREATE TABLE IF NOT EXISTS `billiard_matches` (
   `updated_at` timestamp NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `billiard_matches_phase_unique` (`tournament_id`, `phase`, `group_code`, `round`, `position`),
+  UNIQUE KEY `billiard_matches_tournament_match_no_unique` (`tournament_id`, `match_no`),
   KEY `billiard_matches_tournament_status_index` (`tournament_id`, `status`),
   KEY `billiard_matches_scheduled_index` (`scheduled_on`, `scheduled_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
