@@ -68,9 +68,43 @@ class BilliardMatch extends Model
         'finished_at' => 'datetime',
     ];
 
+    /** شماره بعدی بازی در تورنمنت — همیشه از ۱ شروع می‌شود (اگر بازی‌ای نباشد). */
     public static function nextMatchNo(int $tournamentId): int
     {
-        return (int) static::query()->where('tournament_id', $tournamentId)->max('match_no') + 1;
+        $max = static::query()->where('tournament_id', $tournamentId)->max('match_no');
+
+        return $max === null ? 1 : ((int) $max + 1);
+    }
+
+    /**
+     * شماره‌های بازی را از ۱ تا N بدون فاصله دوباره می‌چیند (بعد از حذف).
+     * ترتیب: match_no فعلی، سپس id.
+     */
+    public static function renumberTournament(int $tournamentId): void
+    {
+        $matches = static::query()
+            ->where('tournament_id', $tournamentId)
+            ->orderByRaw('CASE WHEN match_no IS NULL THEN 1 ELSE 0 END')
+            ->orderBy('match_no')
+            ->orderBy('id')
+            ->get();
+
+        if ($matches->isEmpty()) {
+            return;
+        }
+
+        // برای رعایت UNIQUE موقت همه را خالی می‌کنیم
+        static::query()->where('tournament_id', $tournamentId)->update(['match_no' => null]);
+
+        $n = 1;
+        foreach ($matches as $match) {
+            $updates = ['match_no' => $n];
+            if ($match->phase === self::PHASE_GROUP && $match->group_code) {
+                $updates['round_label'] = 'گروه '.$match->group_code.' · بازی '.$n;
+            }
+            static::query()->where('id', $match->id)->update($updates);
+            $n++;
+        }
     }
 
     public function displayNo(): int

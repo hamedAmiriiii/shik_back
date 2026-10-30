@@ -32,6 +32,7 @@ class BilliardBracketService
                 ->where('phase', BilliardMatch::PHASE_KNOCKOUT)
                 ->delete();
 
+            BilliardMatch::renumberTournament((int) $tournament->id);
             $this->createKnockoutTree($tournament, $size);
 
             $tournament->update([
@@ -64,6 +65,7 @@ class BilliardBracketService
                 ->where('phase', BilliardMatch::PHASE_KNOCKOUT)
                 ->delete();
 
+            BilliardMatch::renumberTournament((int) $tournament->id);
             $this->createKnockoutTree($tournament, $size);
 
             if ($tournament->status === BilliardTournament::STATUS_REGISTRATION_CLOSED
@@ -262,7 +264,43 @@ class BilliardBracketService
         if (in_array($match->status, [BilliardMatch::STATUS_FINISHED, BilliardMatch::STATUS_WALKOVER], true)) {
             throw new RuntimeException('بازی تمام‌شده قابل حذف نیست.');
         }
-        $match->delete();
+
+        DB::transaction(function () use ($match) {
+            $tournamentId = (int) $match->tournament_id;
+
+            // ارجاع‌های وابسته را پاک کن تا حذف ممکن باشد
+            BilliardMatch::query()
+                ->where('tournament_id', $tournamentId)
+                ->where('next_match_id', $match->id)
+                ->update(['next_match_id' => null, 'next_slot' => null]);
+
+            BilliardMatch::query()
+                ->where('tournament_id', $tournamentId)
+                ->where(function ($q) use ($match) {
+                    $q->where('slot1_source_match_id', $match->id)
+                        ->orWhere('slot2_source_match_id', $match->id);
+                })
+                ->get()
+                ->each(function (BilliardMatch $dep) use ($match) {
+                    $data = [];
+                    if ((int) $dep->slot1_source_match_id === (int) $match->id) {
+                        $data['slot1_source_match_id'] = null;
+                        $data['slot1_source_outcome'] = null;
+                        $data['player1_id'] = null;
+                    }
+                    if ((int) $dep->slot2_source_match_id === (int) $match->id) {
+                        $data['slot2_source_match_id'] = null;
+                        $data['slot2_source_outcome'] = null;
+                        $data['player2_id'] = null;
+                    }
+                    if ($data !== []) {
+                        $dep->update($data);
+                    }
+                });
+
+            $match->delete();
+            BilliardMatch::renumberTournament($tournamentId);
+        });
     }
 
     public function recordResult(
