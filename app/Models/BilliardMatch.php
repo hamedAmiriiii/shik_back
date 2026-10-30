@@ -19,8 +19,18 @@ class BilliardMatch extends Model
 
     protected $table = 'billiard_matches';
 
+    public const PHASE_GROUP = 'group';
+
+    public const PHASE_KNOCKOUT = 'knockout';
+
+    public const SOURCE_WINNER = 'winner';
+
+    public const SOURCE_LOSER = 'loser';
+
     protected $fillable = [
         'tournament_id',
+        'phase',
+        'group_code',
         'round',
         'position',
         'round_label',
@@ -35,6 +45,10 @@ class BilliardMatch extends Model
         'status',
         'next_match_id',
         'next_slot',
+        'slot1_source_match_id',
+        'slot1_source_outcome',
+        'slot2_source_match_id',
+        'slot2_source_outcome',
         'referee_id',
         'notes',
         'started_at',
@@ -72,7 +86,10 @@ class BilliardMatch extends Model
         return $this->belongsTo(BilliardUser::class, 'winner_id');
     }
 
-    public function table(): BelongsTo
+    /**
+     * نام رابطه نباید table باشد — با property مدل Eloquent ($table) تداخل دارد.
+     */
+    public function poolTable(): BelongsTo
     {
         return $this->belongsTo(BilliardTable::class, 'table_id');
     }
@@ -80,6 +97,16 @@ class BilliardMatch extends Model
     public function nextMatch(): BelongsTo
     {
         return $this->belongsTo(self::class, 'next_match_id');
+    }
+
+    public function slot1SourceMatch(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'slot1_source_match_id');
+    }
+
+    public function slot2SourceMatch(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'slot2_source_match_id');
     }
 
     public function referee(): BelongsTo
@@ -100,9 +127,25 @@ class BilliardMatch extends Model
             ] : null;
         };
 
+        $sourceLabel = function (?int $matchId, ?string $outcome): ?array {
+            if (! $matchId || ! $outcome) {
+                return null;
+            }
+
+            return [
+                'match_id' => (int) $matchId,
+                'outcome' => $outcome,
+                'label' => ($outcome === self::SOURCE_LOSER ? 'بازنده' : 'برنده').' بازی #'.$matchId,
+            ];
+        };
+
+        $poolTable = $this->relationLoaded('poolTable') ? $this->getRelation('poolTable') : null;
+
         return [
             'id' => (int) $this->id,
             'tournament_id' => (int) $this->tournament_id,
+            'phase' => $this->phase ?: self::PHASE_KNOCKOUT,
+            'group_code' => $this->group_code ?: null,
             'round' => (int) $this->round,
             'position' => (int) $this->position,
             'round_label' => $this->round_label,
@@ -110,11 +153,19 @@ class BilliardMatch extends Model
             'player2_id' => $this->player2_id ? (int) $this->player2_id : null,
             'player1' => $this->relationLoaded('player1') ? $player($this->player1) : null,
             'player2' => $this->relationLoaded('player2') ? $player($this->player2) : null,
+            'player1_source' => $sourceLabel(
+                $this->slot1_source_match_id ? (int) $this->slot1_source_match_id : null,
+                $this->slot1_source_outcome
+            ),
+            'player2_source' => $sourceLabel(
+                $this->slot2_source_match_id ? (int) $this->slot2_source_match_id : null,
+                $this->slot2_source_outcome
+            ),
             'winner_id' => $this->winner_id ? (int) $this->winner_id : null,
             'score1' => $this->score1,
             'score2' => $this->score2,
             'table_id' => $this->table_id ? (int) $this->table_id : null,
-            'table' => $this->relationLoaded('table') && $this->table ? $this->table->toApiArray() : null,
+            'table' => $poolTable ? $poolTable->toApiArray() : null,
             'scheduled_on' => optional($this->scheduled_on)->format('Y-m-d'),
             'scheduled_at' => $this->scheduled_at ? substr((string) $this->scheduled_at, 0, 5) : null,
             'status' => $this->status,

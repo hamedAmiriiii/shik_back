@@ -76,7 +76,7 @@ class BilliardPlayerController extends Controller
         /** @var BilliardUser $user */
         $user = $request->user();
         $items = BilliardMatch::query()
-            ->with(['player1', 'player2', 'table', 'tournament'])
+            ->with(['player1', 'player2', 'poolTable', 'tournament'])
             ->where(function ($q) use ($user) {
                 $q->where('player1_id', $user->id)->orWhere('player2_id', $user->id);
             })

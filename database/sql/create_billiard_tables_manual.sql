@@ -104,6 +104,8 @@ CREATE TABLE IF NOT EXISTS `billiard_tables` (
 CREATE TABLE IF NOT EXISTS `billiard_matches` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `tournament_id` bigint unsigned NOT NULL,
+  `phase` varchar(20) NOT NULL DEFAULT 'knockout' COMMENT 'group|knockout',
+  `group_code` varchar(16) NOT NULL DEFAULT '',
   `round` int unsigned NOT NULL DEFAULT 1,
   `position` int unsigned NOT NULL DEFAULT 1,
   `round_label` varchar(255) NULL,
@@ -118,6 +120,10 @@ CREATE TABLE IF NOT EXISTS `billiard_matches` (
   `status` varchar(30) NOT NULL DEFAULT 'scheduled' COMMENT 'scheduled|live|finished|cancelled|walkover',
   `next_match_id` bigint unsigned NULL,
   `next_slot` tinyint unsigned NULL COMMENT '1 or 2',
+  `slot1_source_match_id` bigint unsigned NULL,
+  `slot1_source_outcome` varchar(10) NULL COMMENT 'winner|loser',
+  `slot2_source_match_id` bigint unsigned NULL,
+  `slot2_source_outcome` varchar(10) NULL COMMENT 'winner|loser',
   `referee_id` bigint unsigned NULL,
   `notes` text NULL,
   `started_at` timestamp NULL,
@@ -125,7 +131,7 @@ CREATE TABLE IF NOT EXISTS `billiard_matches` (
   `created_at` timestamp NULL,
   `updated_at` timestamp NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `billiard_matches_tournament_round_position_unique` (`tournament_id`, `round`, `position`),
+  UNIQUE KEY `billiard_matches_phase_unique` (`tournament_id`, `phase`, `group_code`, `round`, `position`),
   KEY `billiard_matches_tournament_status_index` (`tournament_id`, `status`),
   KEY `billiard_matches_scheduled_index` (`scheduled_on`, `scheduled_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

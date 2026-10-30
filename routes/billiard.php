@@ -67,9 +67,14 @@ Route::prefix('billiard')->name('billiard.')->group(function () {
         Route::post('registrations/{registration}/reject', [BilliardAdminController::class, 'rejectRegistration']);
         Route::patch('registrations/{registration}/seed', [BilliardAdminController::class, 'updateRegistrationSeed']);
 
-        Route::post('tournaments/{tournament}/draw', [BilliardAdminController::class, 'draw']);
+        Route::get('tournaments/{tournament}/matches', [BilliardAdminController::class, 'tournamentMatches']);
+        Route::post('tournaments/{tournament}/bracket', [BilliardAdminController::class, 'buildBracket']);
+        Route::post('tournaments/{tournament}/draw', [BilliardAdminController::class, 'draw']); // سازگاری قدیمی → جدول خالی
+        Route::post('tournaments/{tournament}/group-matches', [BilliardAdminController::class, 'saveGroupMatch']);
+        Route::patch('matches/{match}/slot', [BilliardAdminController::class, 'assignMatchSlot']);
         Route::patch('matches/{match}/schedule', [BilliardAdminController::class, 'scheduleMatch']);
         Route::post('matches/{match}/result', [BilliardAdminController::class, 'recordResult']);
+        Route::delete('matches/{match}', [BilliardAdminController::class, 'destroyMatch']);
 
         Route::get('disciplines', [BilliardAdminController::class, 'disciplines']);
         Route::post('disciplines', [BilliardAdminController::class, 'storeDiscipline'])

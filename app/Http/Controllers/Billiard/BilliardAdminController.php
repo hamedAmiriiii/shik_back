@@ -479,35 +479,122 @@ class BilliardAdminController extends Controller
         return response(['registration' => $registration->fresh(['player', 'tournament'])->toApiArray()]);
     }
 
-    // ——— Draw / Matches ———
-    public function draw(Request $request, BilliardTournament $tournament, BilliardBracketService $bracket)
+    // ——— Bracket / Matches ———
+    public function tournamentMatches(BilliardTournament $tournament)
+    {
+        return response([
+            'data' => $this->bracketPayload($tournament->id),
+        ]);
+    }
+
+    /** ساخت جدول خالی حذفی (بدون قرعه‌کشی). */
+    public function buildBracket(Request $request, BilliardTournament $tournament, BilliardBracketService $bracket)
     {
         $data = $request->validate([
-            'player_ids' => 'nullable|array',
-            'player_ids.*' => 'integer',
-            'shuffle' => 'boolean',
+            'bracket_size' => 'nullable|integer|min:2|max:256',
+            'phase' => 'nullable|in:knockout,after_groups',
         ]);
         try {
-            $bracket->draw(
+            if (($data['phase'] ?? 'knockout') === 'after_groups') {
+                $size = (int) ($data['bracket_size'] ?? 0);
+                if ($size < 2) {
+                    return response()->json(['message' => 'تعداد جایگاه حذفی لازم است.'], 422);
+                }
+                $bracket->buildKnockoutAfterGroups($tournament, $size);
+            } else {
+                if ($tournament->format === BilliardTournament::FORMAT_GROUP_THEN_ELIMINATION
+                    && empty($data['bracket_size'])) {
+                    return response()->json([
+                        'message' => 'برای فرمت گروهی→حذفی ابتدا بازی‌های گروهی را بسازید، سپس مرحله حذفی را با phase=after_groups ایجاد کنید.',
+                    ], 422);
+                }
+                $bracket->buildEmptyElimination($tournament, $data['bracket_size'] ?? null);
+            }
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'tournament' => $tournament->fresh()->toApiArray(),
+            'bracket' => $this->bracketPayload($tournament->id),
+        ]);
+    }
+
+    /** سازگاری قدیمی — همان ساخت جدول خالی */
+    public function draw(Request $request, BilliardTournament $tournament, BilliardBracketService $bracket)
+    {
+        return $this->buildBracket($request, $tournament, $bracket);
+    }
+
+    public function assignMatchSlot(Request $request, BilliardMatch $match, BilliardBracketService $bracket)
+    {
+        $data = $request->validate([
+            'slot' => 'required|integer|in:1,2',
+            'player_id' => 'nullable|integer',
+        ]);
+        try {
+            $playerId = array_key_exists('player_id', $data)
+                ? ($data['player_id'] !== null ? (int) $data['player_id'] : null)
+                : null;
+            $updated = $bracket->assignSlot($match, (int) $data['slot'], $playerId);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response(['match' => $updated->toApiArray()]);
+    }
+
+    public function saveGroupMatch(Request $request, BilliardTournament $tournament, BilliardBracketService $bracket)
+    {
+        $data = $request->validate([
+            'match_id' => 'nullable|integer',
+            'group_code' => 'required|string|max:8',
+            'position' => 'required|integer|min:1|max:128',
+            'round_label' => 'nullable|string|max:120',
+            'slot1' => 'required|array',
+            'slot1.type' => 'required|in:player,source,empty',
+            'slot1.player_id' => 'nullable|integer',
+            'slot1.match_id' => 'nullable|integer',
+            'slot1.outcome' => 'nullable|in:winner,loser',
+            'slot2' => 'required|array',
+            'slot2.type' => 'required|in:player,source,empty',
+            'slot2.player_id' => 'nullable|integer',
+            'slot2.match_id' => 'nullable|integer',
+            'slot2.outcome' => 'nullable|in:winner,loser',
+        ]);
+
+        try {
+            $updated = $bracket->saveGroupMatch(
                 $tournament,
-                $data['player_ids'] ?? null,
-                $data['shuffle'] ?? true
+                $data['group_code'],
+                (int) $data['position'],
+                $data['slot1'],
+                $data['slot2'],
+                $data['match_id'] ?? null,
+                $data['round_label'] ?? null
             );
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        $matches = BilliardMatch::query()
-            ->with(['player1', 'player2', 'table'])
-            ->where('tournament_id', $tournament->id)
-            ->orderBy('round')
-            ->orderBy('position')
-            ->get()
-            ->map->toApiArray();
+        return response([
+            'match' => $updated->toApiArray(),
+            'bracket' => $this->bracketPayload($tournament->id),
+        ]);
+    }
+
+    public function destroyMatch(BilliardMatch $match, BilliardBracketService $bracket)
+    {
+        $tid = (int) $match->tournament_id;
+        try {
+            $bracket->deleteMatch($match);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         return response([
-            'tournament' => $tournament->fresh()->toApiArray(),
-            'bracket' => $matches,
+            'message' => 'حذف شد.',
+            'bracket' => $this->bracketPayload($tid),
         ]);
     }
 
@@ -552,6 +639,23 @@ class BilliardAdminController extends Controller
         }
 
         return response(['match' => $updated->toApiArray()]);
+    }
+
+    /**
+     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
+     */
+    private function bracketPayload(int $tournamentId)
+    {
+        return BilliardMatch::query()
+            ->with(['player1', 'player2', 'poolTable'])
+            ->where('tournament_id', $tournamentId)
+            ->orderByRaw("FIELD(phase, 'group', 'knockout')")
+            ->orderBy('group_code')
+            ->orderBy('round')
+            ->orderBy('position')
+            ->get()
+            ->map->toApiArray()
+            ->values();
     }
 
     // ——— Ranking settings ———
@@ -660,7 +764,7 @@ class BilliardAdminController extends Controller
             'name' => ($creating ? 'required' : 'sometimes').'|string|max:200',
             'slug' => 'nullable|string|max:200',
             'discipline_id' => ($creating ? 'required' : 'sometimes').'|integer|exists:billiard_disciplines,id',
-            'format' => 'nullable|in:single_elimination',
+            'format' => 'nullable|in:'.implode(',', BilliardTournament::formats()),
             'venue' => 'nullable|string|max:200',
             'host_club' => 'nullable|string|max:200',
             'starts_on' => 'nullable|date',
@@ -679,9 +783,11 @@ class BilliardAdminController extends Controller
         ];
 
         $data = $request->validate($rules);
-        $data['format'] = $data['format'] ?? BilliardTournament::FORMAT_SINGLE_ELIMINATION;
-        $data['fee_toman'] = $data['fee_toman'] ?? 0;
-        $data['status'] = $data['status'] ?? BilliardTournament::STATUS_PRE_REGISTRATION;
+        if ($creating) {
+            $data['format'] = $data['format'] ?? BilliardTournament::FORMAT_SINGLE_ELIMINATION;
+            $data['fee_toman'] = $data['fee_toman'] ?? 0;
+            $data['status'] = $data['status'] ?? BilliardTournament::STATUS_PRE_REGISTRATION;
+        }
 
         return $data;
     }

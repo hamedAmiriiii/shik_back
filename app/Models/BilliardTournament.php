@@ -26,6 +26,16 @@ class BilliardTournament extends Model
 
     public const FORMAT_SINGLE_ELIMINATION = 'single_elimination';
 
+    public const FORMAT_GROUP_THEN_ELIMINATION = 'group_then_elimination';
+
+    public static function formats(): array
+    {
+        return [
+            self::FORMAT_SINGLE_ELIMINATION,
+            self::FORMAT_GROUP_THEN_ELIMINATION,
+        ];
+    }
+
     protected $table = 'billiard_tournaments';
 
     protected $fillable = [

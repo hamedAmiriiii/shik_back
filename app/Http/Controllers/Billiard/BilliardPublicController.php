@@ -132,7 +132,7 @@ class BilliardPublicController extends Controller
             ->map(fn (BilliardRegistration $r) => $r->toApiArray());
 
         $matches = BilliardMatch::query()
-            ->with(['player1', 'player2', 'winner', 'table'])
+            ->with(['player1', 'player2', 'winner', 'poolTable'])
             ->where('tournament_id', $tournament->id)
             ->orderBy('round')
             ->orderBy('position')
@@ -172,7 +172,7 @@ class BilliardPublicController extends Controller
     public function schedule(Request $request)
     {
         $q = BilliardMatch::query()
-            ->with(['player1', 'player2', 'table', 'tournament'])
+            ->with(['player1', 'player2', 'poolTable', 'tournament'])
             ->whereNotNull('scheduled_on');
 
         if ($tid = $request->query('tournament_id')) {
