@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\BilliardDiscipline;
 use App\Models\BilliardMatch;
 use App\Models\BilliardNews;
+use App\Models\BilliardRankingEntry;
 use App\Models\BilliardRankingPlacePoint;
 use App\Models\BilliardRankingSetting;
 use App\Models\BilliardRegistration;
@@ -314,6 +315,37 @@ class BilliardAdminController extends Controller
         return response(['player' => $player->fresh()->toAdminArray()]);
     }
 
+    public function destroyPlayer(BilliardUser $player)
+    {
+        if ($player->isStaff()) {
+            return response()->json(['message' => 'کاربر ادمین/اپراتور قابل حذف نیست.'], 422);
+        }
+
+        $hasRegs = $player->registrations()->exists();
+        $hasMatches = BilliardMatch::query()
+            ->where(function ($q) use ($player) {
+                $q->where('player1_id', $player->id)
+                    ->orWhere('player2_id', $player->id)
+                    ->orWhere('winner_id', $player->id);
+            })
+            ->exists();
+        $hasRanking = BilliardRankingEntry::query()->where('player_id', $player->id)->exists();
+
+        if ($hasRegs || $hasMatches || $hasRanking) {
+            return response()->json([
+                'message' => 'این بازیکن در مسابقه یا رنکینگ سابقه دارد؛ به‌جای حذف، غیرفعال کنید.',
+            ], 422);
+        }
+
+        if ($player->photo_path && Storage::exists('public/'.$player->photo_path)) {
+            Storage::delete('public/'.$player->photo_path);
+        }
+        $player->tokens()->delete();
+        $player->delete();
+
+        return response(['message' => 'بازیکن حذف شد.']);
+    }
+
     // ——— Tournaments ———
     public function tournaments(Request $request)
     {
@@ -342,7 +374,11 @@ class BilliardAdminController extends Controller
 
         $tournament = BilliardTournament::create($data);
         $this->syncPlacePoints($tournament, $placePoints);
-        $this->maybeStorePoster($request, $tournament);
+        try {
+            $this->maybeStorePoster($request, $tournament);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         return response([
             'tournament' => $tournament->fresh(['discipline', 'placePoints'])->toApiArray(true),
@@ -359,12 +395,20 @@ class BilliardAdminController extends Controller
             $data['slug'] = BilliardTournament::makeUniqueSlug($data['slug'], $tournament->id);
         }
         $placePoints = $data['place_points'] ?? null;
-        unset($data['place_points'], $data['poster_base64']);
+        unset($data['place_points'], $data['poster_base64'], $data['remove_poster']);
         $tournament->update($data);
         if (is_array($placePoints)) {
             $this->syncPlacePoints($tournament, $placePoints);
         }
-        $this->maybeStorePoster($request, $tournament);
+        try {
+            if ($request->boolean('remove_poster')) {
+                $this->clearPoster($tournament);
+            } else {
+                $this->maybeStorePoster($request, $tournament);
+            }
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         return response([
             'tournament' => $tournament->fresh(['discipline', 'placePoints'])->toApiArray(true),
@@ -455,6 +499,65 @@ class BilliardAdminController extends Controller
         }
 
         return response(['registration' => $registration->toApiArray()], 201);
+    }
+
+    /**
+     * افزودن دسته‌جمعی بازیکن به مسابقه.
+     */
+    public function bulkAddTournamentPlayers(
+        Request $request,
+        BilliardTournament $tournament,
+        BilliardRegistrationService $service
+    ) {
+        $data = $request->validate([
+            'player_ids' => 'required|array|min:1|max:500',
+            'player_ids.*' => 'integer|exists:billiard_users,id',
+            'waive_fee' => 'boolean',
+        ]);
+
+        $waive = (bool) ($data['waive_fee'] ?? true);
+        $added = 0;
+        $skipped = 0;
+        $errors = [];
+
+        $ids = array_values(array_unique(array_map('intval', $data['player_ids'])));
+        $players = BilliardUser::query()->whereIn('id', $ids)->get()->keyBy('id');
+
+        foreach ($ids as $pid) {
+            $player = $players->get($pid);
+            if (! $player) {
+                $errors[] = "بازیکن #{$pid} یافت نشد.";
+                $skipped++;
+                continue;
+            }
+            try {
+                $service->adminAddPlayer($tournament, $player, $waive);
+                $added++;
+            } catch (RuntimeException $e) {
+                $skipped++;
+                $errors[] = ($player->fullName() ?: "بازیکن #{$pid}").': '.$e->getMessage();
+            }
+        }
+
+        $message = "{$added} بازیکن اضافه شد"
+            .($skipped > 0 ? " — {$skipped} رد شد" : '')
+            .'.';
+
+        if ($added === 0 && $skipped > 0) {
+            return response()->json([
+                'message' => $errors[0] ?? 'هیچ بازیکنی اضافه نشد.',
+                'added_count' => 0,
+                'skipped_count' => $skipped,
+                'errors' => array_slice($errors, 0, 30),
+            ], 422);
+        }
+
+        return response([
+            'message' => $message,
+            'added_count' => $added,
+            'skipped_count' => $skipped,
+            'errors' => array_slice($errors, 0, 30),
+        ], 201);
     }
 
     public function confirmRegistration(BilliardRegistration $registration, BilliardRegistrationService $service)
@@ -780,6 +883,7 @@ class BilliardAdminController extends Controller
             'place_points.*.place' => 'required_with:place_points|integer|min:1|max:64',
             'place_points.*.points' => 'required_with:place_points|integer|min:0',
             'poster_base64' => 'nullable|string',
+            'remove_poster' => 'boolean',
         ];
 
         $data = $request->validate($rules);
@@ -827,13 +931,28 @@ class BilliardAdminController extends Controller
         if ($content === false) {
             return;
         }
+        if (strlen($content) > 5 * 1024 * 1024) {
+            throw new RuntimeException('حجم پوستر نباید بیشتر از ۵ مگابایت باشد.');
+        }
         $info = @getimagesizefromstring($content);
-        $ext = [IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png', IMAGETYPE_WEBP => 'webp'][$info[2] ?? 0] ?? 'jpg';
+        $ext = [IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png', IMAGETYPE_WEBP => 'webp'][$info[2] ?? 0] ?? null;
+        if ($ext === null) {
+            throw new RuntimeException('فایل پوستر تصویر معتبر نیست.');
+        }
         $old = $tournament->poster_path;
         $path = ImageTools::saveFile("/billiard-tournaments/{$tournament->id}/poster_".time().'.'.$ext, $content);
         $tournament->update(['poster_path' => $path]);
         if ($old && $old !== $path && Storage::exists('public/'.$old)) {
             Storage::delete('public/'.$old);
         }
+    }
+
+    private function clearPoster(BilliardTournament $tournament): void
+    {
+        $old = $tournament->poster_path;
+        if ($old && Storage::exists('public/'.$old)) {
+            Storage::delete('public/'.$old);
+        }
+        $tournament->update(['poster_path' => null]);
     }
 }

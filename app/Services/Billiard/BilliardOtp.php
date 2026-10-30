@@ -36,8 +36,9 @@ class BilliardOtp
         Cache::forget(self::OTP_ATTEMPTS_PREFIX.$phone);
         Cache::put($cooldownKey, time(), now()->addMinutes(self::OTP_TTL_MINUTES + 1));
 
-        $brand = (string) config('billiard.brand_name');
-        $text = $brand.' - کد ورود: '.$code;
+        $brand = trim((string) config('billiard.brand_name')) ?: 'هیأت بیلیارد شهرستان کرمان';
+        // خط اول = برند برای پترن ملی‌پیامک؛ متن تک‌خطی برند را از دست می‌داد و «وبینو» می‌رفت.
+        $text = $brand."\nکد ورود: ".$code;
         try {
             SmsTools::sendSms($phone, $text, true);
         } catch (\Throwable $e) {

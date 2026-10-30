@@ -49,6 +49,7 @@ Route::prefix('billiard')->name('billiard.')->group(function () {
         Route::post('players/bulk', [BilliardAdminController::class, 'bulkStorePlayers'])
             ->middleware('throttle:10,1');
         Route::patch('players/{player}', [BilliardAdminController::class, 'updatePlayer']);
+        Route::delete('players/{player}', [BilliardAdminController::class, 'destroyPlayer']);
 
         Route::get('tournaments', [BilliardAdminController::class, 'tournaments']);
         Route::post('tournaments', [BilliardAdminController::class, 'storeTournament'])
@@ -63,6 +64,7 @@ Route::prefix('billiard')->name('billiard.')->group(function () {
 
         Route::get('registrations', [BilliardAdminController::class, 'registrations']);
         Route::post('tournaments/{tournament}/registrations', [BilliardAdminController::class, 'addTournamentPlayer']);
+        Route::post('tournaments/{tournament}/registrations/bulk', [BilliardAdminController::class, 'bulkAddTournamentPlayers']);
         Route::post('registrations/{registration}/confirm', [BilliardAdminController::class, 'confirmRegistration']);
         Route::post('registrations/{registration}/reject', [BilliardAdminController::class, 'rejectRegistration']);
         Route::patch('registrations/{registration}/seed', [BilliardAdminController::class, 'updateRegistrationSeed']);

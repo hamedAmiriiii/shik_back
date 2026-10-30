@@ -723,6 +723,13 @@ class SmsTools
             return $first !== '' ? $first : null;
         }
 
+        // «برند - کد ورود: ۱۲۳۴۵» یا «برند: کد …»
+        if (preg_match('/^(.+?)\\s*[-–—:]\\s*(?:کد\\s*)?(?:ورود|تأیید|تایید|احراز)/u', trim($text), $m)) {
+            $brand = trim($m[1]);
+
+            return $brand !== '' ? $brand : null;
+        }
+
         return null;
     }
 

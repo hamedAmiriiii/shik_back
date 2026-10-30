@@ -135,8 +135,10 @@ class BilliardTournament extends Model
             return false;
         }
         if ($this->capacity) {
-            $count = $this->registrations()->activeInTournament()->count();
-            if ($count >= $this->capacity) {
+            $count = isset($this->registrations_count)
+                ? (int) $this->registrations_count
+                : $this->registrations()->activeInTournament()->count();
+            if ($count >= (int) $this->capacity) {
                 return false;
             }
         }
@@ -167,6 +169,10 @@ class BilliardTournament extends Model
             'capacity' => $this->capacity !== null ? (int) $this->capacity : null,
             'fee_toman' => (int) $this->fee_toman,
             'registration_deadline' => optional($this->registration_deadline)->toIso8601String(),
+            'registration_deadline_passed' => $this->registration_deadline
+                ? $this->registration_deadline->isPast()
+                : false,
+            'accepts_registration' => $this->acceptsRegistration(),
             'status' => $this->status,
             'drawn_at' => optional($this->drawn_at)->toIso8601String(),
             'registrations_count' => $this->registrations_count

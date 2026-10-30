@@ -89,8 +89,19 @@ class BilliardPublicController extends Controller
             },
         ]);
 
-        if ($status = $request->query('status')) {
-            $q->where('status', $status);
+        if ($request->query('for_register') === '1') {
+            $q->whereIn('status', [
+                BilliardTournament::STATUS_PRE_REGISTRATION,
+                BilliardTournament::STATUS_REGISTRATION_OPEN,
+                BilliardTournament::STATUS_REGISTRATION_CLOSED,
+            ]);
+        } elseif ($status = $request->query('status')) {
+            $statuses = array_values(array_filter(array_map('trim', explode(',', (string) $status))));
+            if (count($statuses) > 1) {
+                $q->whereIn('status', $statuses);
+            } else {
+                $q->where('status', $statuses[0] ?? $status);
+            }
         }
         if ($discipline = $request->query('discipline_id')) {
             $q->where('discipline_id', (int) $discipline);
@@ -99,7 +110,8 @@ class BilliardPublicController extends Controller
             $q->where('status', BilliardTournament::STATUS_FINISHED);
         }
 
-        $items = $q->orderByDesc('starts_on')->orderByDesc('id')->paginate(20);
+        $perPage = min(50, max(10, (int) $request->query('per_page', 20)));
+        $items = $q->orderByDesc('starts_on')->orderByDesc('id')->paginate($perPage);
 
         return response([
             'data' => collect($items->items())->map(fn (BilliardTournament $t) => $t->toApiArray())->values(),
