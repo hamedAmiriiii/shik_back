@@ -222,17 +222,25 @@ class BilliardBracketService
                     ->where('id', $matchId)
                     ->firstOrFail();
             } else {
-                $match = BilliardMatch::query()->firstOrNew([
+                // ترتیب تکراری بازی قبلی را بی‌صدا عوض نکند؛ جایگاه خالی بعدی را بگیر
+                while (BilliardMatch::query()
+                    ->where('tournament_id', $tournament->id)
+                    ->where('phase', BilliardMatch::PHASE_GROUP)
+                    ->where('group_code', $groupCode)
+                    ->where('round', 1)
+                    ->where('position', $position)
+                    ->exists()) {
+                    $position++;
+                }
+                $match = new BilliardMatch([
                     'tournament_id' => $tournament->id,
                     'phase' => BilliardMatch::PHASE_GROUP,
                     'group_code' => $groupCode,
                     'round' => 1,
                     'position' => $position,
+                    'status' => BilliardMatch::STATUS_SCHEDULED,
+                    'match_no' => BilliardMatch::nextMatchNo((int) $tournament->id),
                 ]);
-                if (! $match->exists) {
-                    $match->status = BilliardMatch::STATUS_SCHEDULED;
-                    $match->match_no = BilliardMatch::nextMatchNo((int) $tournament->id);
-                }
             }
 
             $resolved1 = $this->resolveSlotInput($tournament, $slot1);
