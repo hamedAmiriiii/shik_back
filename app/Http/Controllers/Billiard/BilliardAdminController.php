@@ -768,6 +768,7 @@ class BilliardAdminController extends Controller
     {
         $data = $request->validate([
             'match_id' => 'nullable|integer',
+            'match_no' => 'nullable|integer|min:1|max:9999',
             'group_code' => 'required|string|max:8',
             'position' => 'required|integer|min:1|max:128',
             'round_label' => 'nullable|string|max:120',
@@ -797,6 +798,7 @@ class BilliardAdminController extends Controller
                 $data['slot2'],
                 $data['match_id'] ?? null,
                 $data['round_label'] ?? null,
+                isset($data['match_no']) ? (int) $data['match_no'] : null,
                 [
                     'table_id' => array_key_exists('table_id', $data) ? ($data['table_id'] !== null ? (int) $data['table_id'] : null) : null,
                     'scheduled_on' => $data['scheduled_on'] ?? null,

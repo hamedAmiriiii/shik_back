@@ -207,6 +207,7 @@ class BilliardBracketService
         array $slot2,
         ?int $matchId = null,
         ?string $roundLabel = null,
+        ?int $matchNo = null,
         ?array $schedule = null
     ): BilliardMatch {
         $groupCode = strtoupper(trim($groupCode));
@@ -214,7 +215,7 @@ class BilliardBracketService
             throw new RuntimeException('کد گروه لازم است.');
         }
 
-        return DB::transaction(function () use ($tournament, $groupCode, $position, $slot1, $slot2, $matchId, $roundLabel, $schedule) {
+        return DB::transaction(function () use ($tournament, $groupCode, $position, $slot1, $slot2, $matchId, $roundLabel, $matchNo, $schedule) {
             if ($matchId) {
                 $match = BilliardMatch::query()
                     ->where('tournament_id', $tournament->id)
@@ -239,14 +240,24 @@ class BilliardBracketService
                     'round' => 1,
                     'position' => $position,
                     'status' => BilliardMatch::STATUS_SCHEDULED,
-                    'match_no' => BilliardMatch::nextMatchNo((int) $tournament->id),
                 ]);
             }
 
             $resolved1 = $this->resolveSlotInput($tournament, $slot1);
             $resolved2 = $this->resolveSlotInput($tournament, $slot2);
 
-            if (! $match->match_no) {
+            if ($matchNo) {
+                $taken = BilliardMatch::query()
+                    ->where('tournament_id', $tournament->id)
+                    ->where('match_no', $matchNo)
+                    ->when($match->exists, fn ($q) => $q->where('id', '!=', $match->id))
+                    ->lockForUpdate()
+                    ->exists();
+                if ($taken) {
+                    throw new RuntimeException('شماره بازی '.$matchNo.' قبلاً ثبت شده است.');
+                }
+                $match->match_no = $matchNo;
+            } elseif (! $match->match_no) {
                 $match->match_no = BilliardMatch::nextMatchNo((int) $tournament->id);
             }
 
