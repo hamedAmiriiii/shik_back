@@ -32,7 +32,6 @@ class BilliardBracketService
                 ->where('phase', BilliardMatch::PHASE_KNOCKOUT)
                 ->delete();
 
-            BilliardMatch::renumberTournament((int) $tournament->id);
             $this->createKnockoutTree($tournament, $size);
 
             $tournament->update([
@@ -73,7 +72,6 @@ class BilliardBracketService
                 ->where('phase', BilliardMatch::PHASE_KNOCKOUT)
                 ->delete();
 
-            BilliardMatch::renumberTournament((int) $tournament->id);
             $this->createKnockoutTree($tournament, $size);
 
             if ($tournament->status === BilliardTournament::STATUS_REGISTRATION_CLOSED
@@ -246,6 +244,20 @@ class BilliardBracketService
             $resolved1 = $this->resolveSlotInput($tournament, $slot1);
             $resolved2 = $this->resolveSlotInput($tournament, $slot2);
 
+            if ($match->exists) {
+                $posTaken = BilliardMatch::query()
+                    ->where('tournament_id', $tournament->id)
+                    ->where('phase', BilliardMatch::PHASE_GROUP)
+                    ->where('group_code', $groupCode)
+                    ->where('round', 1)
+                    ->where('position', $position)
+                    ->where('id', '!=', $match->id)
+                    ->exists();
+                if ($posTaken) {
+                    throw new RuntimeException('این ترتیب در همین گروه قبلاً استفاده شده.');
+                }
+            }
+
             if ($matchNo) {
                 $taken = BilliardMatch::query()
                     ->where('tournament_id', $tournament->id)
@@ -344,7 +356,6 @@ class BilliardBracketService
                 });
 
             $match->delete();
-            BilliardMatch::renumberTournament($tournamentId);
         });
     }
 

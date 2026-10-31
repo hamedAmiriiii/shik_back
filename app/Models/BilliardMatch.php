@@ -77,8 +77,7 @@ class BilliardMatch extends Model
     }
 
     /**
-     * شماره‌های بازی را از ۱ تا N بدون فاصله دوباره می‌چیند (بعد از حذف).
-     * ترتیب: match_no فعلی، سپس id.
+     * شماره‌های دستی را از نو نچینید. حذف بازی نباید match_no بقیه را عوض کند.
      */
     public static function renumberTournament(int $tournamentId): void
     {
