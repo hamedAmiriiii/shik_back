@@ -19,8 +19,10 @@ use App\Services\Billiard\BilliardRegistrationService;
 use App\Tools\ImageTools;
 use App\Tools\PhoneTools;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 
 class BilliardAdminController extends Controller
@@ -356,7 +358,7 @@ class BilliardAdminController extends Controller
         $items = $q->paginate(30);
 
         return response([
-            'data' => collect($items->items())->map(fn (BilliardTournament $t) => $t->toApiArray(true))->values(),
+            'data' => collect($items->items())->map(fn (BilliardTournament $t) => $this->tournamentAdminArray($t))->values(),
             'meta' => [
                 'current_page' => $items->currentPage(),
                 'last_page' => $items->lastPage(),
@@ -381,7 +383,7 @@ class BilliardAdminController extends Controller
         }
 
         return response([
-            'tournament' => $tournament->fresh(['discipline', 'placePoints'])->toApiArray(true),
+            'tournament' => $this->tournamentAdminArray($tournament->fresh(['discipline', 'placePoints'])),
         ], 201);
     }
 
@@ -411,7 +413,7 @@ class BilliardAdminController extends Controller
         }
 
         return response([
-            'tournament' => $tournament->fresh(['discipline', 'placePoints'])->toApiArray(true),
+            'tournament' => $this->tournamentAdminArray($tournament->fresh(['discipline', 'placePoints'])),
         ]);
     }
 
@@ -1080,9 +1082,18 @@ class BilliardAdminController extends Controller
             'place_points.*.points' => 'required_with:place_points|integer|min:0',
             'poster_base64' => 'nullable|string',
             'remove_poster' => 'boolean',
+            'results_clerk_phone' => 'nullable|string|max:20',
         ];
 
         $data = $request->validate($rules);
+        if (array_key_exists('results_clerk_phone', $data)) {
+            $clerkPhone = $this->normalizeClerkPhone($data['results_clerk_phone'] ?? null);
+            if ($clerkPhone === null && ! Schema::hasColumn('billiard_tournaments', 'results_clerk_phone')) {
+                unset($data['results_clerk_phone']);
+            } else {
+                $data['results_clerk_phone'] = $clerkPhone;
+            }
+        }
         if ($creating) {
             $data['format'] = $data['format'] ?? BilliardTournament::FORMAT_SINGLE_ELIMINATION;
             $data['fee_toman'] = $data['fee_toman'] ?? 0;
@@ -1090,6 +1101,37 @@ class BilliardAdminController extends Controller
         }
 
         return $data;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function tournamentAdminArray(BilliardTournament $tournament): array
+    {
+        return $tournament->toApiArray(true) + [
+            'results_clerk_phone' => $tournament->results_clerk_phone,
+        ];
+    }
+
+    private function normalizeClerkPhone(?string $raw): ?string
+    {
+        $raw = trim((string) $raw);
+        if ($raw === '') {
+            return null;
+        }
+        if (! Schema::hasColumn('billiard_tournaments', 'results_clerk_phone')) {
+            throw ValidationException::withMessages([
+                'results_clerk_phone' => 'اول ستون مسئول نتایج را به جدول مسابقات اضافه کنید.',
+            ]);
+        }
+        $phone = PhoneTools::normalizeIranPhone($raw);
+        if (! PhoneTools::isValidIranMobile($phone)) {
+            throw ValidationException::withMessages([
+                'results_clerk_phone' => 'شماره موبایل مسئول نتایج معتبر نیست.',
+            ]);
+        }
+
+        return $phone;
     }
 
     private function defaultPlacePoints(): array

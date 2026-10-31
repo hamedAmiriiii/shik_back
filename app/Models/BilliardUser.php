@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Tools\ImageTools;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\HasApiTokens;
 use RuntimeException;
@@ -157,7 +158,31 @@ class BilliardUser extends Authenticatable
             'club' => $this->club,
             'membership_status' => $this->membership_status,
             'profile_complete' => $this->isProfileComplete(),
+            'results_tournaments' => $this->resultsClerkTournaments(),
         ];
+    }
+
+    /**
+     * مسابقه‌هایی که این شماره فقط مجاز به ثبت نتیجه‌شان است.
+     *
+     * @return array<int, array{id: int, name: string}>
+     */
+    public function resultsClerkTournaments(): array
+    {
+        if (! Schema::hasColumn('billiard_tournaments', 'results_clerk_phone')) {
+            return [];
+        }
+
+        return BilliardTournament::query()
+            ->where('results_clerk_phone', $this->phone)
+            ->orderByDesc('id')
+            ->get(['id', 'name'])
+            ->map(fn (BilliardTournament $t) => [
+                'id' => (int) $t->id,
+                'name' => $t->name,
+            ])
+            ->values()
+            ->all();
     }
 
     /**

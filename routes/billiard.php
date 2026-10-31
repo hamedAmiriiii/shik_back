@@ -4,6 +4,7 @@ use App\Http\Controllers\Billiard\BilliardAdminController;
 use App\Http\Controllers\Billiard\BilliardAuthController;
 use App\Http\Controllers\Billiard\BilliardPlayerController;
 use App\Http\Controllers\Billiard\BilliardPublicController;
+use App\Http\Controllers\Billiard\BilliardResultsClerkController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('billiard')->name('billiard.')->group(function () {
@@ -29,6 +30,11 @@ Route::prefix('billiard')->name('billiard.')->group(function () {
         Route::get('me', [BilliardAuthController::class, 'me']);
         Route::patch('me', [BilliardAuthController::class, 'updateProfile']);
         Route::post('logout', [BilliardAuthController::class, 'logout']);
+
+        Route::get('results-clerk/tournaments', [BilliardResultsClerkController::class, 'tournaments']);
+        Route::get('results-clerk/tournaments/{tournament}/matches', [BilliardResultsClerkController::class, 'matches']);
+        Route::post('results-clerk/matches/{match}/result', [BilliardResultsClerkController::class, 'recordResult']);
+        Route::delete('results-clerk/matches/{match}/result', [BilliardResultsClerkController::class, 'clearResult']);
     });
 
     Route::middleware(['auth:sanctum', 'billiard.role:player,admin,operator'])->group(function () {

@@ -63,6 +63,7 @@ class BilliardTournament extends Model
         'status',
         'drawn_at',
         'published_at',
+        'results_clerk_phone',
     ];
 
     protected $casts = [
