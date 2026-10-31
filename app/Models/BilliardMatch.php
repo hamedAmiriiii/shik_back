@@ -111,6 +111,72 @@ class BilliardMatch extends Model
         return (int) ($this->match_no ?: $this->id);
     }
 
+    /**
+     * برنده/بازندهٔ یک بازی: دو نفر، یا برندهٔ بازی x - y، یا ترکیب هر دو.
+     */
+    public static function dependentSideLabel(self $match, string $word): string
+    {
+        $nestedIds = [];
+        if (! $match->player1_id && $match->slot1_source_match_id) {
+            $nestedIds[] = (int) $match->slot1_source_match_id;
+        }
+        if (! $match->player2_id && $match->slot2_source_match_id) {
+            $nestedIds[] = (int) $match->slot2_source_match_id;
+        }
+        $nestedNo = [];
+        if ($nestedIds) {
+            $rows = self::query()->whereIn('id', $nestedIds)->get(['id', 'match_no']);
+            foreach ($rows as $row) {
+                $nestedNo[(int) $row->id] = $row->displayNo();
+            }
+        }
+
+        $caption = function (int $side) use ($match, $nestedNo): ?array {
+            $player = $side === 1 ? $match->player1 : $match->player2;
+            if ($player) {
+                return ['text' => $player->fullName(), 'person' => true];
+            }
+            $id = (int) ($side === 1 ? $match->slot1_source_match_id : $match->slot2_source_match_id);
+            if ($id && isset($nestedNo[$id])) {
+                return ['text' => 'بازی '.$nestedNo[$id], 'person' => false, 'no' => $nestedNo[$id]];
+            }
+
+            return null;
+        };
+
+        $left = $caption(1);
+        $right = $caption(2);
+        if (! $left || ! $right) {
+            return $word.' بازی '.$match->displayNo();
+        }
+        if ($left['person'] && $right['person']) {
+            return $word.' '.$left['text'].' و '.$right['text'];
+        }
+        if (! $left['person'] && ! $right['person']) {
+            return $word.' بازی '.$left['no'].' - '.$right['no'];
+        }
+
+        return $word.' '.$left['text'].' و '.$right['text'];
+    }
+
+    /** نام بازیکن این طرف، یا برنده/بازندهٔ بازی تغذیه‌کننده. */
+    public function sideLabel(int $side): string
+    {
+        $player = $side === 1 ? $this->player1 : $this->player2;
+        if ($player) {
+            return $player->fullName();
+        }
+        $srcId = (int) ($side === 1 ? $this->slot1_source_match_id : $this->slot2_source_match_id);
+        $outcome = $side === 1 ? $this->slot1_source_outcome : $this->slot2_source_outcome;
+        if (! $srcId) {
+            return '';
+        }
+        $src = self::query()->with(['player1', 'player2'])->find($srcId);
+        $word = $outcome === self::SOURCE_LOSER ? 'بازنده' : 'برنده';
+
+        return $src ? self::dependentSideLabel($src, $word) : $word.' بازی '.$srcId;
+    }
+
     public function tournament(): BelongsTo
     {
         return $this->belongsTo(BilliardTournament::class, 'tournament_id');
@@ -176,14 +242,15 @@ class BilliardMatch extends Model
             if (! $matchId || ! $outcome) {
                 return null;
             }
-            $src = self::query()->find($matchId);
+            $src = self::query()->with(['player1', 'player2'])->find($matchId);
             $no = $src ? $src->displayNo() : $matchId;
+            $word = $outcome === self::SOURCE_LOSER ? 'بازنده' : 'برنده';
 
             return [
                 'match_id' => (int) $matchId,
                 'match_no' => (int) $no,
                 'outcome' => $outcome,
-                'label' => ($outcome === self::SOURCE_LOSER ? 'بازنده' : 'برنده').' بازی '.$no,
+                'label' => $src ? self::dependentSideLabel($src, $word) : $word.' بازی '.$no,
             ];
         };
 

@@ -341,25 +341,40 @@ class BilliardPublicController extends Controller
             ->get()
             ->map(function (BilliardRegistration $r) use ($player) {
                 $matches = BilliardMatch::query()
-                    ->with(['player1', 'player2'])
+                    ->with(['player1', 'player2', 'poolTable'])
                     ->whereHas('tournament', fn ($q) => $q->lineupPublic())
                     ->where('tournament_id', $r->tournament_id)
                     ->where(function ($q) use ($player) {
                         $q->where('player1_id', $player->id)->orWhere('player2_id', $player->id);
                     })
-                    ->whereIn('status', [BilliardMatch::STATUS_FINISHED, BilliardMatch::STATUS_WALKOVER])
-                    ->orderBy('round')
+                    ->where('status', '!=', BilliardMatch::STATUS_CANCELLED)
+                    ->orderByRaw('scheduled_on is null')
+                    ->orderBy('scheduled_on')
+                    ->orderBy('scheduled_at')
+                    ->orderBy('match_no')
                     ->get()
                     ->map(function (BilliardMatch $m) use ($player) {
-                        $opponent = (int) $m->player1_id === (int) $player->id ? $m->player2 : $m->player1;
+                        $mineIsFirst = (int) $m->player1_id === (int) $player->id;
+                        $opponentUser = $mineIsFirst ? $m->player2 : $m->player1;
+                        $done = in_array($m->status, [
+                            BilliardMatch::STATUS_FINISHED,
+                            BilliardMatch::STATUS_WALKOVER,
+                        ], true);
                         $won = (int) $m->winner_id === (int) $player->id;
 
                         return [
                             'match_id' => (int) $m->id,
+                            'match_no' => $m->displayNo(),
                             'round_label' => $m->round_label,
-                            'opponent' => $opponent ? $opponent->fullName() : null,
-                            'result' => $won ? 'برد' : 'باخت',
-                            'score' => ($m->score1 ?? '-').' - '.($m->score2 ?? '-'),
+                            'opponent' => $opponentUser
+                                ? $opponentUser->fullName()
+                                : ($m->sideLabel($mineIsFirst ? 2 : 1) ?: null),
+                            'scheduled_on' => optional($m->scheduled_on)->format('Y-m-d'),
+                            'scheduled_at' => $m->scheduled_at ? substr((string) $m->scheduled_at, 0, 5) : null,
+                            'table' => $m->poolTable ? $m->poolTable->name : null,
+                            'status' => $m->status,
+                            'result' => $done ? ($won ? 'برد' : 'باخت') : null,
+                            'score' => $done ? (($m->score1 ?? '-').' - '.($m->score2 ?? '-')) : null,
                         ];
                     });
 
