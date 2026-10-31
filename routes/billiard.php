@@ -80,6 +80,7 @@ Route::prefix('billiard')->name('billiard.')->group(function () {
         Route::patch('matches/{match}/slot', [BilliardAdminController::class, 'assignMatchSlot']);
         Route::patch('matches/{match}/schedule', [BilliardAdminController::class, 'scheduleMatch']);
         Route::post('matches/{match}/result', [BilliardAdminController::class, 'recordResult']);
+        Route::delete('matches/{match}/result', [BilliardAdminController::class, 'clearResult']);
         Route::delete('matches/{match}', [BilliardAdminController::class, 'destroyMatch']);
 
         Route::get('disciplines', [BilliardAdminController::class, 'disciplines']);

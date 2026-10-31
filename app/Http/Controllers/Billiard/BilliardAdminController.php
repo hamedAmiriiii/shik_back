@@ -861,9 +861,20 @@ class BilliardAdminController extends Controller
                 (int) $data['score1'],
                 (int) $data['score2'],
                 $user->id,
-                $data['notes'] ?? null,
+                array_key_exists('notes', $data) ? $data['notes'] : $match->notes,
                 (bool) ($data['walkover'] ?? false)
             );
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response(['match' => $updated->toApiArray()]);
+    }
+
+    public function clearResult(BilliardMatch $match, BilliardBracketService $bracket)
+    {
+        try {
+            $updated = $bracket->clearResult($match);
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }

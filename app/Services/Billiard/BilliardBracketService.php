@@ -358,6 +358,11 @@ class BilliardBracketService
         }
 
         return DB::transaction(function () use ($match, $score1, $score2, $winnerId, $refereeId, $notes, $walkover) {
+            $match = BilliardMatch::query()->lockForUpdate()->findOrFail($match->id);
+            if (in_array($match->status, [BilliardMatch::STATUS_FINISHED, BilliardMatch::STATUS_WALKOVER], true)) {
+                $this->assertResultEditable($match, $winnerId);
+            }
+
             $match->update([
                 'score1' => $score1,
                 'score2' => $score2,
@@ -378,6 +383,31 @@ class BilliardBracketService
             }
 
             $this->maybeFinishTournament($tournament ? $tournament->fresh() : null);
+
+            return $match->fresh(['player1', 'player2', 'winner', 'poolTable']);
+        });
+    }
+
+    public function clearResult(BilliardMatch $match): BilliardMatch
+    {
+        return DB::transaction(function () use ($match) {
+            $match = BilliardMatch::query()->lockForUpdate()->findOrFail($match->id);
+            if (! in_array($match->status, [BilliardMatch::STATUS_FINISHED, BilliardMatch::STATUS_WALKOVER], true)) {
+                throw new RuntimeException('نتیجه‌ای برای حذف نیست.');
+            }
+
+            $this->assertResultEditable($match, null);
+            $this->pullAdvancedPlayers($match);
+
+            $match->update([
+                'score1' => null,
+                'score2' => null,
+                'winner_id' => null,
+                'status' => BilliardMatch::STATUS_SCHEDULED,
+                'finished_at' => null,
+            ]);
+
+            $this->reopenTournamentIfFinished($match->tournament);
 
             return $match->fresh(['player1', 'player2', 'winner', 'poolTable']);
         });
@@ -515,6 +545,132 @@ class BilliardBracketService
         }
 
         throw new RuntimeException('نوع اسلات نامعتبر است.');
+    }
+
+    /**
+     * @param  int|null  $newWinnerId  null یعنی حذف نتیجه
+     */
+    private function assertResultEditable(BilliardMatch $match, ?int $newWinnerId): void
+    {
+        foreach ($this->dependentMatches($match) as $dep) {
+            if (! in_array($dep->status, [BilliardMatch::STATUS_FINISHED, BilliardMatch::STATUS_WALKOVER], true)) {
+                continue;
+            }
+            for ($slot = 1; $slot <= 2; $slot++) {
+                if (! $this->slotFedBy($match, $dep, $slot)) {
+                    continue;
+                }
+                if ($newWinnerId === null) {
+                    throw new RuntimeException('اول نتیجه بازی‌های بعدی را حذف کنید.');
+                }
+                $expected = $this->expectedSlotPlayer($match, $dep, $slot, $newWinnerId);
+                $current = $slot === 1 ? $dep->player1_id : $dep->player2_id;
+                if ((int) $current !== (int) $expected) {
+                    throw new RuntimeException('نتیجه بازی بعدی ثبت شده؛ اول آن را حذف کنید.');
+                }
+            }
+        }
+    }
+
+    private function pullAdvancedPlayers(BilliardMatch $match): void
+    {
+        $winnerId = (int) $match->winner_id;
+        if (! $winnerId) {
+            return;
+        }
+
+        foreach ($this->dependentMatches($match) as $dep) {
+            $changed = false;
+            foreach ([1, 2] as $slot) {
+                $expected = $this->expectedSlotPlayer($match, $dep, $slot, $winnerId);
+                if (! $expected) {
+                    continue;
+                }
+                if ($slot === 1 && (int) $dep->player1_id === $expected) {
+                    $dep->player1_id = null;
+                    $changed = true;
+                }
+                if ($slot === 2 && (int) $dep->player2_id === $expected) {
+                    $dep->player2_id = null;
+                    $changed = true;
+                }
+            }
+            if ($changed) {
+                $dep->save();
+            }
+        }
+    }
+
+    /**
+     * @return \Illuminate\Support\Collection<int, BilliardMatch>
+     */
+    private function dependentMatches(BilliardMatch $match)
+    {
+        return BilliardMatch::query()
+            ->where('tournament_id', $match->tournament_id)
+            ->where(function ($q) use ($match) {
+                $q->where('slot1_source_match_id', $match->id)
+                    ->orWhere('slot2_source_match_id', $match->id);
+                if ($match->next_match_id) {
+                    $q->orWhere('id', $match->next_match_id);
+                }
+            })
+            ->lockForUpdate()
+            ->get();
+    }
+
+    private function slotFedBy(BilliardMatch $source, BilliardMatch $dep, int $slot): bool
+    {
+        $sourceId = $slot === 1 ? $dep->slot1_source_match_id : $dep->slot2_source_match_id;
+        if ((int) $sourceId === (int) $source->id) {
+            return true;
+        }
+
+        return (int) $source->next_match_id === (int) $dep->id && (int) $source->next_slot === $slot;
+    }
+
+    private function expectedSlotPlayer(BilliardMatch $source, BilliardMatch $dep, int $slot, int $winnerId): ?int
+    {
+        if (! $this->slotFedBy($source, $dep, $slot)) {
+            return null;
+        }
+
+        $outcome = $slot === 1 ? $dep->slot1_source_outcome : $dep->slot2_source_outcome;
+        $sourceId = $slot === 1 ? $dep->slot1_source_match_id : $dep->slot2_source_match_id;
+        if ((int) $sourceId === (int) $source->id && $outcome === BilliardMatch::SOURCE_LOSER) {
+            return $this->loserId($source, $winnerId);
+        }
+
+        return $winnerId;
+    }
+
+    private function loserId(BilliardMatch $match, int $winnerId): ?int
+    {
+        if (! $match->player1_id || ! $match->player2_id) {
+            return null;
+        }
+        $loser = (int) ($match->player1_id == $winnerId ? $match->player2_id : $match->player1_id);
+
+        return $loser ?: null;
+    }
+
+    private function reopenTournamentIfFinished(?BilliardTournament $tournament): void
+    {
+        if (! $tournament || $tournament->status !== BilliardTournament::STATUS_FINISHED) {
+            return;
+        }
+
+        BilliardRegistration::query()
+            ->where('tournament_id', $tournament->id)
+            ->update([
+                'final_place' => null,
+                'points_awarded' => 0,
+            ]);
+        $tournament->update(['status' => BilliardTournament::STATUS_LIVE]);
+
+        if ($tournament->discipline_id) {
+            app(BilliardRankingService::class)->recomputeForDiscipline((int) $tournament->discipline_id, (int) $tournament->id);
+        }
     }
 
     private function advanceWinner(BilliardMatch $match, int $winnerId, bool $bye): void
