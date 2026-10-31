@@ -415,6 +415,24 @@ class BilliardAdminController extends Controller
         ]);
     }
 
+    public function publishTournament(Request $request, BilliardTournament $tournament)
+    {
+        $data = $request->validate([
+            'published' => 'required|boolean',
+        ]);
+        $published = (bool) $data['published'];
+        $tournament->update([
+            'published_at' => $published ? ($tournament->published_at ?: now()) : null,
+        ]);
+
+        return response([
+            'message' => $published
+                ? 'بازیکنان، گروه‌بندی و ساعت بازی‌ها برای عموم منتشر شد.'
+                : 'بازیکنان، گروه‌بندی و ساعت بازی‌ها از دید عموم برداشته شد.',
+            'tournament' => $tournament->fresh(['discipline'])->toApiArray(true),
+        ]);
+    }
+
     // ——— Tables ———
     public function tables(BilliardTournament $tournament)
     {
@@ -463,6 +481,7 @@ class BilliardAdminController extends Controller
     {
         $q = BilliardRegistration::query()->with(['player', 'tournament'])->orderByDesc('id');
         if ($tid = $request->query('tournament_id')) {
+            BilliardBracketService::useNumericGroupCodes((int) $tid);
             $q->where('tournament_id', (int) $tid);
         }
         if ($status = $request->query('status')) {
@@ -614,6 +633,8 @@ class BilliardAdminController extends Controller
     // ——— Bracket / Matches ———
     public function tournamentMatches(BilliardTournament $tournament)
     {
+        BilliardBracketService::useNumericGroupCodes((int) $tournament->id);
+
         return response([
             'data' => $this->bracketPayload($tournament->id),
         ]);
@@ -704,10 +725,11 @@ class BilliardAdminController extends Controller
             'format' => BilliardTournament::FORMAT_GROUP_THEN_ELIMINATION,
         ]);
 
-        // بازیکن‌هایی که گروهشان خارج از محدوده جدید است را خالی کن
+        // گروه‌ها با شماره ۱، ۲، ۳ ذخیره می‌شوند. حروف قدیمی A… به همان شماره برمی‌گردند.
+        BilliardBracketService::useNumericGroupCodes((int) $tournament->id);
         $codes = [];
         for ($i = 0; $i < (int) $data['group_count']; $i++) {
-            $codes[] = chr(65 + $i);
+            $codes[] = (string) ($i + 1);
         }
         BilliardRegistration::query()
             ->where('tournament_id', $tournament->id)
@@ -729,7 +751,7 @@ class BilliardAdminController extends Controller
             'player_ids' => 'present|array',
             'player_ids.*' => 'integer',
         ]);
-        $code = strtoupper(trim($data['group_code']));
+        $code = BilliardBracketService::numericGroupCode((string) $data['group_code']);
         $ids = array_values(array_unique(array_map('intval', $data['player_ids'])));
 
         // اول همه اعضای این گروه را خالی کن، بعد لیست جدید را بنشان
@@ -812,6 +834,38 @@ class BilliardAdminController extends Controller
         return response([
             'match' => $updated->toApiArray(),
             'bracket' => $this->bracketPayload($tournament->id),
+        ]);
+    }
+
+    public function saveGroupDoubleElimination(Request $request, BilliardTournament $tournament, BilliardBracketService $bracket)
+    {
+        $data = $request->validate([
+            'group_code' => 'required|string|max:8',
+            'matches' => 'required|array|min:1|max:80',
+            'matches.*.place' => 'nullable|in:first,second',
+            'matches.*.scheduled_on' => 'required|date',
+            'matches.*.scheduled_at' => 'required|date_format:H:i',
+            'matches.*.slot1' => 'required|array',
+            'matches.*.slot1.type' => 'required|in:player,source',
+            'matches.*.slot1.player_id' => 'nullable|integer',
+            'matches.*.slot1.match_index' => 'nullable|integer|min:0',
+            'matches.*.slot1.outcome' => 'nullable|in:winner,loser',
+            'matches.*.slot2' => 'required|array',
+            'matches.*.slot2.type' => 'required|in:player,source',
+            'matches.*.slot2.player_id' => 'nullable|integer',
+            'matches.*.slot2.match_index' => 'nullable|integer|min:0',
+            'matches.*.slot2.outcome' => 'nullable|in:winner,loser',
+        ]);
+
+        try {
+            $bracket->saveGroupDoubleElimination($tournament, $data['group_code'], $data['matches']);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'message' => 'بازی‌های دوحذفی گروه ثبت شد.',
+            'bracket' => $this->bracketPayload((int) $tournament->id),
         ]);
     }
 

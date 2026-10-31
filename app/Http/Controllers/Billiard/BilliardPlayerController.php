@@ -66,7 +66,14 @@ class BilliardPlayerController extends Controller
             ->where('player_id', $user->id)
             ->orderByDesc('id')
             ->get()
-            ->map(fn (BilliardRegistration $r) => $r->toApiArray());
+            ->map(function (BilliardRegistration $r) {
+                $row = $r->toApiArray();
+                if ($r->tournament && $r->tournament->published_at === null) {
+                    $row['group_code'] = null;
+                }
+
+                return $row;
+            });
 
         return response(['data' => $items]);
     }
@@ -77,6 +84,7 @@ class BilliardPlayerController extends Controller
         $user = $request->user();
         $items = BilliardMatch::query()
             ->with(['player1', 'player2', 'poolTable', 'tournament'])
+            ->whereHas('tournament', fn ($q) => $q->lineupPublic())
             ->where(function ($q) use ($user) {
                 $q->where('player1_id', $user->id)->orWhere('player2_id', $user->id);
             })

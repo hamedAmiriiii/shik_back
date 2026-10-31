@@ -10,6 +10,55 @@ use RuntimeException;
 
 class BilliardBracketService
 {
+    /** کد گروه: ۱، ۲، ۳… حرف‌های قدیمی A، B به شماره برمی‌گردند. */
+    public static function numericGroupCode(string $code): string
+    {
+        $code = strtoupper(trim($code));
+        if (preg_match('/^[A-Z]$/', $code) === 1) {
+            return (string) (ord($code) - 64);
+        }
+
+        return $code;
+    }
+
+    /** گروه‌های ذخیره‌شده با حرف را در همین مسابقه به شماره تبدیل می‌کند. */
+    public static function useNumericGroupCodes(int $tournamentId): void
+    {
+        $regs = BilliardRegistration::query()
+            ->where('tournament_id', $tournamentId)
+            ->whereNotNull('group_code')
+            ->get(['id', 'group_code']);
+        foreach ($regs as $reg) {
+            $next = self::numericGroupCode((string) $reg->group_code);
+            if ($next !== '' && $next !== (string) $reg->group_code) {
+                $reg->update(['group_code' => $next]);
+            }
+        }
+
+        $matches = BilliardMatch::query()
+            ->where('tournament_id', $tournamentId)
+            ->where('group_code', '!=', '')
+            ->get(['id', 'group_code', 'round_label']);
+        foreach ($matches as $match) {
+            $next = self::numericGroupCode((string) $match->group_code);
+            $label = $match->round_label;
+            if (is_string($label) && preg_match('/گروه\s+([A-Z])/u', $label, $found) === 1) {
+                $label = preg_replace(
+                    '/گروه\s+[A-Z]/u',
+                    'گروه '.self::numericGroupCode($found[1]),
+                    $label,
+                    1
+                );
+            }
+            if ($next !== (string) $match->group_code || $label !== $match->round_label) {
+                $match->update([
+                    'group_code' => $next,
+                    'round_label' => $label,
+                ]);
+            }
+        }
+    }
+
     /**
      * ساخت جدول خالی Single Elimination — بدون قرعه‌کشی؛ اسلات‌ها بعداً دستی پر می‌شوند.
      */
@@ -208,7 +257,7 @@ class BilliardBracketService
         ?int $matchNo = null,
         ?array $schedule = null
     ): BilliardMatch {
-        $groupCode = strtoupper(trim($groupCode));
+        $groupCode = BilliardBracketService::numericGroupCode($groupCode);
         if ($groupCode === '') {
             throw new RuntimeException('کد گروه لازم است.');
         }
@@ -313,6 +362,153 @@ class BilliardBracketService
             }
 
             return $match->fresh(['player1', 'player2', 'poolTable']);
+        });
+    }
+
+    /**
+     * ثبت یکجای بازی‌های پیشنهادی دوحذفی یک گروه. روال دستی بازی گروهی را عوض نمی‌کند.
+     *
+     * @param  array<int, array<string, mixed>>  $rows
+     */
+    public function saveGroupDoubleElimination(BilliardTournament $tournament, string $groupCode, array $rows): void
+    {
+        $groupCode = self::numericGroupCode($groupCode);
+        if ($groupCode === '') {
+            throw new RuntimeException('کد گروه لازم است.');
+        }
+        if ($rows === []) {
+            throw new RuntimeException('بازی پیشنهادی خالی است.');
+        }
+
+        DB::transaction(function () use ($tournament, $groupCode, $rows) {
+            BilliardTournament::query()->whereKey($tournament->id)->lockForUpdate()->first();
+
+            $exists = BilliardMatch::query()
+                ->where('tournament_id', $tournament->id)
+                ->where('phase', BilliardMatch::PHASE_GROUP)
+                ->where('group_code', $groupCode)
+                ->exists();
+            if ($exists) {
+                throw new RuntimeException('این گروه از قبل بازی دارد. پیشنهاد دوحذفی فقط برای گروه خالی است.');
+            }
+
+            $memberIds = BilliardRegistration::query()
+                ->where('tournament_id', $tournament->id)
+                ->where('group_code', $groupCode)
+                ->activeInTournament()
+                ->pluck('player_id')
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->sort()
+                ->values();
+
+            $used = [];
+            foreach ($rows as $index => $row) {
+                foreach (['slot1', 'slot2'] as $side) {
+                    $slot = $row[$side] ?? null;
+                    if (! is_array($slot)) {
+                        throw new RuntimeException('طرف‌های بازی '.($index + 1).' ناقص است.');
+                    }
+                    $type = $slot['type'] ?? '';
+                    if ($type === 'player') {
+                        $playerId = (int) ($slot['player_id'] ?? 0);
+                        if ($playerId < 1) {
+                            throw new RuntimeException('بازیکن بازی '.($index + 1).' مشخص نیست.');
+                        }
+                        $used[$playerId] = true;
+                    } elseif ($type === 'source') {
+                        $sourceIndex = (int) ($slot['match_index'] ?? -1);
+                        $outcome = $slot['outcome'] ?? '';
+                        if ($sourceIndex < 0 || $sourceIndex >= $index) {
+                            throw new RuntimeException('ارجاع بازی '.($index + 1).' باید به ردیف قبلی باشد.');
+                        }
+                        if (! in_array($outcome, [BilliardMatch::SOURCE_WINNER, BilliardMatch::SOURCE_LOSER], true)) {
+                            throw new RuntimeException('برنده یا بازنده بازی '.($index + 1).' مشخص نیست.');
+                        }
+                    } else {
+                        throw new RuntimeException('طرف بازی '.($index + 1).' نامعتبر است.');
+                    }
+                }
+            }
+
+            $usedIds = collect(array_keys($used))->map(fn ($id) => (int) $id)->sort()->values();
+            if ($usedIds->implode(',') !== $memberIds->implode(',')) {
+                throw new RuntimeException('بازیکن‌های پیشنهاد با اعضای گروه یکی نیست. اعضا را ذخیره کنید و دوباره بچینید.');
+            }
+
+            $playerCount = $memberIds->count();
+            $expected = $playerCount === 2 ? 1 : ($playerCount * 2 - 3);
+            if (count($rows) !== $expected) {
+                throw new RuntimeException('تعداد بازی‌های پیشنهاد با تعداد اعضای گروه نمی‌خواند.');
+            }
+
+            $places = array_map(fn ($row) => $row['place'] ?? null, $rows);
+            $firsts = count(array_filter($places, fn ($place) => $place === 'first'));
+            $seconds = count(array_filter($places, fn ($place) => $place === 'second'));
+            if ($firsts !== 1 || ($playerCount > 2 && $seconds !== 1) || ($playerCount === 2 && $seconds !== 0)) {
+                throw new RuntimeException('جای نفر اول و نفر دوم در پیشنهاد مشخص نیست.');
+            }
+
+            $matchNo = BilliardMatch::nextMatchNo((int) $tournament->id);
+            $created = [];
+            foreach ($rows as $index => $row) {
+                $place = $row['place'] ?? null;
+                $label = match ($place) {
+                    'first' => 'گروه '.$groupCode.' · نفر اول',
+                    'second' => 'گروه '.$groupCode.' · نفر دوم',
+                    default => 'گروه '.$groupCode.' · بازی '.$matchNo,
+                };
+
+                $sides = [];
+                foreach (['slot1', 'slot2'] as $side) {
+                    $slot = $row[$side];
+                    if (($slot['type'] ?? '') === 'player') {
+                        $sides[$side] = [
+                            'player_id' => (int) $slot['player_id'],
+                            'source_match_id' => null,
+                            'source_outcome' => null,
+                        ];
+                    } else {
+                        $source = $created[(int) $slot['match_index']];
+                        $sides[$side] = [
+                            'player_id' => null,
+                            'source_match_id' => (int) $source->id,
+                            'source_outcome' => $slot['outcome'],
+                        ];
+                    }
+                }
+
+                $created[] = BilliardMatch::create([
+                    'tournament_id' => $tournament->id,
+                    'match_no' => $matchNo,
+                    'phase' => BilliardMatch::PHASE_GROUP,
+                    'group_code' => $groupCode,
+                    'round' => 1,
+                    'position' => $index + 1,
+                    'round_label' => $label,
+                    'player1_id' => $sides['slot1']['player_id'],
+                    'player2_id' => $sides['slot2']['player_id'],
+                    'slot1_source_match_id' => $sides['slot1']['source_match_id'],
+                    'slot1_source_outcome' => $sides['slot1']['source_outcome'],
+                    'slot2_source_match_id' => $sides['slot2']['source_match_id'],
+                    'slot2_source_outcome' => $sides['slot2']['source_outcome'],
+                    'scheduled_on' => $row['scheduled_on'] ?: null,
+                    'scheduled_at' => $row['scheduled_at'] ?: null,
+                    'status' => BilliardMatch::STATUS_SCHEDULED,
+                ]);
+                $matchNo++;
+            }
+
+            if (in_array($tournament->status, [
+                BilliardTournament::STATUS_REGISTRATION_CLOSED,
+                BilliardTournament::STATUS_REGISTRATION_OPEN,
+                BilliardTournament::STATUS_PRE_REGISTRATION,
+            ], true)) {
+                $tournament->update([
+                    'status' => BilliardTournament::STATUS_DRAWN,
+                    'drawn_at' => $tournament->drawn_at ?: now(),
+                ]);
+            }
         });
     }
 

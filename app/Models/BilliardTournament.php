@@ -28,6 +28,11 @@ class BilliardTournament extends Model
 
     public const FORMAT_GROUP_THEN_ELIMINATION = 'group_then_elimination';
 
+    public function scopeLineupPublic($query)
+    {
+        return $query->whereNotNull('published_at');
+    }
+
     public static function formats(): array
     {
         return [
@@ -57,6 +62,7 @@ class BilliardTournament extends Model
         'rules',
         'status',
         'drawn_at',
+        'published_at',
     ];
 
     protected $casts = [
@@ -67,6 +73,7 @@ class BilliardTournament extends Model
         'fee_toman' => 'integer',
         'registration_deadline' => 'datetime',
         'drawn_at' => 'datetime',
+        'published_at' => 'datetime',
     ];
 
     public static function statuses(): array
@@ -178,6 +185,8 @@ class BilliardTournament extends Model
             'accepts_registration' => $this->acceptsRegistration(),
             'status' => $this->status,
             'drawn_at' => optional($this->drawn_at)->toIso8601String(),
+            'published_at' => optional($this->published_at)->toIso8601String(),
+            'is_published' => $this->published_at !== null,
             'registrations_count' => $this->registrations_count
                 ?? ($this->relationLoaded('registrations') ? $this->registrations->count() : null),
         ];

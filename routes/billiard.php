@@ -56,6 +56,7 @@ Route::prefix('billiard')->name('billiard.')->group(function () {
             ->middleware('billiard.role:admin');
         Route::patch('tournaments/{tournament}', [BilliardAdminController::class, 'updateTournament'])
             ->middleware('billiard.role:admin');
+        Route::post('tournaments/{tournament}/publish', [BilliardAdminController::class, 'publishTournament']);
 
         Route::get('tournaments/{tournament}/tables', [BilliardAdminController::class, 'tables']);
         Route::post('tournaments/{tournament}/tables', [BilliardAdminController::class, 'storeTable']);
@@ -77,6 +78,7 @@ Route::prefix('billiard')->name('billiard.')->group(function () {
         Route::put('tournaments/{tournament}/groups', [BilliardAdminController::class, 'setTournamentGroups']);
         Route::put('tournaments/{tournament}/group-players', [BilliardAdminController::class, 'assignGroupPlayers']);
         Route::post('tournaments/{tournament}/group-matches', [BilliardAdminController::class, 'saveGroupMatch']);
+        Route::post('tournaments/{tournament}/group-double-elimination', [BilliardAdminController::class, 'saveGroupDoubleElimination']);
         Route::patch('matches/{match}/slot', [BilliardAdminController::class, 'assignMatchSlot']);
         Route::patch('matches/{match}/schedule', [BilliardAdminController::class, 'scheduleMatch']);
         Route::post('matches/{match}/result', [BilliardAdminController::class, 'recordResult']);

@@ -10,6 +10,7 @@ use App\Models\BilliardRankingEntry;
 use App\Models\BilliardRegistration;
 use App\Models\BilliardTournament;
 use App\Models\BilliardUser;
+use App\Services\Billiard\BilliardBracketService;
 use Illuminate\Http\Request;
 
 class BilliardPublicController extends Controller
@@ -35,6 +36,7 @@ class BilliardPublicController extends Controller
 
         $latestResults = BilliardMatch::query()
             ->with(['player1', 'player2', 'winner', 'tournament'])
+            ->whereHas('tournament', fn ($q) => $q->lineupPublic())
             ->whereIn('status', [BilliardMatch::STATUS_FINISHED, BilliardMatch::STATUS_WALKOVER])
             ->orderByDesc('finished_at')
             ->limit(12)
@@ -135,22 +137,31 @@ class BilliardPublicController extends Controller
             ->where('slug', $slug)
             ->firstOrFail();
 
-        $players = BilliardRegistration::query()
-            ->with('player')
-            ->where('tournament_id', $tournament->id)
-            ->activeInTournament()
-            ->orderBy('seed')
-            ->get()
-            ->map(fn (BilliardRegistration $r) => $r->toApiArray());
+        $published = $tournament->published_at !== null;
+        if ($published) {
+            BilliardBracketService::useNumericGroupCodes((int) $tournament->id);
+        }
 
-        $matches = BilliardMatch::query()
-            ->with(['player1', 'player2', 'winner', 'poolTable'])
-            ->where('tournament_id', $tournament->id)
-            ->orderBy('match_no')
-            ->orderBy('round')
-            ->orderBy('position')
-            ->get()
-            ->map(fn (BilliardMatch $m) => $m->toApiArray());
+        $players = $published
+            ? BilliardRegistration::query()
+                ->with('player')
+                ->where('tournament_id', $tournament->id)
+                ->activeInTournament()
+                ->orderBy('seed')
+                ->get()
+                ->map(fn (BilliardRegistration $r) => $r->toApiArray())
+            : collect();
+
+        $matches = $published
+            ? BilliardMatch::query()
+                ->with(['player1', 'player2', 'winner', 'poolTable'])
+                ->where('tournament_id', $tournament->id)
+                ->orderBy('match_no')
+                ->orderBy('round')
+                ->orderBy('position')
+                ->get()
+                ->map(fn (BilliardMatch $m) => $m->toApiArray())
+            : collect();
 
         $stats = [
             'participants' => $players->count(),
@@ -166,8 +177,13 @@ class BilliardPublicController extends Controller
             ])->count(),
         ];
 
+        $tournamentPayload = $tournament->toApiArray(true);
+        if (! $published) {
+            $tournamentPayload['group_count'] = null;
+        }
+
         return response([
-            'tournament' => $tournament->toApiArray(true),
+            'tournament' => $tournamentPayload,
             'players' => $players,
             'bracket' => $matches,
             'schedule' => $matches->sortBy([
@@ -186,6 +202,7 @@ class BilliardPublicController extends Controller
     {
         $q = BilliardMatch::query()
             ->with(['player1', 'player2', 'poolTable', 'tournament'])
+            ->whereHas('tournament', fn ($query) => $query->lineupPublic())
             ->whereNotNull('scheduled_on');
 
         if ($tid = $request->query('tournament_id')) {
@@ -211,6 +228,7 @@ class BilliardPublicController extends Controller
     {
         $q = BilliardMatch::query()
             ->with(['player1', 'player2', 'winner', 'tournament'])
+            ->whereHas('tournament', fn ($query) => $query->lineupPublic())
             ->whereIn('status', [BilliardMatch::STATUS_FINISHED, BilliardMatch::STATUS_WALKOVER]);
 
         if ($tid = $request->query('tournament_id')) {
@@ -324,6 +342,7 @@ class BilliardPublicController extends Controller
             ->map(function (BilliardRegistration $r) use ($player) {
                 $matches = BilliardMatch::query()
                     ->with(['player1', 'player2'])
+                    ->whereHas('tournament', fn ($q) => $q->lineupPublic())
                     ->where('tournament_id', $r->tournament_id)
                     ->where(function ($q) use ($player) {
                         $q->where('player1_id', $player->id)->orWhere('player2_id', $player->id);
