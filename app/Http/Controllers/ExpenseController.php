@@ -205,7 +205,7 @@ class ExpenseController extends Controller
         }
 
         $this->mergeRequestPayload($request, [
-            'amount', 'title', 'type', 'shop_account_id', 'payment_method', 'cheque', 'cheque_id',
+            'amount', 'title', 'type', 'date', 'shop_account_id', 'payment_method', 'cheque', 'cheque_id',
             'payments', 'cash_amount', 'cheque_amount', 'credit_amount', 'beneficiary_id', 'user_shiksho_id',
             'accounting_account_id',
         ]);
@@ -221,6 +221,7 @@ class ExpenseController extends Controller
             'amount' => 'required|numeric|min:0',
             'title' => 'required|string|max:255',
             'type' => 'nullable|in:جاری,سرمایه',
+            'date' => 'nullable',
             'accounting_account_id' => 'nullable|integer',
         ], PurchaseVatService::requestRules(), $this->paymentAccountRules('expenses'), DocumentPaymentService::requestRules(), ShopBeneficiaryService::requestRules('expenses')));
 
@@ -247,7 +248,7 @@ class ExpenseController extends Controller
         $fields['user_name'] = $user instanceof \App\Models\User
             ? ($user->shopDisplayName() ?: trim($user->name.' '.$user->last_name))
             : trim($user->name.' '.$user->last_name);
-        $fields['date'] = Carbon::now()->format('Y-m-d');
+        $fields['date'] = $this->resolveExpenseDate($request) ?: Carbon::now()->format('Y-m-d');
         if (!isset($fields['type']) || empty($fields['type'])) {
             $fields['type'] = 'جاری';
         }
@@ -298,7 +299,7 @@ class ExpenseController extends Controller
         $this->assertModelBelongsToStaffAtelier($request, $expense);
 
         $this->mergeRequestPayload($request, [
-            'user_name', 'amount', 'title', 'type', 'shop_account_id', 'payment_method', 'cheque', 'cheque_id',
+            'user_name', 'amount', 'title', 'type', 'date', 'shop_account_id', 'payment_method', 'cheque', 'cheque_id',
             'payments', 'cash_amount', 'cheque_amount', 'credit_amount', 'beneficiary_id', 'user_shiksho_id',
             'accounting_account_id', 'vat_mode', 'vat_percent', 'vat_amount',
         ]);
@@ -315,8 +316,16 @@ class ExpenseController extends Controller
             'amount' => 'sometimes|required|numeric|min:0',
             'title' => 'sometimes|required|string|max:255',
             'type' => 'sometimes|required|in:جاری,سرمایه',
+            'date' => 'nullable',
             'accounting_account_id' => 'nullable|integer',
         ], PurchaseVatService::requestRules(), $this->paymentAccountRules('expenses'), ShopBeneficiaryService::requestRules('expenses'), DocumentPaymentService::requestRules()));
+
+        $resolvedDate = $this->resolveExpenseDate($request);
+        if ($resolvedDate) {
+            $fields['date'] = $resolvedDate;
+        } else {
+            unset($fields['date']);
+        }
 
         $accountLinkError = $this->applyExpenseAccount((int) $expense->atelier_id, $fields);
         if ($accountLinkError) {
@@ -513,6 +522,35 @@ class ExpenseController extends Controller
         }
 
         return $expense;
+    }
+
+    protected function resolveExpenseDate(Request $request): ?string
+    {
+        $fromParts = DocumentPaymentService::parseJalaliDate($request->input('date'));
+        if ($fromParts) {
+            return $fromParts;
+        }
+
+        $raw = $request->input('date');
+        if (! is_string($raw) || trim($raw) === '') {
+            return null;
+        }
+        $raw = str_replace(['\\', '-'], '/', trim($raw));
+        if (! preg_match('/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/', $raw, $m)) {
+            return null;
+        }
+        $year = (int) $m[1];
+        $month = (int) $m[2];
+        $day = (int) $m[3];
+        if ($year > 1600) {
+            return sprintf('%04d-%02d-%02d', $year, $month, $day);
+        }
+
+        try {
+            return (new Jalalian($year, $month, $day))->toCarbon()->format('Y-m-d');
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     /**
