@@ -13,9 +13,9 @@ class RepairNotifier
 {
     public function requestCreated(RepairRequest $request): void
     {
-        $text = $this->brand().': درخواست تعمیر جدید #'.$request->id
-            .($request->category ? ' ('.$request->category.')' : '')
-            ."\n".$this->link('/repair/admin/requests/'.$request->id);
+        $detail = 'درخواست تعمیر جدید #'.$request->id
+            .($request->category ? ' ('.$request->category.')' : '');
+        $text = $this->brand().': '.$detail;
         foreach ($this->adminPhones() as $phone) {
             $this->send($phone, $text, RepairSmsLog::TYPE_REQUEST);
         }
@@ -29,8 +29,7 @@ class RepairNotifier
                 $technician->phone,
                 $this->brand().': درخواست #'.$request->id.' به شما ارجاع شد.'
                 ."\nآدرس: ".mb_substr((string) $request->address, 0, 120)
-                ."\nتلفن مشتری: ".$request->contact_phone
-                ."\n".$this->link('/repair/tech/requests/'.$request->id),
+                ."\nتلفن مشتری: ".$request->contact_phone,
                 RepairSmsLog::TYPE_ASSIGNED
             );
         }
@@ -48,16 +47,14 @@ class RepairNotifier
         $this->send(
             $request->contact_phone,
             $this->brand().': هزینهٔ درخواست #'.$request->id.' مبلغ '
-            .number_format((int) $request->total_amount).' تومان است.'
-            ."\nپرداخت: ".$this->link('/repair/requests/'.$request->id),
+            .number_format((int) $request->total_amount).' تومان است.',
             RepairSmsLog::TYPE_INVOICED
         );
     }
 
     public function receiptSubmitted(RepairRequest $request): void
     {
-        $text = $this->brand().': رسید کارت به کارت درخواست #'.$request->id.' ثبت شد.'
-            ."\n".$this->link('/repair/admin/requests/'.$request->id);
+        $text = $this->brand().': رسید کارت به کارت درخواست #'.$request->id.' ثبت شد.';
         foreach ($this->adminPhones() as $phone) {
             $this->send($phone, $text, RepairSmsLog::TYPE_RECEIPT);
         }
@@ -68,8 +65,7 @@ class RepairNotifier
         $this->send(
             $request->contact_phone,
             $this->brand().': رسید پرداخت درخواست #'.$request->id.' تأیید نشد.'
-            .($request->receipt_reject_reason ? ' علت: '.$request->receipt_reject_reason : '')
-            ."\n".$this->link('/repair/requests/'.$request->id),
+            .($request->receipt_reject_reason ? ' علت: '.$request->receipt_reject_reason : ''),
             RepairSmsLog::TYPE_RECEIPT
         );
     }
@@ -95,27 +91,20 @@ class RepairNotifier
 
     public function canceled(RepairRequest $request): void
     {
-        $this->send(
-            $request->contact_phone,
-            $this->brand().': درخواست #'.$request->id.' لغو شد.'
-            .($request->cancel_reason ? ' '.$request->cancel_reason : ''),
-            RepairSmsLog::TYPE_CANCELED
-        );
+        $suffix = $request->cancel_reason ? ' '.$request->cancel_reason : '';
+        $text = $this->brand().': درخواست #'.$request->id.' لغو شد.'.$suffix;
+
+        $this->send($request->contact_phone, $text, RepairSmsLog::TYPE_CANCELED);
 
         $technician = $request->technician;
         if ($technician) {
-            $this->send(
-                $technician->phone,
-                $this->brand().': درخواست #'.$request->id.' لغو شد.',
-                RepairSmsLog::TYPE_CANCELED
-            );
+            $this->send($technician->phone, $text, RepairSmsLog::TYPE_CANCELED);
         }
     }
 
     public function technicianRegistered(RepairUser $technician): void
     {
-        $text = $this->brand().': تعمیرکار جدید ثبت‌نام کرد: '.$technician->name.' ('.$technician->phone.')'
-            ."\nبرای تأیید: ".$this->link('/repair/admin/technicians');
+        $text = $this->brand().': تعمیرکار جدید ثبت‌نام کرد: '.$technician->name.' ('.$technician->phone.')';
         foreach ($this->adminPhones() as $phone) {
             $this->send($phone, $text, RepairSmsLog::TYPE_TECHNICIAN);
         }
@@ -125,8 +114,7 @@ class RepairNotifier
     {
         $this->send(
             $technician->phone,
-            $this->brand().': ثبت‌نام شما به‌عنوان تعمیرکار تأیید شد.'
-            ."\nورود: ".$this->link('/repair/tech/login'),
+            $this->brand().': ثبت‌نام شما به‌عنوان تعمیرکار تأیید شد.',
             RepairSmsLog::TYPE_TECHNICIAN
         );
     }
@@ -174,12 +162,5 @@ class RepairNotifier
         $brand = RepairSetting::value('brand_name');
 
         return $brand !== '' ? $brand : (string) config('repair.brand_name');
-    }
-
-    private function link(string $path): string
-    {
-        $base = (string) config('repair.frontend_url');
-
-        return $base !== '' ? $base.$path : '';
     }
 }
