@@ -108,14 +108,18 @@ class ShopAccountTransferController extends Controller
             ? Carbon::parse($fields['date'])->setTimezone('Asia/Tehran')->format('Y-m-d')
             : Carbon::now('Asia/Tehran')->format('Y-m-d');
 
-        $transfer = DB::transaction(function () use ($atelierId, $from, $to, $amount, $date, $fields, $user) {
+        $defaultTitle = $to->isPettyCash()
+            ? 'شارژ تنخواه '.$to->name
+            : 'انتقال از '.$from->name.' به '.$to->name;
+
+        $transfer = DB::transaction(function () use ($atelierId, $from, $to, $amount, $date, $fields, $user, $defaultTitle) {
             $row = ShopAccountTransfer::create([
                 'atelier_id' => $atelierId,
                 'from_shop_account_id' => $from->id,
                 'to_shop_account_id' => $to->id,
                 'amount' => $amount,
                 'date' => $date,
-                'title' => $fields['title'] ?? 'شارژ تنخواه '.$to->name,
+                'title' => $fields['title'] ?? $defaultTitle,
                 'description' => $fields['description'] ?? null,
                 'user_name' => trim($user->name.' '.$user->last_name),
             ]);
@@ -127,7 +131,7 @@ class ShopAccountTransferController extends Controller
         $balances = ShopAccountBalanceService::balances($atelierId, [$from->id, $to->id]);
 
         return response([
-            'message' => 'شارژ تنخواه ثبت شد.',
+            'message' => $to->isPettyCash() ? 'شارژ تنخواه ثبت شد.' : 'انتقال بین حساب‌ها ثبت شد.',
             'data' => $this->serialize($transfer->fresh(['fromAccount', 'toAccount'])),
             'balances' => [
                 'from' => ['id' => $from->id, 'name' => $from->name, 'balance' => round((float) ($balances[$from->id] ?? 0), 2)],
@@ -173,11 +177,18 @@ class ShopAccountTransferController extends Controller
         if (! $from->is_active || ! $to->is_active) {
             return 'حساب‌های غیرفعال قابل استفاده نیستند.';
         }
-        if ($from->isPettyCash() || $from->isTill()) {
-            return 'شارژ فقط از حساب‌های اصلی فروشگاه امکان‌پذیر است، نه از تنخواه یا صندوق نقد.';
+        // شارژ تنخواه: فقط از حساب اصلی فروشگاه → تنخواه
+        if ($to->isPettyCash()) {
+            if ($from->isPettyCash() || $from->isTill()) {
+                return 'شارژ تنخواه فقط از حساب‌های اصلی فروشگاه امکان‌پذیر است، نه از تنخواه یا صندوق نقد.';
+            }
+
+            return null;
         }
-        if (! $to->isPettyCash()) {
-            return 'مقصد شارژ باید یک حساب تنخواه باشد.';
+
+        // جابجایی بین حساب‌های فروشگاه / صندوق
+        if ($from->isPettyCash()) {
+            return 'انتقال از تنخواه از این مسیر پشتیبانی نمی‌شود؛ از صفحه تنخواه استفاده کنید.';
         }
 
         return null;

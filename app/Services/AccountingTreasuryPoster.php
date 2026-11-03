@@ -124,10 +124,15 @@ class AccountingTreasuryPoster
 
         $date = $transfer->getRawOriginal('date') ?: $transfer->date;
 
+        $to = $transfer->relationLoaded('toAccount')
+            ? $transfer->toAccount
+            : $transfer->toAccount()->first();
+        $toPetty = $to && method_exists($to, 'isPettyCash') ? $to->isPettyCash() : false;
+
         return AccountingVoucherService::post(
             $atelierId,
             $date,
-            $transfer->title ?: 'شارژ تنخواه',
+            $transfer->title ?: ($toPetty ? 'شارژ تنخواه' : 'انتقال بین حساب‌ها'),
             AccountingVoucher::SOURCE_ACCOUNT_TRANSFER,
             (int) $transfer->id,
             [
@@ -135,7 +140,7 @@ class AccountingTreasuryPoster
                     'account_id' => AccountingLedger::shopCashAccountId($atelierId, (int) $transfer->to_shop_account_id),
                     'debit' => $amount,
                     'credit' => 0,
-                    'description' => 'ورود به تنخواه',
+                    'description' => $toPetty ? 'ورود به تنخواه' : 'ورود به حساب مقصد',
                 ],
                 [
                     'account_id' => AccountingLedger::shopCashAccountId($atelierId, (int) $transfer->from_shop_account_id),
