@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Repair;
 
 use App\Http\Controllers\Controller;
 use App\Models\GatewayPayment;
+use App\Models\RepairBrand;
 use App\Models\RepairRequest;
 use App\Models\RepairService;
 use App\Models\RepairSetting;
@@ -43,6 +44,7 @@ class RepairCustomerController extends Controller
         $locationRule = $locationMode === 'required' ? 'required' : 'nullable';
         $data = $request->validate([
             'service_id' => 'nullable|integer',
+            'brand_id' => 'nullable|integer',
             'description' => 'required|string|max:3000',
             'address' => 'required|string|max:1000',
             'latitude' => $locationRule.'|numeric|between:24,40|required_with:longitude',
@@ -74,6 +76,21 @@ class RepairCustomerController extends Controller
             $data['category'] = $service->name;
         } elseif (RepairService::query()->where('is_active', true)->exists()) {
             return response()->json(['message' => 'نوع خدمت را انتخاب کنید.'], 422);
+        }
+
+        $data['brand_id'] = null;
+        $data['brand'] = null;
+        if (Schema::hasTable('repair_brands')) {
+            if ($request->filled('brand_id')) {
+                $brand = RepairBrand::query()->active()->find((int) $request->input('brand_id'));
+                if (! $brand) {
+                    return response()->json(['message' => 'برند انتخاب‌شده معتبر نیست.'], 422);
+                }
+                $data['brand_id'] = (int) $brand->id;
+                $data['brand'] = $brand->name;
+            } elseif (RepairBrand::query()->active()->exists()) {
+                return response()->json(['message' => 'برند دستگاه را انتخاب کنید.'], 422);
+            }
         }
         if (! empty($data['contact_phone'])) {
             $phone = PhoneTools::normalizeIranPhone($data['contact_phone']);

@@ -13,8 +13,12 @@ class RepairNotifier
 {
     public function requestCreated(RepairRequest $request): void
     {
+        $bits = array_values(array_filter([
+            $request->category ?: null,
+            $request->brand ?: null,
+        ]));
         $detail = 'درخواست تعمیر جدید #'.$request->id
-            .($request->category ? ' ('.$request->category.')' : '');
+            .($bits !== [] ? ' ('.implode(' · ', $bits).')' : '');
         $text = $this->brand().': '.$detail;
         foreach ($this->adminPhones() as $phone) {
             $this->send($phone, $text, RepairSmsLog::TYPE_REQUEST);

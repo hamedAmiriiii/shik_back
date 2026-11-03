@@ -45,6 +45,10 @@ Route::prefix('billiard')->name('billiard.')->group(function () {
             ->middleware('throttle:10,1');
         Route::get('me/registrations', [BilliardPlayerController::class, 'myRegistrations']);
         Route::get('me/matches', [BilliardPlayerController::class, 'myMatches']);
+        Route::get('national-competitions', [BilliardPlayerController::class, 'nationalCompetitions']);
+        Route::get('me/national-entry-requests', [BilliardPlayerController::class, 'myNationalEntryRequests']);
+        Route::post('national-entry-requests', [BilliardPlayerController::class, 'storeNationalEntryRequest'])
+            ->middleware('throttle:10,1');
     });
 
     Route::prefix('admin')->middleware(['auth:sanctum', 'billiard.role:admin,operator'])->group(function () {
@@ -110,6 +114,17 @@ Route::prefix('billiard')->name('billiard.')->group(function () {
         Route::patch('news/{news}', [BilliardAdminController::class, 'updateNews'])
             ->middleware('billiard.role:admin');
         Route::delete('news/{news}', [BilliardAdminController::class, 'destroyNews'])
+            ->middleware('billiard.role:admin');
+
+        Route::get('national-competitions', [BilliardAdminController::class, 'nationalCompetitions']);
+        Route::post('national-competitions', [BilliardAdminController::class, 'storeNationalCompetition'])
+            ->middleware('billiard.role:admin');
+        Route::patch('national-competitions/{nationalCompetition}', [BilliardAdminController::class, 'updateNationalCompetition'])
+            ->middleware('billiard.role:admin');
+        Route::delete('national-competitions/{nationalCompetition}', [BilliardAdminController::class, 'destroyNationalCompetition'])
+            ->middleware('billiard.role:admin');
+        Route::get('national-entry-requests', [BilliardAdminController::class, 'nationalEntryRequests']);
+        Route::post('national-entry-requests/{nationalEntryRequest}/review', [BilliardAdminController::class, 'reviewNationalEntryRequest'])
             ->middleware('billiard.role:admin');
     });
 });

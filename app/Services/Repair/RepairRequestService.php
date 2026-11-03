@@ -9,6 +9,7 @@ use App\Models\RepairUser;
 use App\Tools\ImageTools;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
@@ -23,7 +24,7 @@ class RepairRequestService
      */
     public function create(RepairUser $customer, array $data): RepairRequest
     {
-        $request = RepairRequest::create([
+        $payload = [
             'customer_id' => $customer->id,
             'service_id' => $data['service_id'] ?? null,
             'category' => $data['category'] ?? null,
@@ -35,7 +36,13 @@ class RepairRequestService
             'contact_phone' => $data['contact_phone'] ?? $customer->phone,
             'preferred_time' => $data['preferred_time'] ?? null,
             'status' => RepairRequest::STATUS_PENDING,
-        ]);
+        ];
+        if (Schema::hasColumn('repair_requests', 'brand_id')) {
+            $payload['brand_id'] = $data['brand_id'] ?? null;
+            $payload['brand'] = $data['brand'] ?? null;
+        }
+
+        $request = RepairRequest::create($payload);
 
         $updates = [];
         if (! $customer->name && ! empty($data['contact_name'])) {

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Repair;
 
 use App\Http\Controllers\Controller;
+use App\Models\RepairBrand;
 use App\Models\RepairPayout;
 use App\Models\RepairRequest;
 use App\Models\RepairService;
@@ -379,6 +380,59 @@ class RepairAdminController extends Controller
         $service->delete();
 
         return response(['message' => 'نوع خدمت حذف شد.']);
+    }
+
+    public function brands()
+    {
+        return response([
+            'brands' => RepairBrand::query()->ordered()->get()->map(function (RepairBrand $brand) {
+                $row = $brand->toApiArray();
+                $row['requests_count'] = RepairRequest::query()->where('brand_id', $brand->id)->count();
+
+                return $row;
+            })->all(),
+        ]);
+    }
+
+    public function storeBrand(Request $request)
+    {
+        $data = $request->validate([
+            'name' => 'required|string|max:255',
+            'is_active' => 'sometimes|boolean',
+            'sort_order' => 'nullable|integer|min:0|max:100000',
+        ]);
+        $brand = RepairBrand::create([
+            'name' => trim($data['name']),
+            'is_active' => $data['is_active'] ?? true,
+            'sort_order' => $data['sort_order'] ?? ((int) RepairBrand::query()->max('sort_order') + 1),
+        ]);
+
+        return response(['message' => 'برند اضافه شد.', 'brand' => $brand->toApiArray()], 201);
+    }
+
+    public function updateBrand(Request $request, RepairBrand $brand)
+    {
+        $data = $request->validate([
+            'name' => 'sometimes|required|string|max:255',
+            'is_active' => 'sometimes|boolean',
+            'sort_order' => 'nullable|integer|min:0|max:100000',
+        ]);
+        if (isset($data['name'])) {
+            $data['name'] = trim($data['name']);
+        }
+        $brand->update(array_filter($data, fn ($v) => $v !== null));
+
+        return response(['message' => 'ذخیره شد.', 'brand' => $brand->fresh()->toApiArray()]);
+    }
+
+    public function destroyBrand(RepairBrand $brand)
+    {
+        if (RepairRequest::query()->where('brand_id', $brand->id)->exists()) {
+            return response()->json(['message' => 'برای این برند درخواست ثبت شده است؛ به‌جای حذف، غیرفعالش کنید.'], 422);
+        }
+        $brand->delete();
+
+        return response(['message' => 'برند حذف شد.']);
     }
 
     /**

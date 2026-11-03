@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Billiard;
 use App\Http\Controllers\Controller;
 use App\Models\BilliardDiscipline;
 use App\Models\BilliardMatch;
+use App\Models\BilliardNationalCompetition;
+use App\Models\BilliardNationalEntryRequest;
 use App\Models\BilliardNews;
 use App\Models\BilliardRankingEntry;
 use App\Models\BilliardRankingPlacePoint;
@@ -1056,6 +1058,137 @@ class BilliardAdminController extends Controller
         $news->delete();
 
         return response(['message' => 'حذف شد.']);
+    }
+
+    // ——— مسابقات کشوری ———
+    public function nationalCompetitions()
+    {
+        if (! Schema::hasTable('billiard_national_competitions')) {
+            return response(['data' => []]);
+        }
+
+        return response([
+            'data' => BilliardNationalCompetition::query()
+                ->with('discipline')
+                ->ordered()
+                ->get()
+                ->map->toApiArray(),
+        ]);
+    }
+
+    public function storeNationalCompetition(Request $request)
+    {
+        if (! Schema::hasTable('billiard_national_competitions')) {
+            return response()->json(['message' => 'جدول مسابقات کشوری هنوز ساخته نشده است.'], 503);
+        }
+
+        $data = $request->validate([
+            'title' => 'required|string|max:255',
+            'discipline_id' => 'required|integer|exists:billiard_disciplines,id',
+            'is_active' => 'sometimes|boolean',
+            'sort_order' => 'nullable|integer|min:0|max:100000',
+        ]);
+        $item = BilliardNationalCompetition::create([
+            'title' => trim($data['title']),
+            'discipline_id' => (int) $data['discipline_id'],
+            'is_active' => $data['is_active'] ?? true,
+            'sort_order' => $data['sort_order'] ?? ((int) BilliardNationalCompetition::query()->max('sort_order') + 1),
+        ]);
+
+        return response([
+            'message' => 'مسابقهٔ کشوری اضافه شد.',
+            'competition' => $item->load('discipline')->toApiArray(),
+        ], 201);
+    }
+
+    public function updateNationalCompetition(Request $request, BilliardNationalCompetition $nationalCompetition)
+    {
+        $data = $request->validate([
+            'title' => 'sometimes|required|string|max:255',
+            'discipline_id' => 'sometimes|required|integer|exists:billiard_disciplines,id',
+            'is_active' => 'sometimes|boolean',
+            'sort_order' => 'nullable|integer|min:0|max:100000',
+        ]);
+        if (isset($data['title'])) {
+            $data['title'] = trim($data['title']);
+        }
+        $nationalCompetition->update(array_filter($data, fn ($v) => $v !== null));
+
+        return response([
+            'message' => 'ذخیره شد.',
+            'competition' => $nationalCompetition->fresh('discipline')->toApiArray(),
+        ]);
+    }
+
+    public function destroyNationalCompetition(BilliardNationalCompetition $nationalCompetition)
+    {
+        if (BilliardNationalEntryRequest::query()->where('national_competition_id', $nationalCompetition->id)->exists()) {
+            return response()->json(['message' => 'برای این عنوان درخواست ثبت شده؛ به‌جای حذف، غیرفعالش کنید.'], 422);
+        }
+        $nationalCompetition->delete();
+
+        return response(['message' => 'حذف شد.']);
+    }
+
+    public function nationalEntryRequests(Request $request)
+    {
+        if (! Schema::hasTable('billiard_national_entry_requests')) {
+            return response(['data' => [], 'meta' => ['current_page' => 1, 'last_page' => 1, 'total' => 0]]);
+        }
+
+        $query = BilliardNationalEntryRequest::query()
+            ->with(['player', 'discipline'])
+            ->orderByDesc('id');
+        if ($request->filled('status') && isset(BilliardNationalEntryRequest::STATUS_LABELS[$request->input('status')])) {
+            $query->where('status', $request->input('status'));
+        }
+        if ($request->filled('q')) {
+            $q = trim((string) $request->input('q'));
+            $query->where(function ($inner) use ($q) {
+                $inner->where('title', 'like', '%'.$q.'%')
+                    ->orWhereHas('player', function ($p) use ($q) {
+                        $p->where('phone', 'like', '%'.$q.'%')
+                            ->orWhere('first_name', 'like', '%'.$q.'%')
+                            ->orWhere('last_name', 'like', '%'.$q.'%');
+                    });
+            });
+        }
+
+        $page = $query->paginate(min(100, max(10, (int) $request->input('per_page', 30))));
+
+        return response([
+            'data' => collect($page->items())->map(fn (BilliardNationalEntryRequest $r) => $r->toApiArray())->values(),
+            'meta' => [
+                'current_page' => $page->currentPage(),
+                'last_page' => $page->lastPage(),
+                'total' => $page->total(),
+            ],
+        ]);
+    }
+
+    public function reviewNationalEntryRequest(Request $request, BilliardNationalEntryRequest $nationalEntryRequest)
+    {
+        /** @var BilliardUser $admin */
+        $admin = $request->user();
+        $data = $request->validate([
+            'status' => 'required|in:'.BilliardNationalEntryRequest::STATUS_APPROVED.','.BilliardNationalEntryRequest::STATUS_REJECTED,
+            'admin_note' => 'nullable|string|max:1000',
+        ]);
+        if ($nationalEntryRequest->status !== BilliardNationalEntryRequest::STATUS_PENDING) {
+            return response()->json(['message' => 'این درخواست قبلاً بررسی شده است.'], 422);
+        }
+
+        $nationalEntryRequest->update([
+            'status' => $data['status'],
+            'admin_note' => isset($data['admin_note']) ? (trim((string) $data['admin_note']) ?: null) : null,
+            'reviewed_at' => now(),
+            'reviewed_by' => $admin->id,
+        ]);
+
+        return response([
+            'message' => $data['status'] === BilliardNationalEntryRequest::STATUS_APPROVED ? 'درخواست تأیید شد.' : 'درخواست رد شد.',
+            'request' => $nationalEntryRequest->fresh(['player', 'discipline'])->toApiArray(),
+        ]);
     }
 
     private function validatedTournament(Request $request, bool $creating = true): array

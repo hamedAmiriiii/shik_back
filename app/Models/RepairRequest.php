@@ -50,6 +50,8 @@ class RepairRequest extends Model
         'customer_id',
         'technician_id',
         'service_id',
+        'brand_id',
+        'brand',
         'category',
         'description',
         'address',
@@ -113,6 +115,11 @@ class RepairRequest extends Model
         return $this->belongsTo(RepairUser::class, 'technician_id');
     }
 
+    public function brandRelation(): BelongsTo
+    {
+        return $this->belongsTo(RepairBrand::class, 'brand_id');
+    }
+
     public function isOpen(): bool
     {
         return ! in_array($this->status, [self::STATUS_COMPLETED, self::STATUS_CANCELED], true);
@@ -149,6 +156,8 @@ class RepairRequest extends Model
         $row = [
             'id' => (int) $this->id,
             'service_id' => $this->service_id ? (int) $this->service_id : null,
+            'brand_id' => isset($this->attributes['brand_id']) && $this->brand_id ? (int) $this->brand_id : null,
+            'brand' => $this->attributes['brand'] ?? null,
             'category' => $this->category,
             'description' => $this->description,
             'address' => $this->address,

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Repair;
 
 use App\Http\Controllers\Controller;
+use App\Models\RepairBrand;
 use App\Models\RepairService;
 use App\Models\RepairSetting;
 use App\Models\RepairUser;
@@ -30,11 +31,13 @@ class RepairAuthController extends Controller
         $this->assertSchema();
         $values = RepairSetting::allValues();
         $services = $this->activeServices();
+        $brands = $this->activeBrands();
 
         return response([
             'brand_name' => $values['brand_name'],
             'support_phone' => $values['support_phone'],
             'services' => $services,
+            'brands' => $brands,
             'categories' => array_column($services, 'name'),
             'online_payment_enabled' => $values['online_payment_enabled'] === '1',
             'card_payment_enabled' => $values['card_payment_enabled'] === '1',
@@ -428,6 +431,20 @@ class RepairAuthController extends Controller
 
         return RepairService::query()->where('is_active', true)->ordered()->get(['id', 'name'])
             ->map(fn (RepairService $s) => ['id' => (int) $s->id, 'name' => $s->name])
+            ->all();
+    }
+
+    /**
+     * @return list<array{id: int, name: string}>
+     */
+    private function activeBrands(): array
+    {
+        if (! Schema::hasTable('repair_brands')) {
+            return [];
+        }
+
+        return RepairBrand::query()->active()->ordered()->get(['id', 'name'])
+            ->map(fn (RepairBrand $b) => ['id' => (int) $b->id, 'name' => $b->name])
             ->all();
     }
 

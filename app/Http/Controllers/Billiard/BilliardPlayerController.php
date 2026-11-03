@@ -3,13 +3,17 @@
 namespace App\Http\Controllers\Billiard;
 
 use App\Http\Controllers\Controller;
+use App\Models\BilliardDiscipline;
 use App\Models\BilliardMatch;
+use App\Models\BilliardNationalCompetition;
+use App\Models\BilliardNationalEntryRequest;
 use App\Models\BilliardRegistration;
 use App\Models\BilliardTournament;
 use App\Models\BilliardUser;
 use App\Services\Billiard\BilliardRegistrationService;
 use App\Services\GatewayPaymentService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
 class BilliardPlayerController extends Controller
@@ -100,6 +104,119 @@ class BilliardPlayerController extends Controller
                 ] : null,
             ]);
 
+            return response(['data' => $items]);
+    }
+
+    public function nationalCompetitions()
+    {
+        if (! Schema::hasTable('billiard_national_competitions')) {
+            return response(['data' => []]);
+        }
+
+        $items = BilliardNationalCompetition::query()
+            ->with('discipline')
+            ->active()
+            ->ordered()
+            ->get()
+            ->map->toApiArray();
+
         return response(['data' => $items]);
+    }
+
+    public function myNationalEntryRequests(Request $request)
+    {
+        if (! Schema::hasTable('billiard_national_entry_requests')) {
+            return response(['data' => []]);
+        }
+
+        /** @var BilliardUser $user */
+        $user = $request->user();
+        $items = BilliardNationalEntryRequest::query()
+            ->with('discipline')
+            ->where('player_id', $user->id)
+            ->orderByDesc('id')
+            ->get()
+            ->map->toApiArray();
+
+        return response(['data' => $items]);
+    }
+
+    public function storeNationalEntryRequest(Request $request)
+    {
+        if (! Schema::hasTable('billiard_national_entry_requests')) {
+            return response()->json([
+                'message' => 'جدول درخواست‌های کشوری هنوز ساخته نشده است. SQL مربوط را اجرا کنید.',
+            ], 503);
+        }
+
+        /** @var BilliardUser $user */
+        $user = $request->user();
+        $data = $request->validate([
+            'national_competition_id' => 'nullable|integer',
+            'title' => 'nullable|string|max:255',
+            'discipline_id' => 'nullable|integer',
+            'note' => 'nullable|string|max:1000',
+        ]);
+
+        $competition = null;
+        if (! empty($data['national_competition_id'])) {
+            $competition = BilliardNationalCompetition::query()
+                ->active()
+                ->with('discipline')
+                ->find((int) $data['national_competition_id']);
+            if (! $competition) {
+                return response()->json(['message' => 'مسابقهٔ انتخاب‌شده معتبر نیست.'], 422);
+            }
+        }
+
+        $title = $competition
+            ? $competition->title
+            : trim((string) ($data['title'] ?? ''));
+        $disciplineId = $competition
+            ? (int) $competition->discipline_id
+            : (int) ($data['discipline_id'] ?? 0);
+
+        if ($title === '') {
+            return response()->json(['message' => 'عنوان مسابقه را انتخاب یا وارد کنید.'], 422);
+        }
+        if ($disciplineId < 1) {
+            return response()->json(['message' => 'نوع (رشته) مسابقه را انتخاب کنید.'], 422);
+        }
+
+        $discipline = BilliardDiscipline::query()->where('is_active', true)->find($disciplineId);
+        if (! $discipline) {
+            return response()->json(['message' => 'رشتهٔ انتخاب‌شده معتبر نیست.'], 422);
+        }
+
+        $dup = BilliardNationalEntryRequest::query()
+            ->where('player_id', $user->id)
+            ->where('status', BilliardNationalEntryRequest::STATUS_PENDING)
+            ->where(function ($q) use ($competition, $title, $disciplineId) {
+                if ($competition) {
+                    $q->where('national_competition_id', $competition->id);
+                } else {
+                    $q->whereNull('national_competition_id')
+                        ->where('title', $title)
+                        ->where('discipline_id', $disciplineId);
+                }
+            })
+            ->exists();
+        if ($dup) {
+            return response()->json(['message' => 'برای این مسابقه درخواست باز دارید.'], 422);
+        }
+
+        $row = BilliardNationalEntryRequest::create([
+            'player_id' => $user->id,
+            'national_competition_id' => $competition?->id,
+            'title' => $title,
+            'discipline_id' => $disciplineId,
+            'note' => isset($data['note']) ? trim((string) $data['note']) ?: null : null,
+            'status' => BilliardNationalEntryRequest::STATUS_PENDING,
+        ]);
+
+        return response([
+            'message' => 'درخواست شما ثبت شد.',
+            'request' => $row->load('discipline')->toApiArray(),
+        ], 201);
     }
 }

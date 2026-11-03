@@ -169,6 +169,10 @@ Route::prefix('repair')->name('repair.')->group(function () {
         Route::post('services', [\App\Http\Controllers\Repair\RepairAdminController::class, 'storeService']);
         Route::patch('services/{service}', [\App\Http\Controllers\Repair\RepairAdminController::class, 'updateService']);
         Route::delete('services/{service}', [\App\Http\Controllers\Repair\RepairAdminController::class, 'destroyService']);
+        Route::get('brands', [\App\Http\Controllers\Repair\RepairAdminController::class, 'brands']);
+        Route::post('brands', [\App\Http\Controllers\Repair\RepairAdminController::class, 'storeBrand']);
+        Route::patch('brands/{brand}', [\App\Http\Controllers\Repair\RepairAdminController::class, 'updateBrand']);
+        Route::delete('brands/{brand}', [\App\Http\Controllers\Repair\RepairAdminController::class, 'destroyBrand']);
         Route::get('payouts', [\App\Http\Controllers\Repair\RepairAdminController::class, 'payouts']);
         Route::post('payouts', [\App\Http\Controllers\Repair\RepairAdminController::class, 'storePayout']);
         Route::delete('payouts/{payout}', [\App\Http\Controllers\Repair\RepairAdminController::class, 'destroyPayout']);
