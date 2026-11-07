@@ -13,13 +13,9 @@ class RepairNotifier
 {
     public function requestCreated(RepairRequest $request): void
     {
-        $bits = array_values(array_filter([
-            $request->category ?: null,
-            $request->brand ?: null,
-        ]));
-        $detail = 'درخواست تعمیر جدید #'.$request->id
-            .($bits !== [] ? ' ('.implode(' · ', $bits).')' : '');
-        $text = $this->brand().': '.$detail;
+        // ملی‌پیامک متن آزاد را رد می‌کند؛ با قالب OTP ارسال می‌شود
+        // {0}=برند ، {1}=«درخواست تعمیر جدید» به‌جای کد عددی
+        $text = $this->brand()."\nکد احراز هویت شما : درخواست تعمیر جدید";
         foreach ($this->adminPhones() as $phone) {
             $this->send($phone, $text, RepairSmsLog::TYPE_REQUEST);
         }

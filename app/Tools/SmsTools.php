@@ -707,6 +707,14 @@ class SmsTools
 
     protected static function extractOtpCode(string $text): ?string
     {
+        // خط OTP صریح — مقدار می‌تواند عدد یا متن کوتاه (مثل «درخواست تعمیر جدید») باشد
+        if (preg_match('/کد\s*(?:احراز\s*هویت\s*شما|ورود|تأیید|تایید)\s*[:：]\s*(.+)$/um', $text, $m)) {
+            $code = trim($m[1]);
+            if ($code !== '') {
+                return $code;
+            }
+        }
+
         if (preg_match('/(?<!\\d)(\\d{4,8})(?!\\d)/u', $text, $m)) {
             return $m[1];
         }
