@@ -320,6 +320,97 @@ class RawMaterialController extends Controller
         return response(['message' => 'ماده اولیه حذف شد'], 200);
     }
 
+    /**
+     * خرید چند ماده اولیه با یک فاکتور جمعی.
+     * POST /api/raw-materials/bulk-purchase
+     * body: { lines: [{raw_material_id, quantity_kg, price_per_kg}], create_invoice, vat_*, payment_* ... }
+     */
+    public function bulkPurchase(Request $request, RawMaterialFifoService $fifo, RawMaterialInvoiceService $invoices)
+    {
+        $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::PRODUCED_GOODS, 'کالای تولیدی برای این فروشگاه فعال نیست.');
+        $atelierId = $this->staffShopAtelierId($request);
+        if ($atelierId === null) {
+            return response()->json([
+                'message' => 'ثبت خرید فقط با حساب پرسنل متصل به فروشگاه امکان‌پذیر است.',
+            ], 422);
+        }
+
+        $this->prepareRawMaterialPurchaseRequest($request);
+
+        $fields = $request->validate(
+            array_merge([
+                'lines' => 'required|array|min:1',
+                'lines.*.raw_material_id' => 'required|integer',
+                'lines.*.quantity_kg' => 'required|numeric|min:0.001',
+                'lines.*.price_per_kg' => 'required|numeric|min:0',
+                'lines.*.note' => 'nullable|string',
+                'purchased_at' => 'nullable|date',
+                'note' => 'nullable|string',
+            ], $this->rawMaterialPurchaseAccountRules(true), RawMaterialInvoiceService::requestRules()),
+            $this->rawMaterialPurchaseMessages()
+        );
+
+        $fields['create_invoice'] = true;
+        unset($fields['invoice_id'], $fields['invoice_link'], $fields['invoice_item_id']);
+
+        $accountError = $this->paymentAccountError($atelierId, $fields['shop_account_id'] ?? null);
+        if ($accountError) {
+            return response()->json(['message' => $accountError], 422);
+        }
+
+        $lineRows = $fields['lines'];
+        unset($fields['lines']);
+
+        try {
+            $result = DB::transaction(function () use ($atelierId, $lineRows, $fields, $invoices, $request, $fifo) {
+                $attachRows = [];
+                $materials = [];
+
+                foreach ($lineRows as $index => $line) {
+                    $material = RawMaterial::query()
+                        ->where('atelier_id', $atelierId)
+                        ->where('id', (int) $line['raw_material_id'])
+                        ->first();
+                    if (! $material) {
+                        throw new RuntimeException('ماده اولیه ردیف '.($index + 1).' یافت نشد.');
+                    }
+                    if ($material->isPieceUnit() && ! ProductQuantityTools::isWholeNumber($line['quantity_kg'])) {
+                        throw new RuntimeException('تعداد «'.$material->name.'» باید عدد صحیح باشد.');
+                    }
+
+                    $lot = $this->createLot($material, [
+                        'quantity_kg' => $line['quantity_kg'],
+                        'price_per_kg' => $line['price_per_kg'],
+                        'purchased_at' => $fields['purchased_at'] ?? now(),
+                        'note' => $line['note'] ?? ($fields['note'] ?? null),
+                    ]);
+                    $attachRows[] = ['material' => $material, 'lot' => $lot];
+                    $materials[$material->id] = $material;
+                }
+
+                $invoice = $invoices->attachBulk($attachRows, $fields, $this->shopRequestActor($request));
+
+                $stock = [];
+                foreach ($materials as $material) {
+                    $stock[] = $fifo->attachStock($material->load($this->lotRelations()));
+                }
+
+                return [
+                    'invoice' => $invoice,
+                    'materials' => array_values($stock),
+                ];
+            });
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response([
+            'message' => 'فاکتور جمعی و موجودی مواد ثبت شد.',
+            'invoice' => $result['invoice'],
+            'materials' => $result['materials'],
+        ], 201);
+    }
+
     public function storeLot(Request $request, RawMaterial $rawMaterial, RawMaterialFifoService $fifo, RawMaterialInvoiceService $invoices)
     {
         $this->assertModelBelongsToStaffAtelier($request, $rawMaterial);
@@ -516,7 +607,8 @@ class RawMaterialController extends Controller
         $this->mergeRequestPayload($request, [
             'name', 'unit_type', 'note', 'sale_price', 'quantity_kg', 'price_per_kg', 'purchased_at',
             'create_invoice', 'invoice_id', 'invoice_link', 'invoice_item_id', 'invoice_title',
-            'date', 'invoice_date',
+            'date', 'invoice_date', 'lines',
+            'vat_mode', 'vat_percent', 'vat_amount',
             'shop_account_id', 'payment_method', 'cheque', 'cheque_id',
             'payments', 'cash_amount', 'cheque_amount', 'credit_amount',
             'beneficiary_id', 'user_shiksho_id',
@@ -535,6 +627,14 @@ class RawMaterialController extends Controller
             $decoded = json_decode($cheque, true);
             if (is_array($decoded)) {
                 $request->merge(['cheque' => $decoded]);
+            }
+        }
+
+        $lines = $request->input('lines');
+        if (is_string($lines) && $lines !== '') {
+            $decoded = json_decode($lines, true);
+            if (is_array($decoded)) {
+                $request->merge(['lines' => $decoded]);
             }
         }
     }

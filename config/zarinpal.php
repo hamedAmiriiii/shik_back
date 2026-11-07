@@ -16,6 +16,8 @@ return [
             (string) parse_url((string) env('REPAIR_FRONTEND_URL', ''), PHP_URL_HOST),
             (string) parse_url((string) env('BILLIARD_FRONTEND_URL', 'https://billiard.webinoplus.ir'), PHP_URL_HOST),
             'billiard.webinoplus.ir',
+            'omidtamir.ir',
+            'www.omidtamir.ir',
         ]
     ))))),
 ];

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Atelier;
 use App\Models\GatewayPayment;
 use App\Models\RepairRequest;
+use App\Models\RepairSetting;
 use App\Models\SmsPackage;
 use App\Models\SmsPackageOrder;
 use App\Models\Setting;
@@ -196,7 +197,7 @@ class GatewayPaymentService
      */
     protected function startZarinpal(GatewayPayment $payment, ?string $mobile): array
     {
-        $callback = rtrim((string) (config('zarinpal.callback_url') ?: url('/api/payments/zarinpal/callback')), '/');
+        $callback = $this->zarinpalCallbackUrl($payment);
         $metadata = [];
         if (is_string($mobile) && $mobile !== '') {
             $metadata['mobile'] = $mobile;
@@ -213,6 +214,31 @@ class GatewayPaymentService
         $payment->update(['authority' => $authority]);
 
         return $this->formatPayment($payment->fresh(), $this->zarinpal->startPayUrl($authority));
+    }
+
+    /** کال‌بک زرین‌پال؛ برای مرچنت تعمیرات از دامنهٔ omidtamir استفاده می‌شود. */
+    protected function zarinpalCallbackUrl(GatewayPayment $payment): string
+    {
+        $merchant = $this->paymentMerchantId($payment);
+        $isRepair = in_array($payment->type, [
+            GatewayPayment::TYPE_REPAIR_INVOICE,
+            GatewayPayment::TYPE_REPAIR_SMS,
+        ], true);
+
+        if ($merchant && $isRepair) {
+            $repairCb = trim((string) config('repair.zarinpal_callback_url'));
+            if ($repairCb !== '') {
+                return rtrim($repairCb, '/');
+            }
+            $front = rtrim((string) config('repair.frontend_url'), '/');
+            if ($front !== '') {
+                return $front.'/zarinpal-callback.html';
+            }
+            // پیش‌فرض دامنهٔ omidtamir اگر frontend_url خالی باشد
+            return 'https://omidtamir.ir/zarinpal-callback.html';
+        }
+
+        return rtrim((string) (config('zarinpal.callback_url') ?: url('/api/payments/zarinpal/callback')), '/');
     }
 
     /**
@@ -671,11 +697,18 @@ class GatewayPaymentService
             if (! $repair || ! $repair->isPayable()) {
                 throw new RuntimeException('این درخواست منتظر پرداخت نیست.');
             }
+            if (! RepairSetting::onlineGatewayAvailable()) {
+                throw new RuntimeException('پرداخت آنلاین فعال نیست یا مرچنت زرین‌پال تنظیم نشده است.');
+            }
 
             return [
                 (int) $repair->total_amount * 10,
                 'پرداخت هزینهٔ تعمیر #'.$repair->id,
-                ['repair_request_id' => (int) $repair->id, 'total_toman' => (int) $repair->total_amount],
+                [
+                    'repair_request_id' => (int) $repair->id,
+                    'total_toman' => (int) $repair->total_amount,
+                    'merchant_id' => RepairSetting::zarinpalMerchantId(),
+                ],
             ];
         }
 

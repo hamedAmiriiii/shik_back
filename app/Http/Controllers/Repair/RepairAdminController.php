@@ -520,10 +520,18 @@ class RepairAdminController extends Controller
             'bank_name' => 'nullable|string|max:100',
             'online_payment_enabled' => 'nullable|boolean',
             'card_payment_enabled' => 'nullable|boolean',
+            'zarinpal_merchant_id' => 'nullable|string|max:64',
             'default_labor_share_percent' => 'nullable|numeric|min:0|max:100',
             'location_mode' => 'nullable|string|in:off,optional,required',
             'map_provider' => 'nullable|string|in:auto,neshan,osm',
         ]);
+        if (array_key_exists('zarinpal_merchant_id', $data)) {
+            $merchant = trim((string) ($data['zarinpal_merchant_id'] ?? ''));
+            if ($merchant !== '' && ! preg_match('/^[0-9a-fA-F-]{8,64}$/', $merchant)) {
+                return response(['message' => 'مرچنت کد زرین‌پال نامعتبر است (معمولاً ۳۶ کاراکتر با خط تیره).'], 422);
+            }
+            $data['zarinpal_merchant_id'] = $merchant;
+        }
         foreach ($data as $key => $value) {
             if (is_bool($value)) {
                 $value = $value ? '1' : '0';

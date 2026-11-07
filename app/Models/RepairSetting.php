@@ -14,6 +14,8 @@ class RepairSetting extends Model
         'bank_name' => '',
         'online_payment_enabled' => '1',
         'card_payment_enabled' => '1',
+        /** مرچنت کد زرین‌پال اختصاصی سامانهٔ تعمیرات (مثلاً omidtamir) */
+        'zarinpal_merchant_id' => '',
         'default_labor_share_percent' => '70',
         // off: بدون نقشه | optional: اختیاری | required: انتخاب لوکیشن الزامی
         'location_mode' => 'optional',
@@ -40,6 +42,9 @@ class RepairSetting extends Model
         if ($values['brand_name'] === '') {
             $values['brand_name'] = (string) config('repair.brand_name');
         }
+        if ($values['zarinpal_merchant_id'] === '') {
+            $values['zarinpal_merchant_id'] = trim((string) config('repair.zarinpal_merchant_id', ''));
+        }
 
         return $values;
     }
@@ -65,13 +70,37 @@ class RepairSetting extends Model
     public static function value(string $key): string
     {
         $row = self::query()->where('key', $key)->value('value');
+        if ($row !== null) {
+            return (string) $row;
+        }
+        if ($key === 'zarinpal_merchant_id') {
+            return trim((string) config('repair.zarinpal_merchant_id', ''));
+        }
 
-        return $row !== null ? (string) $row : (string) (self::DEFAULTS[$key] ?? '');
+        return (string) (self::DEFAULTS[$key] ?? '');
     }
 
     public static function put(string $key, ?string $value): void
     {
         self::query()->updateOrCreate(['key' => $key], ['value' => $value]);
+    }
+
+    /** مرچنت زرین‌پال تعمیرات؛ null یعنی از مرچنت مرکزی وبینو استفاده شود. */
+    public static function zarinpalMerchantId(): ?string
+    {
+        $merchant = trim(self::value('zarinpal_merchant_id'));
+
+        return $merchant !== '' ? $merchant : null;
+    }
+
+    public static function onlineGatewayAvailable(): bool
+    {
+        if (self::value('online_payment_enabled') !== '1') {
+            return false;
+        }
+
+        return self::zarinpalMerchantId() !== null
+            || trim((string) config('zarinpal.merchant_id')) !== '';
     }
 
     /**

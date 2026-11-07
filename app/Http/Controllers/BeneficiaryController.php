@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\UserShiksho;
+use App\Services\DocumentPaymentService;
 use App\Services\ShopBeneficiaryService;
 use App\Services\ShopStaffAccess;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -116,25 +117,40 @@ class BeneficiaryController extends Controller
 
         $invoices = collect();
         if (ShopBeneficiaryService::supports('invoices')) {
-            $invoices = Invoice::query()
+            $invoiceQuery = Invoice::query()
                 ->where('atelier_id', $atelierId)
-                ->where('beneficiary_id', $user->id)
+                ->where('beneficiary_id', $user->id);
+            if (DocumentPaymentService::supportsSplits()) {
+                $invoiceQuery->with('payments.cheque');
+            }
+            $invoices = $invoiceQuery
+                ->orderByDesc('date')
                 ->orderByDesc('id')
                 ->get();
             $invoices->each(function (Invoice $invoice) {
                 $this->attachPaymentAccount($invoice);
+                if (DocumentPaymentService::supports($invoice)) {
+                    $invoice->setAttribute('payment_breakdown', DocumentPaymentService::breakdown($invoice));
+                }
             });
         }
 
         $expenses = collect();
         if (ShopBeneficiaryService::supports('expenses')) {
-            $expenses = Expense::query()
+            $expenseQuery = Expense::query()
                 ->where('atelier_id', $atelierId)
-                ->where('beneficiary_id', $user->id)
+                ->where('beneficiary_id', $user->id);
+            if (DocumentPaymentService::supportsSplits()) {
+                $expenseQuery->with('payments.cheque');
+            }
+            $expenses = $expenseQuery
                 ->orderByDesc('id')
                 ->get();
             $expenses->each(function (Expense $expense) {
                 $this->attachPaymentAccount($expense);
+                if (DocumentPaymentService::supports($expense)) {
+                    $expense->setAttribute('payment_breakdown', DocumentPaymentService::breakdown($expense));
+                }
             });
         }
 

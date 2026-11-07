@@ -366,6 +366,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::post('cheque-books/{chequeBook}/leaves/{leaf}/void', [\App\Http\Controllers\ChequeBookController::class, 'voidLeaf']);
     Route::resource('cheque-books', \App\Http\Controllers\ChequeBookController::class)->except(['create', 'edit']);
     Route::get('pos-catalog', [\App\Http\Controllers\PosCatalogController::class, 'index']);
+    Route::post('raw-materials/bulk-purchase', [\App\Http\Controllers\RawMaterialController::class, 'bulkPurchase']);
     Route::resource('raw-materials', \App\Http\Controllers\RawMaterialController::class)->except(['create', 'edit']);
     Route::post('raw-materials/{rawMaterial}/layer-image', [\App\Http\Controllers\RawMaterialController::class, 'uploadLayerImage']);
     Route::delete('raw-materials/{rawMaterial}/layer-image', [\App\Http\Controllers\RawMaterialController::class, 'deleteLayerImage']);

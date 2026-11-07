@@ -177,8 +177,8 @@ class RepairCustomerController extends Controller
     {
         $customer = $this->customer($request);
         $this->assertOwner($request, $repairRequest);
-        if (RepairSetting::value('online_payment_enabled') !== '1') {
-            return response()->json(['message' => 'پرداخت آنلاین فعال نیست.'], 422);
+        if (! RepairSetting::onlineGatewayAvailable()) {
+            return response()->json(['message' => 'پرداخت آنلاین فعال نیست یا مرچنت زرین‌پال تنظیم نشده است.'], 422);
         }
         $data = $request->validate([
             'return_url' => 'nullable|string|max:1024',
@@ -241,7 +241,7 @@ class RepairCustomerController extends Controller
         $values = RepairSetting::allValues();
 
         return [
-            'online_enabled' => $values['online_payment_enabled'] === '1',
+            'online_enabled' => RepairSetting::onlineGatewayAvailable(),
             'card_enabled' => $values['card_payment_enabled'] === '1' && $values['card_number'] !== '',
             'card_number' => $values['card_number'],
             'card_holder' => $values['card_holder'],

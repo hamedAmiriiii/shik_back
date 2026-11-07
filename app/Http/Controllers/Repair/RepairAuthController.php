@@ -39,7 +39,7 @@ class RepairAuthController extends Controller
             'services' => $services,
             'brands' => $brands,
             'categories' => array_column($services, 'name'),
-            'online_payment_enabled' => $values['online_payment_enabled'] === '1',
+            'online_payment_enabled' => RepairSetting::onlineGatewayAvailable(),
             'card_payment_enabled' => $values['card_payment_enabled'] === '1',
             'location_mode' => RepairSetting::locationMode($values),
             'map_provider' => RepairSetting::mapProvider($values),

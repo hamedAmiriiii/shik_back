@@ -53,6 +53,85 @@ class RawMaterialInvoiceService
     }
 
     /**
+     * چند لات ماده اولیه را با یک فاکتور جمعی ثبت می‌کند (آیتم‌ها + VAT + پرداخت).
+     *
+     * @param  list<array{material: RawMaterial, lot: RawMaterialLot}>  $rows
+     * @param  array<string, mixed>  $fields
+     */
+    public function attachBulk(array $rows, array $fields, $actor): Invoice
+    {
+        if ($rows === []) {
+            throw new RuntimeException('حداقل یک ماده اولیه برای فاکتور جمعی لازم است.');
+        }
+        if (! Schema::hasColumn('raw_material_lots', 'invoice_id')) {
+            throw new RuntimeException('اتصال فاکتور به مواد اولیه آماده نیست. SQL مربوط را اجرا کنید.');
+        }
+
+        $prepared = [];
+        $totalAmount = 0.0;
+        foreach ($rows as $row) {
+            /** @var RawMaterial $material */
+            $material = $row['material'];
+            /** @var RawMaterialLot $lot */
+            $lot = $row['lot'];
+            $qty = round((float) $lot->quantity_kg, 3);
+            $price = round((float) $lot->price_per_kg, 2);
+            $amount = round($qty * $price, 2);
+            if ($qty < 0.001 || $amount < 0) {
+                throw new RuntimeException('مقدار یا مبلغ یکی از ردیف‌های فاکتور جمعی نامعتبر است.');
+            }
+            $prepared[] = compact('material', 'lot', 'qty', 'price', 'amount');
+            $totalAmount = round($totalAmount + $amount, 2);
+        }
+
+        if ($totalAmount < 0.01) {
+            throw new RuntimeException('جمع مبلغ فاکتور جمعی باید بیشتر از صفر باشد.');
+        }
+
+        if (empty($fields['invoice_title']) && empty($fields['title'])) {
+            $names = array_values(array_unique(array_map(
+                static fn (array $row) => (string) $row['material']->name,
+                $prepared
+            )));
+            $fields['invoice_title'] = count($names) === 1
+                ? 'خرید ماده اولیه: '.$names[0]
+                : 'خرید مواد اولیه ('.count($names).' قلم)';
+        }
+
+        $invoice = $this->createInvoice($prepared[0]['material'], $fields, $actor, $totalAmount);
+
+        $sort = 0;
+        foreach ($prepared as $row) {
+            $item = null;
+            if (Schema::hasTable('invoice_items')) {
+                $item = InvoiceItem::create([
+                    'invoice_id' => $invoice->id,
+                    'title' => $row['material']->name,
+                    'unit_price' => $row['price'],
+                    'quantity' => $row['qty'],
+                    'total' => $row['amount'],
+                    'sort_order' => $sort,
+                ]);
+                $sort++;
+            }
+
+            $row['lot']->update([
+                'invoice_id' => $invoice->id,
+                'invoice_item_id' => $item?->id,
+            ]);
+        }
+
+        $invoice = $invoice->fresh(['payments', 'rawMaterialLots', 'items']);
+        foreach ($prepared as $row) {
+            $this->absorbInvoiceVatIntoLotPrice($row['lot']->fresh(), $invoice);
+        }
+
+        AccountingDocumentPoster::syncInvoice($invoice->fresh(['payments', 'rawMaterialLots']));
+
+        return $invoice->fresh(['payments', 'shopAccount', 'cheque', 'items', 'rawMaterialLots']);
+    }
+
+    /**
      * وصل کردن خرید ماده به فاکتور موجود، یا صدور فاکتور همزمان.
      *
      * invoice_link=whole → کل فاکتور
