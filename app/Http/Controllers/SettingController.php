@@ -685,6 +685,11 @@ class SettingController extends Controller
         return response([
             'salary_hourly_wage' => $hourlyWage,
             'salary_monthly_work_hours' => $monthlyWorkHours,
+            'payroll_tax_percent' => (float) Setting::get('payroll_tax_percent', '0'),
+            'payroll_insurance_employee_percent' => (float) Setting::get('payroll_insurance_employee_percent', '0'),
+            'payroll_insurance_employer_percent' => (float) Setting::get('payroll_insurance_employer_percent', '0'),
+            'payroll_tax_fixed' => (float) Setting::get('payroll_tax_fixed', '0'),
+            'payroll_insurance_fixed' => (float) Setting::get('payroll_insurance_fixed', '0'),
         ], 200);
     }
 
@@ -701,6 +706,11 @@ class SettingController extends Controller
             'salary_monthly_work_hours',
             'hourly_wage',
             'monthly_work_hours',
+            'payroll_tax_percent',
+            'payroll_insurance_employee_percent',
+            'payroll_insurance_employer_percent',
+            'payroll_tax_fixed',
+            'payroll_insurance_fixed',
         ]);
 
         if (! $request->has('salary_hourly_wage') && $request->has('hourly_wage')) {
@@ -713,18 +723,38 @@ class SettingController extends Controller
         $request->validate([
             'salary_hourly_wage' => 'required|numeric|min:0',
             'salary_monthly_work_hours' => 'required|numeric|min:1|max:744',
+            'payroll_tax_percent' => 'nullable|numeric|min:0|max:100',
+            'payroll_insurance_employee_percent' => 'nullable|numeric|min:0|max:100',
+            'payroll_insurance_employer_percent' => 'nullable|numeric|min:0|max:100',
+            'payroll_tax_fixed' => 'nullable|numeric|min:0',
+            'payroll_insurance_fixed' => 'nullable|numeric|min:0',
         ]);
 
         $hourlyWage = (float) $request->input('salary_hourly_wage');
         $monthlyWorkHours = (float) $request->input('salary_monthly_work_hours');
+        $taxPercent = (float) $request->input('payroll_tax_percent', 0);
+        $insEmp = (float) $request->input('payroll_insurance_employee_percent', 0);
+        $insEmpoyer = (float) $request->input('payroll_insurance_employer_percent', 0);
+        $taxFixed = (float) $request->input('payroll_tax_fixed', 0);
+        $insFixed = (float) $request->input('payroll_insurance_fixed', 0);
 
         Setting::set('salary_hourly_wage', (string) $hourlyWage);
         Setting::set('salary_monthly_work_hours', (string) $monthlyWorkHours);
+        Setting::set('payroll_tax_percent', (string) $taxPercent);
+        Setting::set('payroll_insurance_employee_percent', (string) $insEmp);
+        Setting::set('payroll_insurance_employer_percent', (string) $insEmpoyer);
+        Setting::set('payroll_tax_fixed', (string) $taxFixed);
+        Setting::set('payroll_insurance_fixed', (string) $insFixed);
 
         return response([
             'message' => 'تنظیمات حقوق با موفقیت ذخیره شد.',
             'salary_hourly_wage' => $hourlyWage,
             'salary_monthly_work_hours' => $monthlyWorkHours,
+            'payroll_tax_percent' => $taxPercent,
+            'payroll_insurance_employee_percent' => $insEmp,
+            'payroll_insurance_employer_percent' => $insEmpoyer,
+            'payroll_tax_fixed' => $taxFixed,
+            'payroll_insurance_fixed' => $insFixed,
         ], 200);
     }
 

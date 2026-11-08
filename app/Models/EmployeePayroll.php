@@ -27,6 +27,11 @@ class EmployeePayroll extends Model
         'base_work_hours_snapshot',
         'overtime_hours',
         'overtime_amount',
+        'base_earned_amount',
+        'items_addition_total',
+        'items_deduction_total',
+        'commission_sales_amount',
+        'commission_amount',
         'status',
         'paid_at',
         'paid_by_user_id',
@@ -43,6 +48,11 @@ class EmployeePayroll extends Model
         'base_work_hours_snapshot' => 'decimal:2',
         'overtime_hours' => 'decimal:2',
         'overtime_amount' => 'decimal:2',
+        'base_earned_amount' => 'decimal:2',
+        'items_addition_total' => 'decimal:2',
+        'items_deduction_total' => 'decimal:2',
+        'commission_sales_amount' => 'decimal:2',
+        'commission_amount' => 'decimal:2',
         'paid_at' => 'datetime',
     ];
 
@@ -69,6 +79,11 @@ class EmployeePayroll extends Model
     public function payments(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(EmployeePayrollPayment::class, 'payroll_id');
+    }
+
+    public function items(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(EmployeePayrollItem::class, 'payroll_id')->orderBy('sort_order')->orderBy('id');
     }
 
     public function isPaid(): bool
@@ -134,7 +149,8 @@ class EmployeePayroll extends Model
     {
         return (float) $this->hours_worked > 0.001
             || (float) ($this->days_worked ?? 0) > 0.001
-            || (float) $this->salary_amount > 0.01;
+            || (float) $this->salary_amount > 0.01
+            || (float) ($this->base_earned_amount ?? 0) > 0.01;
     }
 
     public function isDailySalary(): bool

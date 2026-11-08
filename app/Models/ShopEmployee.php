@@ -10,6 +10,19 @@ class ShopEmployee extends Model
 {
     public const SALARY_TYPE_MONTHLY = 'monthly';
     public const SALARY_TYPE_DAILY = 'daily';
+    public const SALARY_TYPE_HOURLY = 'hourly';
+    public const SALARY_TYPE_COMMISSION = 'commission';
+    public const SALARY_TYPE_MIXED = 'mixed';
+    public const SALARY_TYPE_FIXED = 'fixed';
+
+    public const SALARY_TYPES = [
+        self::SALARY_TYPE_MONTHLY,
+        self::SALARY_TYPE_DAILY,
+        self::SALARY_TYPE_HOURLY,
+        self::SALARY_TYPE_COMMISSION,
+        self::SALARY_TYPE_MIXED,
+        self::SALARY_TYPE_FIXED,
+    ];
 
     protected $fillable = [
         'atelier_id',
@@ -21,6 +34,8 @@ class ShopEmployee extends Model
         'base_salary',
         'base_work_hours',
         'hourly_wage',
+        'commission_percent',
+        'fixed_monthly_amount',
         'note',
         'permissions',
     ];
@@ -30,6 +45,8 @@ class ShopEmployee extends Model
         'base_salary' => 'decimal:2',
         'base_work_hours' => 'decimal:2',
         'hourly_wage' => 'decimal:2',
+        'commission_percent' => 'decimal:2',
+        'fixed_monthly_amount' => 'decimal:2',
         'permissions' => 'array',
     ];
 
@@ -41,9 +58,29 @@ class ShopEmployee extends Model
 
     public function isDailySalary(): bool
     {
-        $type = $this->attributes['salary_type'] ?? self::SALARY_TYPE_MONTHLY;
+        return $this->salaryType() === self::SALARY_TYPE_DAILY;
+    }
 
-        return $type === self::SALARY_TYPE_DAILY;
+    public function salaryType(): string
+    {
+        $type = (string) ($this->attributes['salary_type'] ?? self::SALARY_TYPE_MONTHLY);
+
+        return in_array($type, self::SALARY_TYPES, true) ? $type : self::SALARY_TYPE_MONTHLY;
+    }
+
+    public function itemTemplates(): HasMany
+    {
+        return $this->hasMany(EmployeePayrollItemTemplate::class, 'shop_employee_id');
+    }
+
+    public function loans(): HasMany
+    {
+        return $this->hasMany(EmployeeLoan::class, 'shop_employee_id');
+    }
+
+    public function attendanceDays(): HasMany
+    {
+        return $this->hasMany(EmployeeAttendanceDay::class, 'shop_employee_id');
     }
 
     public function atelier(): BelongsTo
@@ -103,10 +140,43 @@ class ShopEmployee extends Model
      */
     public function calculateSalary(float $hoursWorked = 0, float $daysWorked = 0, float $overtimeHours = 0): array
     {
+        // انواع جدید از طریق PayrollSalaryService محاسبه می‌شوند؛ این متد سازگاری قدیمی را نگه می‌دارد.
         if ($this->isDailySalary()) {
             return $this->calculateDailySalary($daysWorked, $overtimeHours);
         }
 
+        return $this->calculateMonthlySalary($hoursWorked);
+    }
+
+    /**
+     * @return array{
+     *   salary_amount: float,
+     *   base_salary_snapshot: float,
+     *   base_work_hours_snapshot: float,
+     *   overtime_hours: float,
+     *   overtime_amount: float,
+     *   days_worked: float,
+     *   salary_type: string
+     * }
+     */
+    public function calculateDailySalaryPublic(float $daysWorked, float $overtimeHours): array
+    {
+        return $this->calculateDailySalary($daysWorked, $overtimeHours);
+    }
+
+    /**
+     * @return array{
+     *   salary_amount: float,
+     *   base_salary_snapshot: float,
+     *   base_work_hours_snapshot: float,
+     *   overtime_hours: float,
+     *   overtime_amount: float,
+     *   days_worked: float,
+     *   salary_type: string
+     * }
+     */
+    public function calculateMonthlySalaryPublic(float $hoursWorked): array
+    {
         return $this->calculateMonthlySalary($hoursWorked);
     }
 

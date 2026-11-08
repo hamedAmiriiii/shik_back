@@ -387,6 +387,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::post('employee-payrolls', [\App\Http\Controllers\EmployeePayrollController::class, 'store']);
     // مساعده قبل از محاسبه حقوق — باید قبل از {employeePayroll} باشد
     Route::post('employee-payrolls/advances', [\App\Http\Controllers\EmployeePayrollPaymentController::class, 'storeAdvance']);
+    Route::post('employee-payrolls/bulk-calculate', [\App\Http\Controllers\EmployeePayrollExtraController::class, 'bulkCalculate']);
     Route::get('employee-payrolls/{employeePayroll}', [\App\Http\Controllers\EmployeePayrollController::class, 'show']);
     Route::put('employee-payrolls/{employeePayroll}', [\App\Http\Controllers\EmployeePayrollController::class, 'update']);
     Route::delete('employee-payrolls/{employeePayroll}', [\App\Http\Controllers\EmployeePayrollController::class, 'destroy']);
@@ -394,6 +395,21 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('employee-payrolls/{employeePayroll}/payments', [\App\Http\Controllers\EmployeePayrollPaymentController::class, 'index']);
     Route::post('employee-payrolls/{employeePayroll}/payments', [\App\Http\Controllers\EmployeePayrollPaymentController::class, 'store']);
     Route::delete('employee-payrolls/{employeePayroll}/payments/{payment}', [\App\Http\Controllers\EmployeePayrollPaymentController::class, 'destroy']);
+    // ردیف‌های پاداش/کسر/مالیات فیش
+    Route::get('employee-payrolls/{employeePayroll}/items', [\App\Http\Controllers\EmployeePayrollItemController::class, 'index']);
+    Route::post('employee-payrolls/{employeePayroll}/items', [\App\Http\Controllers\EmployeePayrollItemController::class, 'store']);
+    Route::put('employee-payrolls/{employeePayroll}/items/{item}', [\App\Http\Controllers\EmployeePayrollItemController::class, 'update']);
+    Route::delete('employee-payrolls/{employeePayroll}/items/{item}', [\App\Http\Controllers\EmployeePayrollItemController::class, 'destroy']);
+    // قالب تکرارشونده، وام، حضور
+    Route::get('shop-employees/{shopEmployee}/payroll-templates', [\App\Http\Controllers\EmployeePayrollExtraController::class, 'templatesIndex']);
+    Route::post('shop-employees/{shopEmployee}/payroll-templates', [\App\Http\Controllers\EmployeePayrollExtraController::class, 'templatesStore']);
+    Route::delete('shop-employees/{shopEmployee}/payroll-templates/{template}', [\App\Http\Controllers\EmployeePayrollExtraController::class, 'templatesDestroy']);
+    Route::get('shop-employees/{shopEmployee}/loans', [\App\Http\Controllers\EmployeePayrollExtraController::class, 'loansIndex']);
+    Route::post('shop-employees/{shopEmployee}/loans', [\App\Http\Controllers\EmployeePayrollExtraController::class, 'loansStore']);
+    Route::post('shop-employees/{shopEmployee}/loans/{loan}/close', [\App\Http\Controllers\EmployeePayrollExtraController::class, 'loansClose']);
+    Route::get('shop-employees/{shopEmployee}/attendance', [\App\Http\Controllers\EmployeePayrollExtraController::class, 'attendanceIndex']);
+    Route::post('shop-employees/{shopEmployee}/attendance', [\App\Http\Controllers\EmployeePayrollExtraController::class, 'attendanceUpsert']);
+    Route::post('shop-employees/{shopEmployee}/attendance/bulk', [\App\Http\Controllers\EmployeePayrollExtraController::class, 'attendanceBulk']);
     
     // Invoice routes - require authentication
     Route::get('beneficiaries', [\App\Http\Controllers\BeneficiaryController::class, 'index']);

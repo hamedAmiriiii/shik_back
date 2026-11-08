@@ -6,6 +6,7 @@ use App\Models\EmployeePayroll;
 use App\Models\Expense;
 use App\Models\Setting;
 use App\Models\ShopEmployee;
+use App\Services\PayrollSalaryService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
@@ -48,8 +49,12 @@ class EmployeePayrollController extends Controller
                 ', [EmployeePayroll::STATUS_PAID, EmployeePayroll::STATUS_PARTIAL, EmployeePayroll::STATUS_PENDING])
                 ->first();
 
+            $with = ['employee', 'payments'];
+            if (Schema::hasTable('employee_payroll_items')) {
+                $with[] = 'items';
+            }
             $paginator = (clone $filterQuery)
-                ->with(['employee', 'payments'])
+                ->with($with)
                 ->orderByDesc('payroll_year')
                 ->orderByDesc('payroll_month')
                 ->orderByDesc('id')
@@ -133,48 +138,30 @@ class EmployeePayrollController extends Controller
         $hoursWorked = (float) ($fields['hours_worked'] ?? 0);
         $daysWorked = (float) ($fields['days_worked'] ?? 0);
         $overtimeHoursInput = (float) ($fields['overtime_hours'] ?? 0);
+        $year = (int) $fields['payroll_year'];
+        $month = (int) $fields['payroll_month'];
+        $service = app(PayrollSalaryService::class);
+        $salaryType = $employee->salaryType();
 
-        if ($employee->isDailySalary()) {
-            if ($daysWorked <= 0) {
-                return response()->json(['message' => 'تعداد روز کارکرد را وارد کنید.'], 422);
-            }
-            $calc = $employee->calculateSalary(0, $daysWorked, $overtimeHoursInput);
-            $hoursWorked = 0;
-        } else {
-            if ($hoursWorked <= 0) {
-                return response()->json(['message' => 'ساعت کارکرد را وارد کنید.'], 422);
-            }
-            $calc = $employee->calculateSalary($hoursWorked);
-            $daysWorked = 0;
+        if ($service->requiresDays($salaryType) && $daysWorked <= 0) {
+            return response()->json(['message' => 'تعداد روز کارکرد را وارد کنید.'], 422);
+        }
+        if ($service->requiresHours($salaryType) && $hoursWorked <= 0 && ! $service->allowsZeroWork($salaryType)) {
+            return response()->json(['message' => 'ساعت کارکرد را وارد کنید.'], 422);
         }
 
-        // نرخ ساعتی override در صورت ارسال دستی (فقط ماهانه / اضافه‌کار)
         if (array_key_exists('hourly_wage', $fields) && (float) $fields['hourly_wage'] > 0) {
-            $hourlyWage = (float) $fields['hourly_wage'];
-            if ($employee->isDailySalary()) {
-                $calc['overtime_amount'] = round($hourlyWage * $calc['overtime_hours'], 2);
-                $calc['salary_amount'] = round(
-                    ((float) $calc['base_salary_snapshot'] * (float) $calc['days_worked']) + $calc['overtime_amount'],
-                    2
-                );
-            } else {
-                $calc['overtime_amount'] = round($hourlyWage * $calc['overtime_hours'], 2);
-                $calc['salary_amount'] = round($calc['base_salary_snapshot'] > 0
-                    ? (($hoursWorked >= $calc['base_work_hours_snapshot'] && $calc['base_work_hours_snapshot'] > 0)
-                        ? $calc['base_salary_snapshot'] + $calc['overtime_amount']
-                        : ($calc['base_work_hours_snapshot'] > 0
-                            ? round(($calc['base_salary_snapshot'] / $calc['base_work_hours_snapshot']) * $hoursWorked, 2) + $calc['overtime_amount']
-                            : $calc['overtime_amount']))
-                    : $hourlyWage * $hoursWorked, 2);
-            }
-        } else {
-            $hourlyWage = (float) $employee->hourly_wage;
+            $employee->hourly_wage = (float) $fields['hourly_wage'];
         }
+        $hourlyWage = (float) $employee->hourly_wage;
+
+        $calc = $service->calculateBase($employee, $hoursWorked, $daysWorked, $overtimeHoursInput, $year, $month);
+        $hoursWorked = (float) ($calc['hours_worked'] ?? $hoursWorked);
 
         $existing = EmployeePayroll::query()
             ->where('shop_employee_id', $employee->id)
-            ->where('payroll_year', (int) $fields['payroll_year'])
-            ->where('payroll_month', (int) $fields['payroll_month'])
+            ->where('payroll_year', $year)
+            ->where('payroll_month', $month)
             ->first();
 
         // مساعده مانع محاسبه مجدد حقوق نیست؛ فقط بعد از پرداخت «حقوق» قفل می‌شود
@@ -201,19 +188,30 @@ class EmployeePayrollController extends Controller
         if (Schema::hasColumn('employee_payrolls', 'salary_type_snapshot')) {
             $payload['salary_type_snapshot'] = $calc['salary_type'];
         }
+        if (Schema::hasColumn('employee_payrolls', 'base_earned_amount')) {
+            $payload['base_earned_amount'] = $calc['base_earned_amount'];
+        }
+        if (Schema::hasColumn('employee_payrolls', 'commission_sales_amount')) {
+            $payload['commission_sales_amount'] = $calc['commission_sales_amount'];
+            $payload['commission_amount'] = $calc['commission_amount'];
+        }
 
+        $wasNew = ! $existing;
         $payroll = EmployeePayroll::updateOrCreate(
             [
                 'shop_employee_id' => $employee->id,
-                'payroll_year' => (int) $fields['payroll_year'],
-                'payroll_month' => (int) $fields['payroll_month'],
+                'payroll_year' => $year,
+                'payroll_month' => $month,
             ],
             $payload
         );
 
-        // بعد از محاسبه حقوق، مساعده‌های قبلی از مانده کسر و وضعیت همگام می‌شود
-        $payroll->syncStatus();
-        $payroll->load(['employee', 'payments']);
+        if ($wasNew || ! $payroll->items()->exists()) {
+            $service->applyRecurringAndLoans($payroll, $employee);
+        }
+        $service->applyAutoTaxInsurance($payroll);
+        $payroll = $service->recomputePayrollTotals($payroll);
+        $payroll->load(['employee', 'payments', 'items']);
 
         return response(array_merge($payroll->toArray(), $payroll->paymentSummary(), [
             'salary_breakdown' => [
@@ -223,6 +221,9 @@ class EmployeePayrollController extends Controller
                 'overtime_amount' => $calc['overtime_amount'],
                 'days_worked' => $calc['days_worked'],
                 'salary_type' => $calc['salary_type'],
+                'base_earned_amount' => $calc['base_earned_amount'],
+                'commission_sales_amount' => $calc['commission_sales_amount'],
+                'commission_amount' => $calc['commission_amount'],
             ],
         ]), 201);
     }
@@ -231,14 +232,32 @@ class EmployeePayrollController extends Controller
     {
         $this->assertModelBelongsToStaffAtelier($request, $employeePayroll);
 
-        $payroll = $employeePayroll->load([
+        $with = [
             'employee',
             'paidBy:id,name,last_name',
             'expense:id,title,amount,date,type',
             'payments.paidBy:id,name,last_name',
-        ]);
+        ];
+        if (Schema::hasTable('employee_payroll_items')) {
+            $with[] = 'items';
+        }
+        $payroll = $employeePayroll->load($with);
 
-        return response(array_merge($payroll->toArray(), $employeePayroll->paymentSummary()), 200);
+        return response(array_merge($payroll->toArray(), $employeePayroll->paymentSummary(), [
+            'salary_breakdown' => [
+                'base_salary' => (float) $payroll->base_salary_snapshot,
+                'base_work_hours' => (float) $payroll->base_work_hours_snapshot,
+                'overtime_hours' => (float) $payroll->overtime_hours,
+                'overtime_amount' => (float) $payroll->overtime_amount,
+                'days_worked' => (float) ($payroll->days_worked ?? 0),
+                'salary_type' => $payroll->salary_type_snapshot,
+                'base_earned_amount' => (float) ($payroll->base_earned_amount ?? 0),
+                'commission_sales_amount' => (float) ($payroll->commission_sales_amount ?? 0),
+                'commission_amount' => (float) ($payroll->commission_amount ?? 0),
+                'items_addition_total' => (float) ($payroll->items_addition_total ?? 0),
+                'items_deduction_total' => (float) ($payroll->items_deduction_total ?? 0),
+            ],
+        ]), 200);
     }
 
     public function update(Request $request, EmployeePayroll $employeePayroll)
@@ -301,56 +320,35 @@ class EmployeePayrollController extends Controller
             ? (float) $fields['overtime_hours']
             : (float) ($employeePayroll->overtime_hours ?? 0);
 
-        if ($employee && $employee->isDailySalary()) {
-            if ($daysWorked <= 0) {
+        $service = app(PayrollSalaryService::class);
+        $hourlyWage = array_key_exists('hourly_wage', $fields) && (float) $fields['hourly_wage'] > 0
+            ? (float) $fields['hourly_wage']
+            : (float) ($employee->hourly_wage ?? $employeePayroll->hourly_wage);
+
+        if ($employee) {
+            $salaryType = $employee->salaryType();
+            if ($service->requiresDays($salaryType) && $daysWorked <= 0) {
                 return response()->json(['message' => 'تعداد روز کارکرد را وارد کنید.'], 422);
             }
-            $calc = $employee->calculateSalary(0, $daysWorked, $overtimeHoursInput);
-            $hoursWorked = 0;
-        } elseif ($employee) {
-            if ($hoursWorked <= 0) {
+            if ($service->requiresHours($salaryType) && $hoursWorked <= 0 && ! $service->allowsZeroWork($salaryType)) {
                 return response()->json(['message' => 'ساعت کارکرد را وارد کنید.'], 422);
             }
-            $calc = $employee->calculateSalary($hoursWorked);
-            $daysWorked = 0;
+            $employee->hourly_wage = $hourlyWage;
+            $calc = $service->calculateBase($employee, $hoursWorked, $daysWorked, $overtimeHoursInput, $payrollYear, $payrollMonth);
+            $hoursWorked = (float) ($calc['hours_worked'] ?? $hoursWorked);
         } else {
             $calc = [
                 'salary_amount' => round((float) $employeePayroll->hourly_wage * $hoursWorked, 2),
+                'base_earned_amount' => round((float) $employeePayroll->hourly_wage * $hoursWorked, 2),
                 'base_salary_snapshot' => (float) $employeePayroll->base_salary_snapshot,
                 'base_work_hours_snapshot' => (float) $employeePayroll->base_work_hours_snapshot,
                 'overtime_hours' => 0,
                 'overtime_amount' => 0,
                 'days_worked' => 0,
                 'salary_type' => ShopEmployee::SALARY_TYPE_MONTHLY,
+                'commission_sales_amount' => 0,
+                'commission_amount' => 0,
             ];
-        }
-
-        $hourlyWage = array_key_exists('hourly_wage', $fields) && (float) $fields['hourly_wage'] > 0
-            ? (float) $fields['hourly_wage']
-            : (float) ($employee->hourly_wage ?? $employeePayroll->hourly_wage);
-
-        if (array_key_exists('hourly_wage', $fields) && (float) $fields['hourly_wage'] > 0) {
-            $calc['overtime_amount'] = round($hourlyWage * $calc['overtime_hours'], 2);
-            if (($calc['salary_type'] ?? '') === ShopEmployee::SALARY_TYPE_DAILY) {
-                $calc['salary_amount'] = round(
-                    ((float) $calc['base_salary_snapshot'] * (float) $calc['days_worked']) + $calc['overtime_amount'],
-                    2
-                );
-            } else {
-                $baseSnap = (float) $calc['base_salary_snapshot'];
-                $baseHoursSnap = (float) $calc['base_work_hours_snapshot'];
-                if ($baseSnap > 0) {
-                    if ($hoursWorked >= $baseHoursSnap && $baseHoursSnap > 0) {
-                        $calc['salary_amount'] = round($baseSnap + $calc['overtime_amount'], 2);
-                    } elseif ($baseHoursSnap > 0) {
-                        $calc['salary_amount'] = round(($baseSnap / $baseHoursSnap) * $hoursWorked + $calc['overtime_amount'], 2);
-                    } else {
-                        $calc['salary_amount'] = round($calc['overtime_amount'], 2);
-                    }
-                } else {
-                    $calc['salary_amount'] = round($hourlyWage * $hoursWorked, 2);
-                }
-            }
         }
 
         $update = [
@@ -371,17 +369,28 @@ class EmployeePayrollController extends Controller
         if (Schema::hasColumn('employee_payrolls', 'salary_type_snapshot')) {
             $update['salary_type_snapshot'] = $calc['salary_type'];
         }
+        if (Schema::hasColumn('employee_payrolls', 'base_earned_amount')) {
+            $update['base_earned_amount'] = $calc['base_earned_amount'];
+        }
+        if (Schema::hasColumn('employee_payrolls', 'commission_sales_amount')) {
+            $update['commission_sales_amount'] = $calc['commission_sales_amount'];
+            $update['commission_amount'] = $calc['commission_amount'];
+        }
 
         $employeePayroll->update($update);
 
-        $employeePayroll->syncStatus();
+        if ($employee) {
+            $service->applyAutoTaxInsurance($employeePayroll);
+            $employeePayroll = $service->recomputePayrollTotals($employeePayroll);
+        } else {
+            $employeePayroll->syncStatus();
+        }
+
+        $fresh = $employeePayroll->fresh()->load(['employee', 'payments', 'items']);
 
         return response([
             'message' => 'کارکرد ماهانه با موفقیت به‌روزرسانی شد.',
-            'payroll' => array_merge(
-                $employeePayroll->fresh()->load(['employee', 'payments'])->toArray(),
-                $employeePayroll->paymentSummary()
-            ),
+            'payroll' => array_merge($fresh->toArray(), $fresh->paymentSummary()),
         ], 200);
     }
 

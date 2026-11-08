@@ -92,6 +92,12 @@ class ShopEmployeeController extends Controller
             'hourly_wage' => $fields['hourly_wage'] ?? 0,
             'note' => $fields['note'] ?? null,
         ];
+        if (Schema::hasColumn('shop_employees', 'commission_percent')) {
+            $data['commission_percent'] = $fields['commission_percent'] ?? 0;
+        }
+        if (Schema::hasColumn('shop_employees', 'fixed_monthly_amount')) {
+            $data['fixed_monthly_amount'] = $fields['fixed_monthly_amount'] ?? 0;
+        }
         if (Schema::hasColumn('shop_employees', 'salary_type')) {
             $data['salary_type'] = $fields['salary_type'] ?? ShopEmployee::SALARY_TYPE_MONTHLY;
             if ($data['salary_type'] === ShopEmployee::SALARY_TYPE_DAILY) {
@@ -138,6 +144,12 @@ class ShopEmployeeController extends Controller
             unset($payload['salary_type']);
         } elseif (($payload['salary_type'] ?? $shopEmployee->salary_type) === ShopEmployee::SALARY_TYPE_DAILY) {
             $payload['base_work_hours'] = 0;
+        }
+        if (! Schema::hasColumn('shop_employees', 'commission_percent')) {
+            unset($payload['commission_percent']);
+        }
+        if (! Schema::hasColumn('shop_employees', 'fixed_monthly_amount')) {
+            unset($payload['fixed_monthly_amount']);
         }
 
         if (array_key_exists('permissions', $fields)) {
@@ -190,10 +202,12 @@ class ShopEmployeeController extends Controller
             'phone' => ($updating ? 'sometimes|' : '').'nullable|string|regex:/^09\d{9}$/',
             'username' => 'sometimes|nullable|string|regex:/^09\d{9}$/',
             'is_active' => ($updating ? 'sometimes|' : 'nullable|').'boolean',
-            'salary_type' => ($updating ? 'sometimes|' : 'nullable|').'in:monthly,daily',
+            'salary_type' => ($updating ? 'sometimes|' : 'nullable|').'in:'.implode(',', ShopEmployee::SALARY_TYPES),
             'base_salary' => ($updating ? 'sometimes|' : 'nullable|').'numeric|min:0',
             'base_work_hours' => ($updating ? 'sometimes|' : 'nullable|').'numeric|min:0',
             'hourly_wage' => ($updating ? 'sometimes|' : 'nullable|').'numeric|min:0',
+            'commission_percent' => ($updating ? 'sometimes|' : 'nullable|').'numeric|min:0|max:100',
+            'fixed_monthly_amount' => ($updating ? 'sometimes|' : 'nullable|').'numeric|min:0',
             'note' => ($updating ? 'sometimes|' : 'nullable|').'nullable|string|max:2000',
             'password' => 'sometimes|nullable|string|min:6|max:255',
             'permissions' => 'sometimes|nullable|array',
@@ -207,7 +221,7 @@ class ShopEmployeeController extends Controller
     private function ruleMessages(): array
     {
         return [
-            'salary_type.in' => 'نوع حقوق باید ماهانه یا روزانه باشد.',
+            'salary_type.in' => 'نوع حقوق نامعتبر است.',
             'permissions.array' => 'لیست دسترسی باید آرایه باشد.',
             'permissions.*.in' => 'یکی از دسترسی‌های انتخاب‌شده معتبر نیست.',
             'permissions.*.string' => 'کلید دسترسی نامعتبر است.',
