@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Services\AccountingDocumentPoster;
+use App\Services\ConsumableInvoiceSyncService;
 use App\Services\DocumentPaymentService;
 use App\Services\PurchaseVatService;
 use App\Services\ShopBeneficiaryService;
@@ -288,6 +289,7 @@ class InvoiceController extends Controller
             'image' => 'nullable',
             'image_base64' => 'nullable|string',
             'remove_image' => 'nullable|boolean',
+            'discount_amount' => 'sometimes|nullable|numeric|min:0',
         ], PurchaseVatService::requestRules(), $this->paymentAccountRules('invoices'), ShopBeneficiaryService::requestRules('invoices'), DocumentPaymentService::requestRules()));
 
         $beneficiaryError = ShopBeneficiaryService::applyToFields((int) $invoice->atelier_id, $fields, true, 'invoices');
@@ -346,7 +348,30 @@ class InvoiceController extends Controller
             $fields['vat_mode'] = $vatNorm['vat_mode'];
             $fields['vat_percent'] = $vatNorm['vat_percent'];
             $fields['vat_amount'] = $vatNorm['vat_amount'];
-            $newPayable = round($newAmount + (float) $vatNorm['vat_amount'], 2);
+            if ($itemsSent && $itemRows !== []) {
+                $lineVat = round(array_sum(array_map(static function (array $row) {
+                    return (float) ($row['vat_amount'] ?? 0);
+                }, $itemRows)), 2);
+                $fields['vat_mode'] = $lineVat > 0.009 ? PurchaseVatService::MODE_AMOUNT : PurchaseVatService::MODE_NONE;
+                $fields['vat_percent'] = null;
+                $fields['vat_amount'] = $lineVat;
+            }
+            $newPayable = round($newAmount + (float) $fields['vat_amount'], 2);
+            if ($request->exists('discount_amount')) {
+                $discount = round(max(0, (float) $request->input('discount_amount')), 2);
+                if ($discount > 0.009 && ! Schema::hasColumn('invoices', 'discount_amount')) {
+                    throw new RuntimeException('ستون تخفیف فاکتور آماده نیست. SQL مواد مصرفی را اجرا کنید.');
+                }
+                if ($discount > $newPayable + 0.001) {
+                    throw new RuntimeException('مبلغ تخفیف از جمع فاکتور و ارزش افزوده بیشتر است.');
+                }
+                if (Schema::hasColumn('invoices', 'discount_amount')) {
+                    $fields['discount_amount'] = $discount;
+                    $newPayable = round($newPayable - $discount, 2);
+                }
+            } elseif (Schema::hasColumn('invoices', 'discount_amount')) {
+                $newPayable = round($newPayable - (float) ($invoice->discount_amount ?? 0), 2);
+            }
             $oldPayable = PurchaseVatService::payableAmount($invoice);
             $paymentsSent = DocumentPaymentService::requestHasPaymentSplits($request);
             if (
@@ -391,6 +416,12 @@ class InvoiceController extends Controller
                     if (! array_key_exists('amount', $fields) && $invoice->hasLineItems()) {
                         $invoice->update(['amount' => $invoice->itemsSum()]);
                     }
+                }
+                if ($request->boolean('sync_consumables')) {
+                    if (! $itemsSent) {
+                        throw new RuntimeException('برای ثبت مواد مصرفی باید اقلام فاکتور ارسال شود.');
+                    }
+                    app(ConsumableInvoiceSyncService::class)->syncFromInvoice($invoice->fresh(['items']));
                 }
                 if ($paymentSource) {
                     DocumentPaymentService::replaceSplits($invoice->fresh(), $paymentSource, (string) $invoice->user_name);
@@ -602,6 +633,14 @@ class InvoiceController extends Controller
                 )
             );
         }
+        if (Schema::hasTable('consumable_material_lots')) {
+            $invoice->setAttribute(
+                'has_consumable_lots',
+                $invoice->consumableMaterialLots()->exists()
+            );
+        } else {
+            $invoice->setAttribute('has_consumable_lots', false);
+        }
 
         return $invoice;
     }
@@ -654,6 +693,7 @@ class InvoiceController extends Controller
             'date',
             'invoice_date',
             'items',
+            'discount_amount',
             'image',
             'image_base64',
             'remove_image',
@@ -731,11 +771,20 @@ class InvoiceController extends Controller
                 return null;
             }
 
+            $base = round($unitPrice * $quantity, 2);
+            $vat = $this->normalizeItemVat($item, $base);
+            if ($vat === null) {
+                return null;
+            }
+
             $rows[] = [
                 'title' => mb_substr($title, 0, 255),
                 'unit_price' => round($unitPrice, 2),
                 'quantity' => round($quantity, 3),
-                'total' => round($unitPrice * $quantity, 2),
+                'total' => $base,
+                'vat_mode' => $vat['vat_mode'],
+                'vat_percent' => $vat['vat_percent'],
+                'vat_amount' => $vat['vat_amount'],
                 'sort_order' => $index,
             ];
         }
@@ -805,16 +854,74 @@ class InvoiceController extends Controller
         }
 
         $invoice->items()->delete();
+        $withVat = Schema::hasColumn('invoice_items', 'vat_mode');
+        if (! $withVat) {
+            foreach ($rows as $row) {
+                if ((float) ($row['vat_amount'] ?? 0) > 0.009) {
+                    throw new RuntimeException('ستون ارزش افزوده اقلام آماده نیست. SQL مواد مصرفی را اجرا کنید.');
+                }
+            }
+        }
         foreach ($rows as $row) {
-            InvoiceItem::create([
+            $payload = [
                 'invoice_id' => $invoice->id,
                 'title' => $row['title'],
                 'unit_price' => $row['unit_price'],
                 'quantity' => $row['quantity'],
                 'total' => $row['total'],
                 'sort_order' => $row['sort_order'],
-            ]);
+            ];
+            if ($withVat) {
+                $payload['vat_mode'] = $row['vat_mode'] ?? 'none';
+                $payload['vat_percent'] = $row['vat_percent'] ?? null;
+                $payload['vat_amount'] = $row['vat_amount'] ?? 0;
+            }
+            InvoiceItem::create($payload);
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     * @return array{vat_mode: string, vat_percent: ?float, vat_amount: float}|null
+     */
+    protected function normalizeItemVat(array $item, float $base): ?array
+    {
+        $mode = strtolower(trim((string) ($item['vat_mode'] ?? 'none')));
+        if (! in_array($mode, ['none', 'percent', 'amount'], true)) {
+            return null;
+        }
+
+        if ($mode === 'percent') {
+            $percent = round((float) ($item['vat_percent'] ?? 0), 2);
+            if ($percent < 0 || $percent > 100) {
+                return null;
+            }
+
+            return [
+                'vat_mode' => 'percent',
+                'vat_percent' => $percent,
+                'vat_amount' => round($base * $percent / 100, 2),
+            ];
+        }
+
+        if ($mode === 'amount') {
+            $amount = round((float) ($item['vat_amount'] ?? 0), 2);
+            if ($amount < 0) {
+                return null;
+            }
+
+            return [
+                'vat_mode' => 'amount',
+                'vat_percent' => null,
+                'vat_amount' => $amount,
+            ];
+        }
+
+        return [
+            'vat_mode' => 'none',
+            'vat_percent' => null,
+            'vat_amount' => 0.0,
+        ];
     }
 
     protected function requestHasImage(Request $request): bool

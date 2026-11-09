@@ -14,6 +14,9 @@ class InvoiceItem extends Model
         'unit_price',
         'quantity',
         'total',
+        'vat_mode',
+        'vat_percent',
+        'vat_amount',
         'sort_order',
     ];
 
@@ -21,6 +24,8 @@ class InvoiceItem extends Model
         'unit_price' => 'decimal:2',
         'quantity' => 'decimal:3',
         'total' => 'decimal:2',
+        'vat_percent' => 'decimal:2',
+        'vat_amount' => 'decimal:2',
         'sort_order' => 'integer',
     ];
 

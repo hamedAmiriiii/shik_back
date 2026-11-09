@@ -14,7 +14,7 @@ class Invoice extends Model
     use HasFactory;
 
     protected $fillable = [
-        'amount', 'vat_mode', 'vat_percent', 'vat_amount',
+        'amount', 'vat_mode', 'vat_percent', 'vat_amount', 'discount_amount',
         'title', 'description', 'date', 'user_name', 'atelier_id', 'beneficiary_id', 'shop_account_id',
         'payment_method', 'payment_status', 'paid_at', 'cheque_id', 'image_path',
     ];
@@ -24,6 +24,7 @@ class Invoice extends Model
         'amount' => 'decimal:2',
         'vat_percent' => 'decimal:2',
         'vat_amount' => 'decimal:2',
+        'discount_amount' => 'decimal:2',
         'paid_at' => 'datetime',
     ];
 
@@ -65,6 +66,11 @@ class Invoice extends Model
     public function rawMaterialLots(): HasMany
     {
         return $this->hasMany(RawMaterialLot::class);
+    }
+
+    public function consumableMaterialLots(): HasMany
+    {
+        return $this->hasMany(ConsumableMaterialLot::class);
     }
 
     public function getImageUrlAttribute(): ?string

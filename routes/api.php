@@ -419,6 +419,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::post('invoices/{invoice}/apply-advance', [\App\Http\Controllers\InvoiceController::class, 'applyAdvance']);
     Route::post('invoices/{invoice}/image', [\App\Http\Controllers\InvoiceController::class, 'uploadImage']);
     Route::delete('invoices/{invoice}/image', [\App\Http\Controllers\InvoiceController::class, 'deleteImage']);
+
+    Route::get('consumable-withdrawals', [\App\Http\Controllers\ConsumableMaterialController::class, 'withdrawals']);
+    Route::post('consumable-materials/{consumableMaterial}/withdraw', [\App\Http\Controllers\ConsumableMaterialController::class, 'withdraw']);
+    Route::resource('consumable-materials', \App\Http\Controllers\ConsumableMaterialController::class)->except(['create', 'edit']);
     Route::resource('manual-trades', \App\Http\Controllers\ManualTradeController::class)->except(['create', 'edit']);
     
     // SMS Logs routes - require authentication

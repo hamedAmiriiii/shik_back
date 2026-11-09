@@ -131,7 +131,12 @@ class PurchaseVatService
             return round((float) ($model->amount ?? 0), 2);
         }
 
-        return round((float) $model->amount + self::vatAmount($model), 2);
+        $payable = round((float) $model->amount + self::vatAmount($model), 2);
+        if ($model instanceof Invoice && Schema::hasColumn('invoices', 'discount_amount')) {
+            $payable = round($payable - (float) ($model->discount_amount ?? 0), 2);
+        }
+
+        return max(0, $payable);
     }
 
     /**
