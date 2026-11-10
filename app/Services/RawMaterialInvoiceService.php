@@ -7,6 +7,7 @@ use App\Models\InvoiceItem;
 use App\Models\RawMaterial;
 use App\Models\RawMaterialLot;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
@@ -348,7 +349,9 @@ class RawMaterialInvoiceService
         $payment = DocumentPaymentService::resolveOnCreate($atelierId, $fields, $payable, 'invoices');
         $payload = array_merge($payload, $payment);
 
-        $invoice = Invoice::create($payload);
+        $invoice = DB::transaction(function () use ($payload) {
+            return Invoice::create($payload);
+        });
         DocumentPaymentService::attachChequeFromRequest($invoice, $paymentSource, $userName);
 
         return $invoice->fresh(['payments', 'shopAccount', 'cheque']);

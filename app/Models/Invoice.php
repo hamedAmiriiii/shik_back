@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use App\Models\Cheque;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Morilog\Jalali\Jalalian;
 
@@ -26,7 +27,28 @@ class Invoice extends Model
         'vat_amount' => 'decimal:2',
         'discount_amount' => 'decimal:2',
         'paid_at' => 'datetime',
+        'number' => 'integer',
     ];
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::creating(function (Invoice $invoice) {
+            if (! Schema::hasColumn('invoices', 'number') || $invoice->number) {
+                return;
+            }
+
+            $query = static::query();
+            if ($invoice->atelier_id) {
+                $query->where('atelier_id', $invoice->atelier_id);
+            } else {
+                $query->whereNull('atelier_id');
+            }
+
+            $invoice->number = ((int) $query->lockForUpdate()->max('number')) + 1;
+        });
+    }
 
     protected $appends = [
         'payment_method_label',
