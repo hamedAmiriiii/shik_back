@@ -143,7 +143,14 @@ class InvoiceController extends Controller
             }
         }
 
-        $totalAmount = (clone $query)->sum('amount');
+        $payableSql = 'amount';
+        if (Schema::hasColumn('invoices', 'vat_amount')) {
+            $payableSql .= ' + COALESCE(vat_amount, 0)';
+        }
+        if (Schema::hasColumn('invoices', 'discount_amount')) {
+            $payableSql .= ' - COALESCE(discount_amount, 0)';
+        }
+        $totalAmount = (clone $query)->sum(DB::raw($payableSql));
 
         $perPage = max(1, min(100, (int) $request->input('per_page', 20)));
         $page = max(1, (int) $request->input('page', 1));
