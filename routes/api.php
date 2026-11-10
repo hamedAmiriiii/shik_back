@@ -414,6 +414,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Invoice routes - require authentication
     Route::get('beneficiaries', [\App\Http\Controllers\BeneficiaryController::class, 'index']);
     Route::get('beneficiaries/{id}', [\App\Http\Controllers\BeneficiaryController::class, 'show']);
+    Route::get('shop-people', [\App\Http\Controllers\ShopPersonController::class, 'index']);
+    Route::put('shop-people', [\App\Http\Controllers\ShopPersonController::class, 'update']);
     Route::resource('invoices', \App\Http\Controllers\InvoiceController::class);
     Route::post('invoices/{invoice}/settle', [\App\Http\Controllers\InvoiceController::class, 'settle']);
     Route::post('invoices/{invoice}/apply-advance', [\App\Http\Controllers\InvoiceController::class, 'applyAdvance']);
