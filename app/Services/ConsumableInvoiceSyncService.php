@@ -67,13 +67,23 @@ class ConsumableInvoiceSyncService
                 'name' => $name,
                 'qty' => $qty,
                 'gross' => round($base + $vat, 2),
+                'line_discount' => round((float) ($item->discount_amount ?? 0), 2),
             ];
         }
 
-        $discount = Schema::hasColumn('invoices', 'discount_amount')
-            ? round((float) ($invoice->discount_amount ?? 0), 2)
-            : 0.0;
-        $shares = $this->allocateDiscount($prepared, $discount);
+        $lineDiscountSum = round(array_sum(array_map(static function (array $row) {
+            return (float) $row['line_discount'];
+        }, $prepared)), 2);
+        $discount = $lineDiscountSum > 0
+            ? 0.0
+            : (Schema::hasColumn('invoices', 'discount_amount')
+                ? round((float) ($invoice->discount_amount ?? 0), 2)
+                : 0.0);
+        $shares = $lineDiscountSum > 0
+            ? array_map(static function (array $row) {
+                return (float) $row['line_discount'];
+            }, $prepared)
+            : $this->allocateDiscount($prepared, $discount);
 
         foreach ($prepared as $index => $row) {
             $material = ConsumableMaterial::query()

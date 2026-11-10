@@ -191,6 +191,7 @@ class InvoiceController extends Controller
             'description' => 'nullable|string',
             'image' => 'nullable',
             'image_base64' => 'nullable|string',
+            'discount_amount' => 'sometimes|nullable|numeric|min:0',
         ], PurchaseVatService::requestRules(), $this->paymentAccountRules('invoices'), DocumentPaymentService::requestRules(), ShopBeneficiaryService::requestRules('invoices')));
 
         $amountConflict = $this->amountConflictWithItems($request, $itemRows);
@@ -224,7 +225,31 @@ class InvoiceController extends Controller
 
         try {
             PurchaseVatService::applyToCreateFields($atelierId, $fields, 'invoices');
-            $payable = round((float) $fields['amount'] + (float) ($fields['vat_amount'] ?? 0), 2);
+            if ($itemsSent && $itemRows !== []) {
+                $lineVat = round(array_sum(array_map(static function (array $row) {
+                    return (float) ($row['vat_amount'] ?? 0);
+                }, $itemRows)), 2);
+                $fields['vat_mode'] = $lineVat > 0.009 ? PurchaseVatService::MODE_AMOUNT : PurchaseVatService::MODE_NONE;
+                $fields['vat_percent'] = null;
+                $fields['vat_amount'] = $lineVat;
+                $fields['discount_amount'] = round(array_sum(array_map(static function (array $row) {
+                    return (float) ($row['discount_amount'] ?? 0);
+                }, $itemRows)), 2);
+            }
+            $discount = round(max(0, (float) ($fields['discount_amount'] ?? 0)), 2);
+            $gross = round((float) $fields['amount'] + (float) ($fields['vat_amount'] ?? 0), 2);
+            if ($discount > $gross + 0.001) {
+                throw new RuntimeException('مبلغ تخفیف از جمع فاکتور و ارزش افزوده بیشتر است.');
+            }
+            if ($discount > 0.009 && ! Schema::hasColumn('invoices', 'discount_amount')) {
+                throw new RuntimeException('ستون تخفیف فاکتور آماده نیست. SQL مواد مصرفی را اجرا کنید.');
+            }
+            if (Schema::hasColumn('invoices', 'discount_amount')) {
+                $fields['discount_amount'] = $discount;
+            } else {
+                unset($fields['discount_amount']);
+            }
+            $payable = round(max(0, $gross - $discount), 2);
             $invoice = DB::transaction(function () use ($fields, $atelierId, $itemRows, $request, $payable) {
                 $paymentSource = $fields;
                 $payment = DocumentPaymentService::resolveOnCreate(
@@ -357,6 +382,13 @@ class InvoiceController extends Controller
                 $fields['vat_amount'] = $lineVat;
             }
             $newPayable = round($newAmount + (float) $fields['vat_amount'], 2);
+            if ($itemsSent && $itemRows !== []) {
+                $request->merge([
+                    'discount_amount' => round(array_sum(array_map(static function (array $row) {
+                        return (float) ($row['discount_amount'] ?? 0);
+                    }, $itemRows)), 2),
+                ]);
+            }
             if ($request->exists('discount_amount')) {
                 $discount = round(max(0, (float) $request->input('discount_amount')), 2);
                 if ($discount > 0.009 && ! Schema::hasColumn('invoices', 'discount_amount')) {
@@ -777,6 +809,11 @@ class InvoiceController extends Controller
                 return null;
             }
 
+            $discount = round(max(0, (float) ($item['discount_amount'] ?? $item['discount'] ?? 0)), 2);
+            if ($discount > round($base + $vat['vat_amount'], 2) + 0.001) {
+                return null;
+            }
+
             $rows[] = [
                 'title' => mb_substr($title, 0, 255),
                 'unit_price' => round($unitPrice, 2),
@@ -785,6 +822,7 @@ class InvoiceController extends Controller
                 'vat_mode' => $vat['vat_mode'],
                 'vat_percent' => $vat['vat_percent'],
                 'vat_amount' => $vat['vat_amount'],
+                'discount_amount' => $discount,
                 'sort_order' => $index,
             ];
         }
@@ -875,6 +913,11 @@ class InvoiceController extends Controller
                 $payload['vat_mode'] = $row['vat_mode'] ?? 'none';
                 $payload['vat_percent'] = $row['vat_percent'] ?? null;
                 $payload['vat_amount'] = $row['vat_amount'] ?? 0;
+            }
+            if (Schema::hasColumn('invoice_items', 'discount_amount')) {
+                $payload['discount_amount'] = $row['discount_amount'] ?? 0;
+            } elseif ((float) ($row['discount_amount'] ?? 0) > 0.009) {
+                throw new RuntimeException('ستون تخفیف اقلام آماده نیست. SQL تخفیف ردیف فاکتور را اجرا کنید.');
             }
             InvoiceItem::create($payload);
         }

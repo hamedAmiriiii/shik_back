@@ -17,6 +17,7 @@ class InvoiceItem extends Model
         'vat_mode',
         'vat_percent',
         'vat_amount',
+        'discount_amount',
         'sort_order',
     ];
 
@@ -26,6 +27,7 @@ class InvoiceItem extends Model
         'total' => 'decimal:2',
         'vat_percent' => 'decimal:2',
         'vat_amount' => 'decimal:2',
+        'discount_amount' => 'decimal:2',
         'sort_order' => 'integer',
     ];
 
