@@ -839,29 +839,56 @@ class DocumentPaymentService
             }
         } else {
             $need = -$delta;
-            $credits = $model->payments()
-                ->where('method', self::METHOD_CREDIT)
-                ->where('settled', false)
-                ->orderByDesc('sort_order')
-                ->orderByDesc('id')
-                ->get();
-            foreach ($credits as $row) {
-                if ($need <= 0.001) {
-                    break;
-                }
-                $rowAmount = round((float) $row->amount, 2);
-                if ($rowAmount - $need <= 0.001) {
-                    $need = round($need - $rowAmount, 2);
-                    $row->delete();
-                } else {
-                    $row->update(['amount' => round($rowAmount - $need, 2)]);
-                    $need = 0;
-                }
+            $need = self::reducePaymentRows(
+                $model->payments()
+                    ->where('method', self::METHOD_CREDIT)
+                    ->where('settled', false)
+                    ->orderByDesc('sort_order')
+                    ->orderByDesc('id')
+                    ->get(),
+                $need
+            );
+            if ($need > 0.001) {
+                $need = self::reducePaymentRows(
+                    $model->payments()
+                        ->where('method', '!=', self::METHOD_ADVANCE)
+                        ->orderByDesc('sort_order')
+                        ->orderByDesc('id')
+                        ->get(),
+                    $need
+                );
             }
         }
 
         $model->unsetRelation('payments');
         self::refreshDocumentSummary($model);
+    }
+
+    /**
+     * از انتهای ردیف‌های پرداخت کم می‌کند تا سند با مبلغ جدید (بعد از تخفیف) یکی شود.
+     *
+     * @param  \Illuminate\Support\Collection<int, DocumentPayment>  $rows
+     */
+    protected static function reducePaymentRows($rows, float $need): float
+    {
+        foreach ($rows as $row) {
+            if ($need <= 0.001) {
+                break;
+            }
+            $rowAmount = round((float) $row->amount, 2);
+            if ($rowAmount <= 0.001) {
+                continue;
+            }
+            if ($rowAmount - $need <= 0.001) {
+                $need = round($need - $rowAmount, 2);
+                $row->delete();
+            } else {
+                $row->update(['amount' => round($rowAmount - $need, 2)]);
+                $need = 0;
+            }
+        }
+
+        return round(max(0, $need), 2);
     }
 
     /**

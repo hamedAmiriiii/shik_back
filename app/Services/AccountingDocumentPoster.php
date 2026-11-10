@@ -136,8 +136,9 @@ class AccountingDocumentPoster
 
         try {
             $lines = [];
-            // مبلغ پایه + ارزش افزوده موقتاً به موجودی می‌رود؛ سند VAT جداگانه مالیات را به ۱۱۵۰۱ منتقل می‌کند
-            $raw = self::lotCost($invoice);
+            // موجودی به مبلغ قابل‌پرداخت (پایه + ارزش افزوده − تخفیف) بدهکار می‌شود.
+            // سند VAT جداگانه مالیات را از موجودی به ۱۱۵۰۱ منتقل می‌کند.
+            $raw = round(min(self::lotCost($invoice), $payable), 2);
             $catalog = round(max(0, $payable - $raw), 2);
             AccountingLedger::push(
                 $lines,
@@ -407,7 +408,7 @@ class AccountingDocumentPoster
                 $credited += $part;
             }
             $gap = round($amount - $credited, 2);
-            if (abs($gap) >= 0.01) {
+            if ($gap >= 0.01) {
                 AccountingLedger::push(
                     $lines,
                     AccountingLedger::mapped($atelierId, $model instanceof Expense ? 'expense.ap' : 'invoice.ap'),
@@ -415,6 +416,9 @@ class AccountingDocumentPoster
                     $gap,
                     'مانده پرداختنی'
                 );
+            } elseif ($gap <= -0.01) {
+                // تخفیف خالص قابل‌پرداخت را از جمع پرداخت‌ها کمتر کرده؛ مازاد بستانکار سند را نامتوازن می‌کند.
+                self::trimCredits($lines, -$gap);
             }
 
             return;
@@ -432,6 +436,28 @@ class AccountingDocumentPoster
             $model->shop_account_id ?? null,
             $model instanceof Expense
         );
+    }
+
+    /**
+     * مازاد بستانکار (مثلاً وقتی تخفیف، قابل‌پرداخت را از پرداخت‌های قبلی کمتر کرده) را برمی‌دارد.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     */
+    protected static function trimCredits(array &$lines, float $need): void
+    {
+        $need = round($need, 2);
+        for ($i = count($lines) - 1; $i >= 0 && $need >= 0.01; $i--) {
+            $credit = round((float) ($lines[$i]['credit'] ?? 0), 2);
+            if ($credit < 0.01) {
+                continue;
+            }
+            $cut = round(min($credit, $need), 2);
+            $lines[$i]['credit'] = round($credit - $cut, 2);
+            $need = round($need - $cut, 2);
+            if ((float) $lines[$i]['credit'] < 0.01 && (float) ($lines[$i]['debit'] ?? 0) < 0.01) {
+                array_splice($lines, $i, 1);
+            }
+        }
     }
 
     /**
