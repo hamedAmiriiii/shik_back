@@ -9,6 +9,7 @@ use App\Models\InvoiceItem;
 use App\Tools\ProductQuantityTools;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Schema;
+use Morilog\Jalali\Jalalian;
 use RuntimeException;
 
 class ConsumableInvoiceSyncService
@@ -154,9 +155,24 @@ class ConsumableInvoiceSyncService
 
     protected function resolvePurchasedAt(Invoice $invoice): Carbon
     {
-        if ($invoice->date) {
+        $raw = $invoice->getRawOriginal('date');
+        if (! $raw) {
+            $attributes = $invoice->getAttributes();
+            $raw = $attributes['date'] ?? null;
+        }
+
+        if ($raw instanceof Carbon) {
+            $raw = $raw->format('Y-m-d');
+        }
+
+        if (is_string($raw) && trim($raw) !== '') {
             try {
-                return Carbon::parse($invoice->date)->startOfDay();
+                $parsed = Carbon::parse($raw);
+                if ($parsed->year < 1700) {
+                    return (new Jalalian($parsed->year, $parsed->month, $parsed->day))->toCarbon()->startOfDay();
+                }
+
+                return $parsed->startOfDay();
             } catch (\Throwable $e) {
                 // fall through
             }
