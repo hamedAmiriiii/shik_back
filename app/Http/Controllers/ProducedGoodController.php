@@ -459,8 +459,38 @@ class ProducedGoodController extends Controller
                     'price_per_kg' => (float) $row->price_per_kg,
                     'cost' => (float) $row->cost,
                 ];
-            })->values(),
+            })->concat($this->consumableConsumptions($production))->values(),
         ];
+    }
+
+    private function consumableConsumptions(Production $production)
+    {
+        if (! Schema::hasTable('consumable_withdrawals') || ! Schema::hasColumn('consumable_withdrawals', 'production_id')) {
+            return collect();
+        }
+
+        return \App\Models\ConsumableWithdrawal::query()
+            ->where('production_id', $production->id)
+            ->with('material')
+            ->orderBy('id')
+            ->get()
+            ->map(function ($row) {
+                $qty = (float) $row->quantity;
+
+                return [
+                    'id' => 'cm-'.$row->id,
+                    'ingredient_kind' => 'consumable',
+                    'raw_material_id' => null,
+                    'raw_material_name' => optional($row->material)->name,
+                    'consumable_material_id' => (int) $row->consumable_material_id,
+                    'ingredient_produced_good_id' => null,
+                    'raw_material_lot_id' => null,
+                    'source_production_id' => null,
+                    'quantity_kg' => $qty,
+                    'price_per_kg' => $qty > 0 ? round(((float) $row->total_cost) / $qty, 2) : 0,
+                    'cost' => (float) $row->total_cost,
+                ];
+            });
     }
 
     private function validatedGood(Request $request, int $atelierId, ?int $ignoreId = null): array
@@ -488,6 +518,7 @@ class ProducedGoodController extends Controller
             'ingredients' => $ingredientsRule,
             'ingredients.*.raw_material_id' => 'nullable|integer',
             'ingredients.*.ingredient_produced_good_id' => 'nullable|integer',
+            'ingredients.*.consumable_material_id' => 'nullable|integer',
             'ingredients.*.grams_per_kg' => 'required|numeric|min:0.001',
             'ingredients.*.is_removable' => 'sometimes|boolean',
             'ingredients.*.is_addable' => 'sometimes|boolean',
@@ -598,26 +629,35 @@ class ProducedGoodController extends Controller
         }
 
         $hasNestedCol = Schema::hasColumn('produced_good_ingredients', 'ingredient_produced_good_id');
+        $hasConsumableCol = Schema::hasColumn('produced_good_ingredients', 'consumable_material_id');
         $rawIds = [];
         $nestedIds = [];
+        $consumableIds = [];
 
         foreach ($ingredients as $row) {
             $rawId = (int) ($row['raw_material_id'] ?? 0);
             $nestedId = (int) ($row['ingredient_produced_good_id'] ?? 0);
+            $consumableId = (int) ($row['consumable_material_id'] ?? 0);
+            $picked = ($rawId > 0 ? 1 : 0) + ($nestedId > 0 ? 1 : 0) + ($consumableId > 0 ? 1 : 0);
 
-            if ($rawId > 0 && $nestedId > 0) {
+            if ($picked > 1) {
                 abort(response()->json([
-                    'message' => 'هر خط فرمول باید ماده اولیه یا کالای تولیدی باشد، نه هر دو.',
+                    'message' => 'هر خط فرمول فقط یکی از ماده اولیه، کالای تولیدی یا انبار مصرفی است.',
                 ], 422));
             }
-            if ($rawId <= 0 && $nestedId <= 0) {
+            if ($picked === 0) {
                 abort(response()->json([
-                    'message' => 'هر خط فرمول باید ماده اولیه یا کالای تولیدی داشته باشد.',
+                    'message' => 'هر خط فرمول باید ماده اولیه، کالای تولیدی یا کالای انبار مصرفی داشته باشد.',
                 ], 422));
             }
             if ($nestedId > 0 && ! $hasNestedCol) {
                 abort(response()->json([
                     'message' => 'ستون کالای تولیدی در فرمول وجود ندارد. migration یا SQL را اجرا کنید.',
+                ], 503));
+            }
+            if ($consumableId > 0 && ! $hasConsumableCol) {
+                abort(response()->json([
+                    'message' => 'ستون انبار مصرفی در فرمول وجود ندارد. database/sql/add_consumable_to_produced_goods_manual.sql را اجرا کنید.',
                 ], 503));
             }
             if ($nestedId > 0 && $parentGoodId !== null && $nestedId === (int) $parentGoodId) {
@@ -628,6 +668,8 @@ class ProducedGoodController extends Controller
 
             if ($rawId > 0) {
                 $rawIds[] = $rawId;
+            } elseif ($consumableId > 0) {
+                $consumableIds[] = $consumableId;
             } else {
                 $nestedIds[] = $nestedId;
             }
@@ -643,6 +685,11 @@ class ProducedGoodController extends Controller
                 'message' => 'هر کالای تولیدی فقط یک‌بار در فرمول کالا می‌تواند بیاید.',
             ], 422));
         }
+        if (count($consumableIds) !== count(array_unique($consumableIds))) {
+            abort(response()->json([
+                'message' => 'هر کالای انبار مصرفی فقط یک‌بار در فرمول کالا می‌تواند بیاید.',
+            ], 422));
+        }
 
         if (count($rawIds) > 0) {
             $found = RawMaterial::where('atelier_id', $atelierId)
@@ -651,6 +698,17 @@ class ProducedGoodController extends Controller
             if ($found !== count($rawIds)) {
                 abort(response()->json([
                     'message' => 'یک یا چند ماده اولیه متعلق به این فروشگاه نیست.',
+                ], 422));
+            }
+        }
+
+        if (count($consumableIds) > 0) {
+            $found = \App\Models\ConsumableMaterial::where('atelier_id', $atelierId)
+                ->whereIn('id', $consumableIds)
+                ->count();
+            if ($found !== count($consumableIds)) {
+                abort(response()->json([
+                    'message' => 'یک یا چند کالای انبار مصرفی متعلق به این فروشگاه نیست.',
                 ], 422));
             }
         }
@@ -725,6 +783,9 @@ class ProducedGoodController extends Controller
         if (Schema::hasColumn('produced_good_ingredients', 'ingredient_produced_good_id')) {
             $with[] = 'ingredients.ingredientProducedGood';
         }
+        if (Schema::hasColumn('produced_good_ingredients', 'consumable_material_id')) {
+            $with[] = 'ingredients.consumableMaterial';
+        }
 
         return $with;
     }
@@ -746,25 +807,31 @@ class ProducedGoodController extends Controller
         $hasRemovable = Schema::hasColumn('produced_good_ingredients', 'is_removable');
         $hasAddable = Schema::hasColumn('produced_good_ingredients', 'is_addable');
         $hasNested = Schema::hasColumn('produced_good_ingredients', 'ingredient_produced_good_id');
+        $hasConsumable = Schema::hasColumn('produced_good_ingredients', 'consumable_material_id');
 
         foreach ($ingredients as $row) {
             $rawId = (int) ($row['raw_material_id'] ?? 0);
             $nestedId = (int) ($row['ingredient_produced_good_id'] ?? 0);
+            $consumableId = (int) ($row['consumable_material_id'] ?? 0);
             $isNested = $nestedId > 0;
+            $isConsumable = $consumableId > 0;
 
             $payload = [
-                'raw_material_id' => $isNested ? null : $rawId,
+                'raw_material_id' => ($isNested || $isConsumable) ? null : $rawId,
                 'grams_per_kg' => $row['grams_per_kg'],
             ];
             if ($hasNested) {
                 $payload['ingredient_produced_good_id'] = $isNested ? $nestedId : null;
             }
+            if ($hasConsumable) {
+                $payload['consumable_material_id'] = $isConsumable ? $consumableId : null;
+            }
             if ($hasRemovable) {
                 // حذف/اضافه فقط برای مواد اولیه منوی سه‌بعدی معنا دارد
-                $payload['is_removable'] = ! $isNested && ! empty($row['is_removable']);
+                $payload['is_removable'] = ! $isNested && ! $isConsumable && ! empty($row['is_removable']);
             }
             if ($hasAddable) {
-                $payload['is_addable'] = ! $isNested && ! empty($row['is_addable']);
+                $payload['is_addable'] = ! $isNested && ! $isConsumable && ! empty($row['is_addable']);
             }
             $good->ingredients()->create($payload);
         }

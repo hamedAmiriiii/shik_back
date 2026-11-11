@@ -11,6 +11,7 @@ class ProducedGoodIngredient extends Model
         'produced_good_id',
         'raw_material_id',
         'ingredient_produced_good_id',
+        'consumable_material_id',
         'grams_per_kg',
         'is_removable',
         'is_addable',
@@ -37,8 +38,18 @@ class ProducedGoodIngredient extends Model
         return $this->belongsTo(ProducedGood::class, 'ingredient_produced_good_id');
     }
 
+    public function consumableMaterial(): BelongsTo
+    {
+        return $this->belongsTo(ConsumableMaterial::class, 'consumable_material_id');
+    }
+
     public function isNestedProducedGood(): bool
     {
         return (int) ($this->ingredient_produced_good_id ?? 0) > 0;
+    }
+
+    public function isConsumable(): bool
+    {
+        return (int) ($this->consumable_material_id ?? 0) > 0;
     }
 }

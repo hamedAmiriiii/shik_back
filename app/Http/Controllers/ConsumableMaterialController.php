@@ -153,6 +153,11 @@ class ConsumableMaterialController extends Controller
             return response()->json(['message' => 'این ماده هیستوری برداشت دارد و قابل حذف نیست.'], 422);
         }
 
+        if (Schema::hasColumn('produced_good_ingredients', 'consumable_material_id')
+            && \App\Models\ProducedGoodIngredient::query()->where('consumable_material_id', $consumableMaterial->id)->exists()) {
+            return response()->json(['message' => 'این کالا در فرمول کالای تولیدی استفاده شده و قابل حذف نیست.'], 422);
+        }
+
         $consumableMaterial->lots()->delete();
         $consumableMaterial->delete();
 

@@ -11,6 +11,7 @@ class ConsumableWithdrawal extends Model
     protected $fillable = [
         'atelier_id',
         'consumable_material_id',
+        'production_id',
         'quantity',
         'total_cost',
         'withdrawn_at',
@@ -31,6 +32,11 @@ class ConsumableWithdrawal extends Model
     public function material(): BelongsTo
     {
         return $this->belongsTo(ConsumableMaterial::class, 'consumable_material_id');
+    }
+
+    public function production(): BelongsTo
+    {
+        return $this->belongsTo(Production::class);
     }
 
     public function slices(): HasMany

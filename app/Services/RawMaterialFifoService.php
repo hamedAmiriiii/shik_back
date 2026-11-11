@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\ConsumableMaterial;
+use App\Models\ConsumableWithdrawal;
 use App\Models\ProducedGood;
 use App\Models\ProducedGoodIngredient;
 use App\Models\Production;
@@ -9,6 +11,7 @@ use App\Models\ProductionConsumption;
 use App\Models\PurchaseStockConsumption;
 use App\Models\RawMaterial;
 use App\Models\RawMaterialLot;
+use App\Tools\ProductQuantityTools;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
@@ -249,6 +252,76 @@ class RawMaterialFifoService
         $sufficient = true;
 
         foreach ($good->ingredients as $line) {
+            if ($this->lineIsConsumable($line)) {
+                $material = $line->consumableMaterial;
+                $grams = (float) $line->grams_per_kg;
+                $need = round($grams * $quantityKg, 3);
+                $plan = ($material && Schema::hasTable('consumable_material_lots'))
+                    ? app(ConsumableFifoService::class)->plan($material, $need)
+                    : [
+                        'slices' => [],
+                        'shortage' => $need,
+                        'total_cost' => 0,
+                    ];
+
+                if ($plan['shortage'] > 0) {
+                    $sufficient = false;
+                    $shortages[] = [
+                        'raw_material_id' => null,
+                        'ingredient_produced_good_id' => null,
+                        'consumable_material_id' => (int) $line->consumable_material_id,
+                        'name' => $material ? $material->name : null,
+                        'needed_kg' => $need,
+                        'shortage_kg' => $plan['shortage'],
+                    ];
+                }
+
+                $slicePayload = array_map(function ($slice) {
+                    return [
+                        'lot_id' => $slice['lot_id'],
+                        'quantity_kg' => $slice['quantity'],
+                        'price_per_kg' => $slice['unit_cost'],
+                        'cost' => $slice['cost'],
+                    ];
+                }, $plan['slices']);
+
+                $cost = (float) $plan['total_cost'];
+                if ($plan['shortage'] > 0 && $material) {
+                    $lastPrice = app(ConsumableFifoService::class)->lastUnitCost($material);
+                    if ($lastPrice !== null) {
+                        $estimated = round($plan['shortage'] * $lastPrice, 2);
+                        $cost = round($cost + $estimated, 2);
+                        $slicePayload[] = [
+                            'lot_id' => null,
+                            'quantity_kg' => $plan['shortage'],
+                            'price_per_kg' => $lastPrice,
+                            'cost' => $estimated,
+                            'estimated' => true,
+                        ];
+                    }
+                }
+
+                $total += $cost;
+                $lines[] = [
+                    'id' => $line->id,
+                    'raw_material_id' => null,
+                    'ingredient_produced_good_id' => null,
+                    'consumable_material_id' => (int) $line->consumable_material_id,
+                    'ingredient_kind' => 'consumable',
+                    'name' => $material ? $material->name : null,
+                    'unit_type' => 'piece',
+                    'grams_per_kg' => $grams,
+                    'is_removable' => false,
+                    'is_addable' => false,
+                    'needed_kg' => $need,
+                    'cost' => $cost,
+                    'lots' => $slicePayload,
+                    'shortage_kg' => $plan['shortage'],
+                ];
+
+                continue;
+            }
+
             if ($this->lineIsNested($line)) {
                 $nested = $line->ingredientProducedGood;
                 $grams = (float) $line->grams_per_kg;
@@ -402,6 +475,12 @@ class RawMaterialFifoService
             && (int) ($line->ingredient_produced_good_id ?? 0) > 0;
     }
 
+    private function lineIsConsumable(ProducedGoodIngredient $line): bool
+    {
+        return Schema::hasColumn('produced_good_ingredients', 'consumable_material_id')
+            && (int) ($line->consumable_material_id ?? 0) > 0;
+    }
+
     /**
      * آخرین قیمت خرید ماده اولیه، حتی اگر موجودی لات صفر شده باشد.
      */
@@ -437,7 +516,7 @@ class RawMaterialFifoService
             return null;
         }
 
-        $good->loadMissing(['ingredients.rawMaterial', 'ingredients.ingredientProducedGood']);
+        $good->loadMissing(['ingredients.rawMaterial', 'ingredients.ingredientProducedGood', 'ingredients.consumableMaterial']);
         $preview = $this->recipeCostPreview($good, 1.0, $depth + 1);
         if ($preview['total'] > 0) {
             return round((float) $preview['total'], 2);
@@ -469,6 +548,14 @@ class RawMaterialFifoService
 
         $weightedCost = 0.0;
         $byKey = [];
+        $withdrawalsByProduction = collect();
+        if (Schema::hasTable('consumable_withdrawals') && Schema::hasColumn('consumable_withdrawals', 'production_id')) {
+            $withdrawalsByProduction = ConsumableWithdrawal::query()
+                ->whereIn('production_id', $productions->pluck('id'))
+                ->with('material')
+                ->get()
+                ->groupBy('production_id');
+        }
 
         foreach ($productions as $production) {
             $batchKg = (float) $production->quantity_kg;
@@ -530,6 +617,37 @@ class RawMaterialFifoService
                     'cost_per_kg' => $costPerKg * $weight,
                 ];
             }
+
+            foreach ($withdrawalsByProduction->get($production->id, []) as $withdrawal) {
+                $cid = (int) $withdrawal->consumable_material_id;
+                $key = 'cm:'.$cid;
+                if (! isset($byKey[$key])) {
+                    $byKey[$key] = [
+                        'kind' => 'consumable',
+                        'raw_material_id' => null,
+                        'ingredient_produced_good_id' => null,
+                        'consumable_material_id' => $cid,
+                        'name' => optional($withdrawal->material)->name,
+                        'unit_type' => 'piece',
+                        'qty_per_kg' => 0.0,
+                        'cost_per_kg' => 0.0,
+                        'lots' => [],
+                    ];
+                }
+
+                $taken = (float) $withdrawal->quantity;
+                $qtyPerKg = $taken / $batchKg;
+                $costPerKg = ((float) $withdrawal->total_cost) / $batchKg;
+                $byKey[$key]['qty_per_kg'] += $qtyPerKg * $weight;
+                $byKey[$key]['cost_per_kg'] += $costPerKg * $weight;
+                $byKey[$key]['lots'][] = [
+                    'lot_id' => null,
+                    'source_production_id' => null,
+                    'quantity_kg_per_kg' => $qtyPerKg * $weight,
+                    'price_per_kg' => $taken > 0 ? round(((float) $withdrawal->total_cost) / $taken, 2) : 0,
+                    'cost_per_kg' => $costPerKg * $weight,
+                ];
+            }
         }
 
         $costPerKg = round($weightedCost / $stockKg, 2);
@@ -560,6 +678,10 @@ class RawMaterialFifoService
         };
 
         $lineKey = function (array $line): string {
+            $consumableId = (int) ($line['consumable_material_id'] ?? 0);
+            if (($line['ingredient_kind'] ?? '') === 'consumable' || $consumableId > 0) {
+                return 'cm:'.$consumableId;
+            }
             $nestedId = (int) ($line['ingredient_produced_good_id'] ?? 0);
             if ($nestedId > 0) {
                 return 'pg:'.$nestedId;
@@ -588,12 +710,15 @@ class RawMaterialFifoService
                 continue;
             }
 
-            $isPiece = ($inv['unit_type'] ?? RawMaterial::UNIT_KG) === RawMaterial::UNIT_PIECE
+            $isConsumable = ($inv['kind'] ?? '') === 'consumable';
+            $isPiece = $isConsumable
+                || ($inv['unit_type'] ?? RawMaterial::UNIT_KG) === RawMaterial::UNIT_PIECE
                 || ($inv['unit_type'] ?? '') === ProducedGood::UNIT_PIECE;
             $lines[] = [
                 'id' => null,
                 'raw_material_id' => $inv['raw_material_id'],
                 'ingredient_produced_good_id' => $inv['ingredient_produced_good_id'],
+                'consumable_material_id' => $inv['consumable_material_id'] ?? null,
                 'ingredient_kind' => $inv['kind'] ?? 'raw_material',
                 'name' => $inv['name'],
                 'unit_type' => $inv['unit_type'] ?? RawMaterial::UNIT_KG,
@@ -618,11 +743,37 @@ class RawMaterialFifoService
             throw new RuntimeException('مقدار تولید باید بیشتر از صفر باشد.');
         }
 
-        $good->loadMissing(['ingredients.rawMaterial', 'ingredients.ingredientProducedGood']);
+        $good->loadMissing(['ingredients.rawMaterial', 'ingredients.ingredientProducedGood', 'ingredients.consumableMaterial']);
 
         return DB::transaction(function () use ($good, $quantityKg, $note) {
             $plans = [];
             foreach ($good->ingredients as $line) {
+                if ($this->lineIsConsumable($line)) {
+                    $material = $line->consumableMaterial;
+                    if (! $material) {
+                        throw new RuntimeException('کالای انبار مصرفی در فرمول یافت نشد.');
+                    }
+                    if (! Schema::hasColumn('consumable_withdrawals', 'production_id')) {
+                        throw new RuntimeException(
+                            'ستون ارتباط تولید با انبار مصرفی وجود ندارد. database/sql/add_consumable_to_produced_goods_manual.sql را اجرا کنید.'
+                        );
+                    }
+
+                    $need = round((float) $line->grams_per_kg * $quantityKg, 3);
+                    if (! ProductQuantityTools::isWholeNumber($need)) {
+                        throw new RuntimeException(
+                            'مصرف «'.$material->name.'» باید عدد صحیح باشد. مقدار فرمول یا مقدار تولید را طوری بگذارید که تعداد صحیح شود.'
+                        );
+                    }
+                    $plans[] = [
+                        'kind' => 'consumable',
+                        'material' => $material,
+                        'need' => $need,
+                    ];
+
+                    continue;
+                }
+
                 if ($this->lineIsNested($line)) {
                     $nested = $line->ingredientProducedGood;
                     if (! $nested) {
@@ -679,8 +830,24 @@ class RawMaterialFifoService
             ]);
 
             $hasNestedCols = Schema::hasColumn('production_consumptions', 'ingredient_produced_good_id');
+            $consumableFifo = app(ConsumableFifoService::class);
 
             foreach ($plans as $row) {
+                if (($row['kind'] ?? '') === 'consumable') {
+                    /** @var ConsumableMaterial $material */
+                    $material = $row['material'];
+                    $withdrawal = $consumableFifo->withdraw(
+                        $material,
+                        (float) $row['need'],
+                        'مصرف در تولید '.$good->name,
+                        now(),
+                        (int) $production->id
+                    );
+                    $totalCost += (float) $withdrawal->total_cost;
+
+                    continue;
+                }
+
                 if (($row['kind'] ?? '') === 'produced_good') {
                     if (! $hasNestedCols) {
                         throw new RuntimeException(
@@ -802,6 +969,17 @@ class RawMaterialFifoService
 
             $locked->load('consumptions');
             AccountingProductionPoster::reverse($locked);
+
+            if (Schema::hasTable('consumable_withdrawals') && Schema::hasColumn('consumable_withdrawals', 'production_id')) {
+                $withdrawals = ConsumableWithdrawal::query()
+                    ->where('production_id', $locked->id)
+                    ->lockForUpdate()
+                    ->get();
+                $consumableFifo = app(ConsumableFifoService::class);
+                foreach ($withdrawals as $withdrawal) {
+                    $consumableFifo->restoreWithdrawal($withdrawal);
+                }
+            }
 
             $lotIds = $locked->consumptions
                 ->pluck('raw_material_lot_id')

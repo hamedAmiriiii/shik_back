@@ -105,11 +105,49 @@ class ConsumableFifoService
         return $material;
     }
 
+    public function lastUnitCost(ConsumableMaterial $material): ?float
+    {
+        $lot = ConsumableMaterialLot::query()
+            ->where('consumable_material_id', $material->id)
+            ->orderByDesc('purchased_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $lot) {
+            return null;
+        }
+
+        return (float) $lot->unit_cost;
+    }
+
+    /**
+     * برگشت موجودی یک برداشت تولید. داخل تراکنش صدا زده شود.
+     */
+    public function restoreWithdrawal(ConsumableWithdrawal $withdrawal): void
+    {
+        $withdrawal->loadMissing('slices');
+        foreach ($withdrawal->slices as $slice) {
+            $lot = ConsumableMaterialLot::query()
+                ->where('id', $slice->consumable_material_lot_id)
+                ->lockForUpdate()
+                ->first();
+            if (! $lot) {
+                throw new RuntimeException('لات انبار مصرفی یافت نشد.');
+            }
+            $lot->remaining = round((float) $lot->remaining + (float) $slice->quantity, 3);
+            $lot->save();
+        }
+
+        $withdrawal->slices()->delete();
+        $withdrawal->delete();
+    }
+
     public function withdraw(
         ConsumableMaterial $material,
         float $quantity,
         ?string $note = null,
-        $withdrawnAt = null
+        $withdrawnAt = null,
+        ?int $productionId = null
     ): ConsumableWithdrawal {
         $this->assertTablesReady();
         $quantity = round($quantity, 3);
@@ -120,7 +158,7 @@ class ConsumableFifoService
             throw new RuntimeException('تعداد برداشت باید عدد صحیح باشد.');
         }
 
-        return DB::transaction(function () use ($material, $quantity, $note, $withdrawnAt) {
+        return DB::transaction(function () use ($material, $quantity, $note, $withdrawnAt, $productionId) {
             $plan = $this->plan($material, $quantity, true);
             if ($plan['shortage'] > 0) {
                 throw new RuntimeException(
@@ -128,14 +166,18 @@ class ConsumableFifoService
                 );
             }
 
-            $withdrawal = ConsumableWithdrawal::create([
+            $payload = [
                 'atelier_id' => $material->atelier_id,
                 'consumable_material_id' => $material->id,
                 'quantity' => $quantity,
                 'total_cost' => 0,
                 'note' => $note,
                 'withdrawn_at' => $withdrawnAt ?: now(),
-            ]);
+            ];
+            if ($productionId && Schema::hasColumn('consumable_withdrawals', 'production_id')) {
+                $payload['production_id'] = $productionId;
+            }
+            $withdrawal = ConsumableWithdrawal::create($payload);
 
             $totalCost = 0.0;
             foreach ($plan['slices'] as $slice) {
