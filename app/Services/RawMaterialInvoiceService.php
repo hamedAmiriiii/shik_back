@@ -6,9 +6,11 @@ use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Models\RawMaterial;
 use App\Models\RawMaterialLot;
+use App\Tools\ProductQuantityTools;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Morilog\Jalali\Jalalian;
 use RuntimeException;
 
 class RawMaterialInvoiceService
@@ -355,6 +357,175 @@ class RawMaterialInvoiceService
         DocumentPaymentService::attachChequeFromRequest($invoice, $paymentSource, $userName);
 
         return $invoice->fresh(['payments', 'shopAccount', 'cheque']);
+    }
+
+    /**
+     * اقلام فاکتور را به لات مواد اولیه تبدیل می‌کند. لات مصرف‌نشدهٔ همین فاکتور جایگزین می‌شود.
+     */
+    public function syncFromInvoice(Invoice $invoice): void
+    {
+        if (! Schema::hasTable('raw_materials') || ! Schema::hasTable('raw_material_lots')) {
+            throw new RuntimeException('جداول مواد اولیه آماده نیست.');
+        }
+        if (! Schema::hasColumn('raw_material_lots', 'invoice_id')) {
+            throw new RuntimeException('اتصال فاکتور به مواد اولیه آماده نیست. SQL مربوط را اجرا کنید.');
+        }
+
+        $invoice->loadMissing('items');
+        $atelierId = (int) $invoice->atelier_id;
+
+        $existingLots = RawMaterialLot::query()
+            ->where('invoice_id', $invoice->id)
+            ->lockForUpdate()
+            ->get();
+        foreach ($existingLots as $lot) {
+            if (! $lot->isUntouched()) {
+                throw new RuntimeException('برخی مواد اولیه این فاکتور قبلاً مصرف شده‌اند و قابل ویرایش نیستند.');
+            }
+        }
+        foreach ($existingLots as $lot) {
+            $lot->delete();
+        }
+
+        $purchasedAt = $this->purchasedAt($invoice);
+        $prepared = [];
+        foreach ($invoice->items as $item) {
+            $name = $this->normalizeName($item->title);
+            $qty = round((float) $item->quantity, 3);
+            $unitPrice = round((float) $item->unit_price, 2);
+            if ($name === '' || $qty <= 0 || $unitPrice < 0) {
+                continue;
+            }
+            $unit = $this->unitOf($item);
+            if ($unit === RawMaterial::UNIT_PIECE && ! ProductQuantityTools::isWholeNumber($qty)) {
+                throw new RuntimeException('تعداد ماده اولیه «'.$name.'» باید عدد صحیح باشد.');
+            }
+            $prepared[] = [
+                'item' => $item,
+                'name' => $name,
+                'qty' => $qty,
+                'unit' => $unit,
+                'gross' => round($qty * $unitPrice + (float) ($item->vat_amount ?? 0), 2),
+                'line_discount' => round((float) ($item->discount_amount ?? 0), 2),
+            ];
+        }
+
+        $lineDiscountSum = round(array_sum(array_column($prepared, 'line_discount')), 2);
+        $headerDiscount = $lineDiscountSum > 0
+            ? 0.0
+            : (Schema::hasColumn('invoices', 'discount_amount') ? round((float) ($invoice->discount_amount ?? 0), 2) : 0.0);
+        $shares = $lineDiscountSum > 0
+            ? array_column($prepared, 'line_discount')
+            : $this->allocate($prepared, $headerDiscount);
+
+        foreach ($prepared as $index => $row) {
+            $material = RawMaterial::query()
+                ->where('atelier_id', $atelierId)
+                ->where('name', $row['name'])
+                ->first();
+            if (! $material) {
+                $create = [
+                    'atelier_id' => $atelierId,
+                    'name' => $row['name'],
+                    'sale_price' => 0,
+                ];
+                if (Schema::hasColumn('raw_materials', 'unit_type')) {
+                    $create['unit_type'] = $row['unit'];
+                }
+                $material = RawMaterial::create($create);
+            } elseif ($material->unitType() !== $row['unit']) {
+                throw new RuntimeException(
+                    '«'.$row['name'].'» در مواد اولیه با واحد '.$material->unitLabelFa().' ثبت شده است.'
+                );
+            }
+
+            $net = max(0, round($row['gross'] - (float) ($shares[$index] ?? 0), 2));
+            $unitCost = $row['qty'] > 0 ? round($net / $row['qty'], 2) : 0.0;
+            RawMaterialLot::create([
+                'atelier_id' => $atelierId,
+                'raw_material_id' => $material->id,
+                'quantity_kg' => $row['qty'],
+                'remaining_kg' => $row['qty'],
+                'price_per_kg' => $unitCost,
+                'purchased_at' => $purchasedAt,
+                'invoice_id' => $invoice->id,
+                'invoice_item_id' => $row['item']->id,
+            ]);
+        }
+    }
+
+    protected function normalizeName(?string $name): string
+    {
+        $name = trim((string) $name);
+        $name = preg_replace('/\s+/u', ' ', $name) ?? '';
+
+        return $name;
+    }
+
+    protected function unitOf(InvoiceItem $item): string
+    {
+        $value = Schema::hasColumn('invoice_items', 'unit_type') ? (string) ($item->unit_type ?? '') : '';
+        if ($value === RawMaterial::UNIT_LITER || $value === RawMaterial::UNIT_PIECE) {
+            return $value;
+        }
+
+        return RawMaterial::UNIT_KG;
+    }
+
+    /**
+     * @param  list<array{gross: float}>  $rows
+     * @return list<float>
+     */
+    protected function allocate(array $rows, float $discount): array
+    {
+        $shares = array_fill(0, count($rows), 0.0);
+        if ($discount <= 0 || $rows === []) {
+            return $shares;
+        }
+        $sum = 0.0;
+        foreach ($rows as $row) {
+            $sum += (float) $row['gross'];
+        }
+        if ($sum <= 0) {
+            return $shares;
+        }
+        $allocated = 0.0;
+        $last = count($rows) - 1;
+        foreach ($rows as $index => $row) {
+            if ($index === $last) {
+                $shares[$index] = round($discount - $allocated, 2);
+                break;
+            }
+            $share = round($discount * ((float) $row['gross'] / $sum), 2);
+            $shares[$index] = $share;
+            $allocated = round($allocated + $share, 2);
+        }
+
+        return $shares;
+    }
+
+    protected function purchasedAt(Invoice $invoice): Carbon
+    {
+        $raw = $invoice->getRawOriginal('date');
+        if (! $raw) {
+            $raw = $invoice->getAttributes()['date'] ?? null;
+        }
+        if ($raw instanceof Carbon) {
+            $raw = $raw->format('Y-m-d');
+        }
+        if (is_string($raw) && trim($raw) !== '') {
+            try {
+                $parsed = Carbon::parse($raw);
+                if ($parsed->year < 1700) {
+                    return (new Jalalian($parsed->year, $parsed->month, $parsed->day))->toCarbon()->startOfDay();
+                }
+
+                return $parsed->startOfDay();
+            } catch (\Throwable $e) {
+            }
+        }
+
+        return now();
     }
 
     /**

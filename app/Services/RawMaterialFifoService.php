@@ -255,7 +255,9 @@ class RawMaterialFifoService
             if ($this->lineIsConsumable($line)) {
                 $material = $line->consumableMaterial;
                 $grams = (float) $line->grams_per_kg;
-                $need = round($grams * $quantityKg, 3);
+                $need = $material && ! $material->isPieceUnit()
+                    ? $this->kgFromGrams($grams, $quantityKg)
+                    : round($grams * $quantityKg, 3);
                 $plan = ($material && Schema::hasTable('consumable_material_lots'))
                     ? app(ConsumableFifoService::class)->plan($material, $need)
                     : [
@@ -309,7 +311,7 @@ class RawMaterialFifoService
                     'consumable_material_id' => (int) $line->consumable_material_id,
                     'ingredient_kind' => 'consumable',
                     'name' => $material ? $material->name : null,
-                    'unit_type' => 'piece',
+                    'unit_type' => $material ? $material->unitType() : 'piece',
                     'grams_per_kg' => $grams,
                     'is_removable' => false,
                     'is_addable' => false,
@@ -759,8 +761,10 @@ class RawMaterialFifoService
                         );
                     }
 
-                    $need = round((float) $line->grams_per_kg * $quantityKg, 3);
-                    if (! ProductQuantityTools::isWholeNumber($need)) {
+                    $need = $material->isPieceUnit()
+                        ? round((float) $line->grams_per_kg * $quantityKg, 3)
+                        : $this->kgFromGrams((float) $line->grams_per_kg, $quantityKg);
+                    if ($material->isPieceUnit() && ! ProductQuantityTools::isWholeNumber($need)) {
                         throw new RuntimeException(
                             'مصرف «'.$material->name.'» باید عدد صحیح باشد. مقدار فرمول یا مقدار تولید را طوری بگذارید که تعداد صحیح شود.'
                         );

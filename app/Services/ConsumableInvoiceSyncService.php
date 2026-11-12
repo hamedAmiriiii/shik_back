@@ -57,7 +57,8 @@ class ConsumableInvoiceSyncService
             if ($name === '' || $qty <= 0 || $unitPrice < 0) {
                 continue;
             }
-            if (! ProductQuantityTools::isWholeNumber($qty)) {
+            $unit = $this->unitOf($item);
+            if ($unit === ConsumableMaterial::UNIT_PIECE && ! ProductQuantityTools::isWholeNumber($qty)) {
                 throw new RuntimeException('تعداد مواد مصرفی «'.$name.'» باید عدد صحیح باشد.');
             }
 
@@ -67,6 +68,7 @@ class ConsumableInvoiceSyncService
                 'item' => $item,
                 'name' => $name,
                 'qty' => $qty,
+                'unit' => $unit,
                 'gross' => round($base + $vat, 2),
                 'line_discount' => round((float) ($item->discount_amount ?? 0), 2),
             ];
@@ -92,11 +94,20 @@ class ConsumableInvoiceSyncService
                 ->where('name', $row['name'])
                 ->first();
 
+            $unit = $row['unit'] ?? ConsumableMaterial::UNIT_PIECE;
             if (! $material) {
-                $material = ConsumableMaterial::create([
+                $create = [
                     'atelier_id' => $atelierId,
                     'name' => $row['name'],
-                ]);
+                ];
+                if (Schema::hasColumn('consumable_materials', 'unit_type')) {
+                    $create['unit_type'] = $unit;
+                }
+                $material = ConsumableMaterial::create($create);
+            } elseif ($material->unitType() !== $unit) {
+                throw new RuntimeException(
+                    '«'.$row['name'].'» در انبار مصرفی با واحد '.$material->unitLabelFa().' ثبت شده است.'
+                );
             }
 
             $share = $shares[$index] ?? 0.0;
@@ -151,6 +162,18 @@ class ConsumableInvoiceSyncService
         }
 
         return $shares;
+    }
+
+    protected function unitOf(InvoiceItem $item): string
+    {
+        $value = Schema::hasColumn('invoice_items', 'unit_type')
+            ? (string) ($item->unit_type ?? '')
+            : '';
+        if ($value === ConsumableMaterial::UNIT_KG || $value === ConsumableMaterial::UNIT_LITER) {
+            return $value;
+        }
+
+        return ConsumableMaterial::UNIT_PIECE;
     }
 
     protected function resolvePurchasedAt(Invoice $invoice): Carbon

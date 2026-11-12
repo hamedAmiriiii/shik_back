@@ -154,7 +154,7 @@ class ConsumableFifoService
         if ($quantity <= 0) {
             throw new RuntimeException('تعداد برداشت باید بیشتر از صفر باشد.');
         }
-        if (! ProductQuantityTools::isWholeNumber($quantity)) {
+        if ($material->isPieceUnit() && ! ProductQuantityTools::isWholeNumber($quantity)) {
             throw new RuntimeException('تعداد برداشت باید عدد صحیح باشد.');
         }
 

@@ -13,6 +13,7 @@ class InvoiceItem extends Model
         'title',
         'unit_price',
         'quantity',
+        'unit_type',
         'total',
         'vat_mode',
         'vat_percent',

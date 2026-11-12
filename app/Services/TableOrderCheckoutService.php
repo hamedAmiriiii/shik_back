@@ -183,6 +183,9 @@ class TableOrderCheckoutService
                         $purchase->setAttribute('sms_error', InsufficientShopSmsQuotaException::sideEffectNotice());
                     }
                 }
+                if ($enableLoyaltyCredit) {
+                    UserShiksho::renewCreditExpiry($phone, $atelierId);
+                }
                 CustomerPhone::createNewPhone($phone);
             }
 

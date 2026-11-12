@@ -454,6 +454,10 @@ class CartController extends Controller
                     }
                 }
 
+                if ($enableLoyaltyCredit) {
+                    UserShiksho::renewCreditExpiry($phone, $atelierId);
+                }
+
                 // ثبت شماره تلفن در جدول customer_phones
                 CustomerPhone::createNewPhone($phone);
             }

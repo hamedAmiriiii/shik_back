@@ -828,6 +828,10 @@ class PurchasedProductController extends Controller
                 }
             }
 
+            if ($enableLoyaltyCredit) {
+                UserShiksho::renewCreditExpiry($phone, $purchaseAtelierId);
+            }
+
             // ثبت شماره تلفن در جدول customer_phones
             CustomerPhone::createNewPhone($phone);
         }

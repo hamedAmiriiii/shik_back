@@ -83,11 +83,37 @@ class UserShiksho extends Model
         }
 
         $user->credit = round(max(0, (float) $user->credit) + $earned, 2);
-        $user->credit_last_updated_at = now();
-        $user->last_warning_sent_at = null; // ریست کردن هشدار برای اعتبار جدید
+        $user->restartCreditExpiry();
         $user->save();
 
         return $user;
+    }
+
+    /**
+     * با هر خرید جدید، مهلت انقضای اعتبار موجود از همین لحظه دوباره شروع می‌شود
+     * حتی اگر این خرید اعتبار تازه‌ای نساخته باشد.
+     */
+    public static function renewCreditExpiry(string $phone, ?int $atelierId = null): void
+    {
+        $q = static::query()->where('phone', $phone);
+        if ($atelierId !== null) {
+            $q->where('atelier_id', $atelierId);
+        } else {
+            $q->whereNull('atelier_id');
+        }
+        $user = $q->first();
+        if (! $user || (float) $user->credit <= 0) {
+            return;
+        }
+
+        $user->restartCreditExpiry();
+        $user->save();
+    }
+
+    public function restartCreditExpiry(): void
+    {
+        $this->credit_last_updated_at = now();
+        $this->last_warning_sent_at = null;
     }
 
     /**

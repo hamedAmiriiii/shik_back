@@ -374,8 +374,6 @@ class PurchaseItemReturnService
                     (float) $customer->credit + $creditRefunded - $creditEarnedReversed
                 ));
                 $customer->credit = $newCredit;
-                $customer->credit_last_updated_at = now();
-                $customer->last_warning_sent_at = null;
                 $customer->save();
             }
 

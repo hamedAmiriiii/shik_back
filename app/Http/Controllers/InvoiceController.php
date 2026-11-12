@@ -7,7 +7,9 @@ use App\Models\InvoiceItem;
 use App\Services\AccountingDocumentPoster;
 use App\Services\ConsumableInvoiceSyncService;
 use App\Services\DocumentPaymentService;
+use App\Services\ProductInvoiceSyncService;
 use App\Services\PurchaseVatService;
+use App\Services\RawMaterialInvoiceService;
 use App\Services\ShopBeneficiaryService;
 use App\Tools\ImageTools;
 use Carbon\Carbon;
@@ -271,6 +273,7 @@ class InvoiceController extends Controller
 
                 $invoice = Invoice::create($fields);
                 $this->syncInvoiceItems($invoice, $itemRows);
+                $this->syncStockTarget($invoice, $request, $itemRows, collect());
                 DocumentPaymentService::attachChequeFromRequest($invoice, $paymentSource, $fields['user_name']);
                 $this->saveInvoiceImageFromRequest($invoice, $request);
                 AccountingDocumentPoster::syncInvoice($invoice->fresh(['payments', 'rawMaterialLots']));
@@ -451,16 +454,14 @@ class InvoiceController extends Controller
                 }
                 $invoice->update($fields);
                 if ($itemsSent) {
+                    $previousItems = $invoice->items()->get();
                     $this->syncInvoiceItems($invoice, $itemRows);
+                    $this->syncStockTarget($invoice, $request, $itemRows, $previousItems);
                     if (! array_key_exists('amount', $fields) && $invoice->hasLineItems()) {
                         $invoice->update(['amount' => $invoice->itemsSum()]);
                     }
-                }
-                if ($request->boolean('sync_consumables')) {
-                    if (! $itemsSent) {
-                        throw new RuntimeException('برای ثبت مواد مصرفی باید اقلام فاکتور ارسال شود.');
-                    }
-                    app(ConsumableInvoiceSyncService::class)->syncFromInvoice($invoice->fresh(['items']));
+                } elseif ($request->boolean('sync_consumables') || $request->boolean('sync_raw_materials') || $request->boolean('sync_products')) {
+                    throw new RuntimeException('برای ثبت موجودی باید اقلام فاکتور ارسال شود.');
                 }
                 if ($paymentSource) {
                     DocumentPaymentService::replaceSplits($invoice->fresh(), $paymentSource, (string) $invoice->user_name);
@@ -680,6 +681,14 @@ class InvoiceController extends Controller
         } else {
             $invoice->setAttribute('has_consumable_lots', false);
         }
+        if (Schema::hasTable('raw_material_lots') && Schema::hasColumn('raw_material_lots', 'invoice_id')) {
+            $invoice->setAttribute(
+                'has_raw_material_lots',
+                $invoice->rawMaterialLots()->exists()
+            );
+        } else {
+            $invoice->setAttribute('has_raw_material_lots', false);
+        }
 
         return $invoice;
     }
@@ -821,15 +830,25 @@ class InvoiceController extends Controller
                 return null;
             }
 
+            $unit = strtolower(trim((string) ($item['unit_type'] ?? '')));
+            if (! in_array($unit, ['piece', 'kg', 'liter'], true)) {
+                $unit = '';
+            }
+            $salePrice = $item['sale_price'] ?? null;
+            $salePrice = $salePrice === null || $salePrice === '' ? null : round((float) $salePrice, 2);
+
             $rows[] = [
                 'title' => mb_substr($title, 0, 255),
                 'unit_price' => round($unitPrice, 2),
                 'quantity' => round($quantity, 3),
+                'unit_type' => $unit,
                 'total' => $base,
                 'vat_mode' => $vat['vat_mode'],
                 'vat_percent' => $vat['vat_percent'],
                 'vat_amount' => $vat['vat_amount'],
                 'discount_amount' => $discount,
+                'sale_price' => $salePrice,
+                'barcode' => trim((string) ($item['barcode'] ?? '')),
                 'sort_order' => $index,
             ];
         }
@@ -926,7 +945,45 @@ class InvoiceController extends Controller
             } elseif ((float) ($row['discount_amount'] ?? 0) > 0.009) {
                 throw new RuntimeException('ستون تخفیف اقلام آماده نیست. SQL تخفیف ردیف فاکتور را اجرا کنید.');
             }
+            $unit = (string) ($row['unit_type'] ?? '');
+            if ($unit !== '' && Schema::hasColumn('invoice_items', 'unit_type')) {
+                $payload['unit_type'] = $unit;
+            } elseif (in_array($unit, ['kg', 'liter'], true)) {
+                throw new RuntimeException('ستون واحد اقلام آماده نیست. database/sql/add_invoice_stock_target_and_units_manual.sql را اجرا کنید.');
+            }
             InvoiceItem::create($payload);
+        }
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $itemRows
+     * @param  \Illuminate\Support\Collection<int, InvoiceItem>  $previousItems
+     */
+    protected function syncStockTarget(Invoice $invoice, Request $request, array $itemRows, $previousItems): void
+    {
+        $target = (string) $request->input('stock_target', '');
+        if (! in_array($target, ['product', 'consumable', 'raw'], true)) {
+            if ($request->boolean('sync_consumables')) {
+                $target = 'consumable';
+            } elseif ($request->boolean('sync_raw_materials')) {
+                $target = 'raw';
+            } elseif ($request->boolean('sync_products')) {
+                $target = 'product';
+            }
+        }
+
+        if ($target === 'consumable') {
+            app(ConsumableInvoiceSyncService::class)->syncFromInvoice($invoice->fresh(['items']));
+        } elseif ($target === 'raw') {
+            app(RawMaterialInvoiceService::class)->syncFromInvoice($invoice->fresh(['items']));
+        } elseif ($target === 'product') {
+            app(ProductInvoiceSyncService::class)->syncFromInvoice($invoice->fresh(['items']), $itemRows, $previousItems);
+        } else {
+            return;
+        }
+
+        if (Schema::hasColumn('invoices', 'stock_target')) {
+            $invoice->update(['stock_target' => $target]);
         }
     }
 

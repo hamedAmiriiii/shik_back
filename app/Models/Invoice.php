@@ -16,7 +16,7 @@ class Invoice extends Model
 
     protected $fillable = [
         'amount', 'vat_mode', 'vat_percent', 'vat_amount', 'discount_amount',
-        'title', 'description', 'date', 'user_name', 'atelier_id', 'beneficiary_id', 'shop_account_id',
+        'title', 'stock_target', 'description', 'date', 'user_name', 'atelier_id', 'beneficiary_id', 'shop_account_id',
         'payment_method', 'payment_status', 'paid_at', 'cheque_id', 'image_path',
     ];
 

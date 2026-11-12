@@ -8,11 +8,45 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ConsumableMaterial extends Model
 {
+    public const UNIT_PIECE = 'piece';
+
+    public const UNIT_KG = 'kg';
+
+    public const UNIT_LITER = 'liter';
+
     protected $fillable = [
         'atelier_id',
         'name',
+        'unit_type',
         'note',
     ];
+
+    public function unitType(): string
+    {
+        $value = $this->attributes['unit_type'] ?? null;
+        if ($value === self::UNIT_KG || $value === self::UNIT_LITER) {
+            return $value;
+        }
+
+        return self::UNIT_PIECE;
+    }
+
+    public function isPieceUnit(): bool
+    {
+        return $this->unitType() === self::UNIT_PIECE;
+    }
+
+    public function unitLabelFa(): string
+    {
+        if ($this->unitType() === self::UNIT_KG) {
+            return 'کیلو';
+        }
+        if ($this->unitType() === self::UNIT_LITER) {
+            return 'لیتر';
+        }
+
+        return 'عدد';
+    }
 
     public function atelier(): BelongsTo
     {

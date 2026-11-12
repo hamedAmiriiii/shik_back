@@ -104,12 +104,13 @@ class ExpireUserCredits extends Command
      */
     private function sendWarningSms(?int $atelierId, int $expiryDays): void
     {
-        $warningDate = Carbon::now()->subDays($expiryDays - self::WARNING_BEFORE_DAYS);
-        $expiryDate = Carbon::now()->subDays($expiryDays);
+        $now = Carbon::now('Asia/Tehran');
+        $expiryCutoff = $now->copy()->subDays($expiryDays);
+        $warningCutoff = $now->copy()->subDays($expiryDays - self::WARNING_BEFORE_DAYS);
 
         $usersToWarn = $this->usersOf($atelierId)
-            ->where('credit_last_updated_at', '<=', $warningDate)
-            ->where('credit_last_updated_at', '>', $expiryDate) // هنوز منقضی نشده
+            ->where('credit_last_updated_at', '<=', $warningCutoff)
+            ->where('credit_last_updated_at', '>', $expiryCutoff)
             ->whereNull('last_warning_sent_at')
             ->get();
 
@@ -118,7 +119,9 @@ class ExpireUserCredits extends Command
         foreach ($usersToWarn as $user) {
             try {
                 $creditAmount = number_format($user->credit, 0);
-                $daysLeft = max(1, $expiryDays - (int) Carbon::parse($user->credit_last_updated_at)->diffInDays(Carbon::now()));
+                $expiresAt = Carbon::parse($user->credit_last_updated_at)->timezone('Asia/Tehran')->addDays($expiryDays);
+                $secondsLeft = Carbon::now('Asia/Tehran')->diffInSeconds($expiresAt, false);
+                $daysLeft = max(1, (int) ceil($secondsLeft / 86400));
 
                 $shopName = SmsTools::shopSmsBrand($atelierId);
                 $message = "{$shopName}\nاعتبار شما به مبلغ {$creditAmount} تومان در حال اتمام است ({$daysLeft} روز دیگر)";
@@ -145,10 +148,10 @@ class ExpireUserCredits extends Command
      */
     private function expireCredits(?int $atelierId, int $expiryDays): void
     {
-        $expiryDate = Carbon::now()->subDays($expiryDays);
+        $expiryCutoff = Carbon::now('Asia/Tehran')->subDays($expiryDays);
 
         $usersToExpire = $this->usersOf($atelierId)
-            ->whereDate('credit_last_updated_at', '<=', $expiryDate->format('Y-m-d'))
+            ->where('credit_last_updated_at', '<=', $expiryCutoff)
             ->get();
 
         $this->info("تعداد کاربرانی که اعتبارشان منقضی شده: " . $usersToExpire->count());

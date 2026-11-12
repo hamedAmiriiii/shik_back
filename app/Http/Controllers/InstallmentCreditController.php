@@ -92,7 +92,9 @@ class InstallmentCreditController extends Controller
         $oldRegularCredit = $user->credit;
         $user->installment_credit = $installmentCredit;
         $user->credit = $regularCredit;
-        $user->credit_last_updated_at = now();
+        if (abs((float) $oldRegularCredit - (float) $regularCredit) >= 0.01) {
+            $user->restartCreditExpiry();
+        }
         $user->save();
 
         UserCreditGrantService::recordManualChange(
@@ -178,7 +180,9 @@ class InstallmentCreditController extends Controller
                 $newRegular
             );
             $user->credit = $newRegular;
-            $user->credit_last_updated_at = now();
+            if (abs((float) $oldRegularCredit - (float) $newRegular) >= 0.01) {
+                $user->restartCreditExpiry();
+            }
         }
         $user->save();
 
