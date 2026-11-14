@@ -6,6 +6,8 @@ use App\Models\ConsumableMaterial;
 use App\Models\ConsumableMaterialLot;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use App\Models\RawMaterial;
+use App\Models\RawMaterialLot;
 use App\Tools\ProductQuantityTools;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Schema;
@@ -45,6 +47,7 @@ class ConsumableInvoiceSyncService
             $lot->delete();
         }
 
+        $rawNames = $this->rawNamesOnInvoice($invoice);
         $purchasedAt = $this->resolvePurchasedAt($invoice);
         $prepared = [];
 
@@ -88,7 +91,17 @@ class ConsumableInvoiceSyncService
             }, $prepared)
             : $this->allocateDiscount($prepared, $discount);
 
+        $rawRows = [];
         foreach ($prepared as $index => $row) {
+            $share = $shares[$index] ?? 0.0;
+            $net = max(0, round($row['gross'] - $share, 2));
+            $unitCost = $row['qty'] > 0 ? round($net / $row['qty'], 2) : 0.0;
+            if (isset($rawNames[$row['name']])) {
+                $row['unit_cost'] = $unitCost;
+                $rawRows[] = $row;
+                continue;
+            }
+
             $material = ConsumableMaterial::query()
                 ->where('atelier_id', $atelierId)
                 ->where('name', $row['name'])
@@ -116,10 +129,6 @@ class ConsumableInvoiceSyncService
                 $material->save();
             }
 
-            $share = $shares[$index] ?? 0.0;
-            $net = max(0, round($row['gross'] - $share, 2));
-            $unitCost = $row['qty'] > 0 ? round($net / $row['qty'], 2) : 0.0;
-
             ConsumableMaterialLot::create([
                 'atelier_id' => $atelierId,
                 'consumable_material_id' => $material->id,
@@ -132,6 +141,46 @@ class ConsumableInvoiceSyncService
                 'note' => null,
             ]);
         }
+
+        if ($rawNames !== []) {
+            app(RawMaterialInvoiceService::class)->replaceMovedLines($invoice, $rawRows, array_keys($rawNames));
+        }
+    }
+
+    /**
+     * نام موادی که از همین فاکتور به انبار مواد اولیه منتقل شده‌اند.
+     *
+     * @return array<string, true>
+     */
+    protected function rawNamesOnInvoice(Invoice $invoice): array
+    {
+        if (
+            ! Schema::hasTable('raw_material_lots')
+            || ! Schema::hasColumn('raw_material_lots', 'invoice_id')
+            || ! Schema::hasTable('raw_materials')
+        ) {
+            return [];
+        }
+
+        $materialIds = RawMaterialLot::query()
+            ->where('invoice_id', $invoice->id)
+            ->pluck('raw_material_id')
+            ->unique()
+            ->filter()
+            ->values();
+        if ($materialIds->isEmpty()) {
+            return [];
+        }
+
+        $names = [];
+        foreach (RawMaterial::query()->whereIn('id', $materialIds)->pluck('name') as $name) {
+            $normalized = ConsumableMaterial::normalizeName($name);
+            if ($normalized !== '') {
+                $names[$normalized] = true;
+            }
+        }
+
+        return $names;
     }
 
     /**

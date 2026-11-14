@@ -6,6 +6,7 @@ use App\Models\ConsumableMaterial;
 use App\Models\ConsumableMaterialLot;
 use App\Models\ConsumableWithdrawal;
 use App\Models\Invoice;
+use App\Models\InvoiceItem;
 use App\Models\ProducedGoodIngredient;
 use App\Models\RawMaterial;
 use App\Models\RawMaterialLot;
@@ -198,17 +199,6 @@ class ConsumableMaterialController extends Controller
 
         $lots = $consumableMaterial->lots()->get();
         $invoiceIds = $lots->pluck('invoice_id')->filter()->unique()->values();
-        foreach ($invoiceIds as $invoiceId) {
-            $others = ConsumableMaterialLot::query()
-                ->where('invoice_id', $invoiceId)
-                ->where('consumable_material_id', '!=', $consumableMaterial->id)
-                ->exists();
-            if ($others) {
-                return response()->json([
-                    'message' => '«'.$consumableMaterial->name.'» در فاکتوری است که مواد مصرفی دیگری هم دارد. انتقال این کالا موجودی همان فاکتور را دوباره در انبار مصرفی می‌سازد.',
-                ], 422);
-            }
-        }
         if ($invoiceIds->isNotEmpty() && ! Schema::hasColumn('raw_material_lots', 'invoice_id')) {
             return response()->json([
                 'message' => 'اتصال فاکتور به مواد اولیه آماده نیست و انتقال موجودی این کالا موجودی را دوباره می‌سازد.',
@@ -216,7 +206,7 @@ class ConsumableMaterialController extends Controller
         }
 
         try {
-            $raw = DB::transaction(function () use ($consumableMaterial, $name, $unit, $invoiceIds) {
+            $raw = DB::transaction(function () use ($consumableMaterial, $name, $unit) {
                 $lots = $consumableMaterial->lots()->lockForUpdate()->get();
                 $stillBlocked = $this->moveToRawBlockReason($consumableMaterial);
                 if ($stillBlocked) {
@@ -267,11 +257,31 @@ class ConsumableMaterialController extends Controller
                     RawMaterialLot::create($lotPayload);
                 }
 
-                if ($invoiceIds->isNotEmpty() && Schema::hasColumn('invoices', 'stock_target')) {
+                $exclusiveIds = [];
+                foreach ($lots->pluck('invoice_id')->filter()->unique() as $invoiceId) {
+                    $others = ConsumableMaterialLot::query()
+                        ->where('invoice_id', $invoiceId)
+                        ->where('consumable_material_id', '!=', $consumableMaterial->id)
+                        ->lockForUpdate()
+                        ->exists();
+                    if (! $others) {
+                        $exclusiveIds[] = $invoiceId;
+                    }
+                }
+                if ($exclusiveIds !== [] && Schema::hasColumn('invoices', 'stock_target')) {
                     Invoice::query()
-                        ->whereIn('id', $invoiceIds->all())
+                        ->whereIn('id', $exclusiveIds)
                         ->where('atelier_id', $consumableMaterial->atelier_id)
                         ->update(['stock_target' => 'raw']);
+                }
+
+                $itemIds = $lots->pluck('invoice_item_id')->filter()->unique()->values();
+                if ($itemIds->isNotEmpty()) {
+                    $itemUpdate = ['title' => $name];
+                    if (Schema::hasColumn('invoice_items', 'unit_type')) {
+                        $itemUpdate['unit_type'] = $unit;
+                    }
+                    InvoiceItem::query()->whereIn('id', $itemIds->all())->update($itemUpdate);
                 }
 
                 $consumableMaterial->lots()->delete();

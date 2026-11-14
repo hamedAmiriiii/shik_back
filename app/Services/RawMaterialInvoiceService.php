@@ -360,6 +360,92 @@ class RawMaterialInvoiceService
     }
 
     /**
+     * ردیف‌هایی که از یک فاکتور مصرفی به مواد اولیه منتقل شده‌اند را با ویرایش فاکتور تازه می‌کند.
+     * نام‌هایی که دیگر در فاکتور نیستند از موجودی همین فاکتور حذف می‌شوند.
+     *
+     * @param  list<array{item: InvoiceItem, name: string, qty: float, unit: string, unit_cost: float}>  $rows
+     * @param  list<string>  $names
+     */
+    public function replaceMovedLines(Invoice $invoice, array $rows, array $names): void
+    {
+        if (! Schema::hasTable('raw_material_lots') || ! Schema::hasColumn('raw_material_lots', 'invoice_id')) {
+            throw new RuntimeException('اتصال فاکتور به مواد اولیه آماده نیست. SQL مربوط را اجرا کنید.');
+        }
+
+        $nameSet = [];
+        foreach ($names as $name) {
+            $normalized = $this->normalizeName($name);
+            if ($normalized !== '') {
+                $nameSet[$normalized] = true;
+            }
+        }
+        if ($nameSet === []) {
+            return;
+        }
+
+        $lots = RawMaterialLot::query()
+            ->where('invoice_id', $invoice->id)
+            ->with('rawMaterial')
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($lots as $lot) {
+            $lotName = $this->normalizeName(optional($lot->rawMaterial)->name);
+            if (! isset($nameSet[$lotName])) {
+                continue;
+            }
+            if (! $lot->isUntouched()) {
+                throw new RuntimeException('«'.$lotName.'» در انبار مواد اولیه مصرف شده و این فاکتور قابل ویرایش نیست.');
+            }
+        }
+
+        foreach ($lots as $lot) {
+            $lotName = $this->normalizeName(optional($lot->rawMaterial)->name);
+            if (isset($nameSet[$lotName])) {
+                $lot->delete();
+            }
+        }
+
+        $purchasedAt = $this->purchasedAt($invoice);
+        $atelierId = (int) $invoice->atelier_id;
+        foreach ($rows as $row) {
+            if (! isset($nameSet[$row['name']])) {
+                continue;
+            }
+            $material = RawMaterial::query()
+                ->where('atelier_id', $atelierId)
+                ->where('name', $row['name'])
+                ->first();
+            if (! $material) {
+                $create = [
+                    'atelier_id' => $atelierId,
+                    'name' => $row['name'],
+                    'sale_price' => 0,
+                ];
+                if (Schema::hasColumn('raw_materials', 'unit_type')) {
+                    $create['unit_type'] = $row['unit'];
+                }
+                $material = RawMaterial::create($create);
+            } elseif ($material->unitType() !== $row['unit']) {
+                throw new RuntimeException(
+                    '«'.$row['name'].'» در مواد اولیه با واحد '.$material->unitLabelFa().' ثبت شده است.'
+                );
+            }
+
+            RawMaterialLot::create([
+                'atelier_id' => $atelierId,
+                'raw_material_id' => $material->id,
+                'quantity_kg' => $row['qty'],
+                'remaining_kg' => $row['qty'],
+                'price_per_kg' => $row['unit_cost'],
+                'purchased_at' => $purchasedAt,
+                'invoice_id' => $invoice->id,
+                'invoice_item_id' => $row['item']->id,
+            ]);
+        }
+    }
+
+    /**
      * اقلام فاکتور را به لات مواد اولیه تبدیل می‌کند. لات مصرف‌نشدهٔ همین فاکتور جایگزین می‌شود.
      */
     public function syncFromInvoice(Invoice $invoice): void
