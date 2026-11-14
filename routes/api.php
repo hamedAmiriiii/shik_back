@@ -423,6 +423,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::delete('invoices/{invoice}/image', [\App\Http\Controllers\InvoiceController::class, 'deleteImage']);
 
     Route::get('consumable-withdrawals', [\App\Http\Controllers\ConsumableMaterialController::class, 'withdrawals']);
+    Route::post('consumable-materials/bulk-move-to-raw', [\App\Http\Controllers\ConsumableMaterialController::class, 'bulkMoveToRaw']);
     Route::post('consumable-materials/{consumableMaterial}/withdraw', [\App\Http\Controllers\ConsumableMaterialController::class, 'withdraw']);
     Route::post('consumable-materials/{consumableMaterial}/move-to-raw', [\App\Http\Controllers\ConsumableMaterialController::class, 'moveToRaw']);
     Route::resource('consumable-materials', \App\Http\Controllers\ConsumableMaterialController::class)->except(['create', 'edit']);
