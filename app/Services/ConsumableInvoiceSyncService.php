@@ -105,9 +105,15 @@ class ConsumableInvoiceSyncService
                 }
                 $material = ConsumableMaterial::create($create);
             } elseif ($material->unitType() !== $unit) {
-                throw new RuntimeException(
-                    '«'.$row['name'].'» در انبار مصرفی با واحد '.$material->unitLabelFa().' ثبت شده است.'
-                );
+                $blocked = $material->unitChangeBlockReason();
+                if ($blocked) {
+                    throw new RuntimeException($blocked);
+                }
+                if (! Schema::hasColumn('consumable_materials', 'unit_type')) {
+                    throw new RuntimeException('ستون واحد مواد مصرفی آماده نیست. database/sql/add_invoice_stock_target_and_units_manual.sql را اجرا کنید.');
+                }
+                $material->unit_type = $unit;
+                $material->save();
             }
 
             $share = $shares[$index] ?? 0.0;

@@ -3,10 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\ConsumableMaterial;
+use App\Models\ConsumableMaterialLot;
 use App\Models\ConsumableWithdrawal;
+use App\Models\Invoice;
+use App\Models\ProducedGoodIngredient;
+use App\Models\RawMaterial;
+use App\Models\RawMaterialLot;
 use App\Services\ConsumableFifoService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
@@ -116,7 +122,22 @@ class ConsumableMaterialController extends Controller
         $fields = $request->validate([
             'name' => 'sometimes|required|string|max:255',
             'note' => 'nullable|string',
+            'unit_type' => 'sometimes|in:piece,kg,liter',
         ]);
+
+        if (array_key_exists('unit_type', $fields)) {
+            if (! Schema::hasColumn('consumable_materials', 'unit_type')) {
+                return response()->json([
+                    'message' => 'ستون واحد مواد مصرفی آماده نیست. database/sql/add_invoice_stock_target_and_units_manual.sql را اجرا کنید.',
+                ], 422);
+            }
+            if ($fields['unit_type'] !== $consumableMaterial->unitType()) {
+                $blocked = $consumableMaterial->unitChangeBlockReason();
+                if ($blocked) {
+                    return response()->json(['message' => $blocked], 422);
+                }
+            }
+        }
 
         if (array_key_exists('name', $fields)) {
             $name = ConsumableMaterial::normalizeName($fields['name']);
@@ -137,6 +158,135 @@ class ConsumableMaterialController extends Controller
         $consumableMaterial->update($fields);
 
         return response($fifo->attachStock($consumableMaterial->fresh()->load('lots')), 200);
+    }
+
+    /**
+     * کالا و لات‌های دست‌نخورده‌اش را به انبار مواد اولیه می‌برد و از انبار مصرفی حذف می‌کند.
+     */
+    public function moveToRaw(Request $request, ConsumableMaterial $consumableMaterial)
+    {
+        $this->assertModelBelongsToStaffAtelier($request, $consumableMaterial);
+
+        if (! Schema::hasTable('raw_materials') || ! Schema::hasTable('raw_material_lots')) {
+            return response()->json(['message' => 'جداول مواد اولیه آماده نیست.'], 422);
+        }
+
+        $fields = $request->validate([
+            'name' => 'sometimes|required|string|max:255',
+            'unit_type' => 'sometimes|in:piece,kg,liter',
+        ]);
+
+        $name = ConsumableMaterial::normalizeName($fields['name'] ?? $consumableMaterial->name);
+        if ($name === '') {
+            return response()->json(['message' => 'نام ماده الزامی است.'], 422);
+        }
+
+        $unit = $fields['unit_type'] ?? $consumableMaterial->unitType();
+        if (! in_array($unit, [RawMaterial::UNIT_PIECE, RawMaterial::UNIT_KG, RawMaterial::UNIT_LITER], true)) {
+            $unit = RawMaterial::UNIT_PIECE;
+        }
+        if ($unit !== RawMaterial::UNIT_KG && ! Schema::hasColumn('raw_materials', 'unit_type')) {
+            return response()->json([
+                'message' => 'ستون واحد مواد اولیه آماده نیست و انتقال با واحد '.$consumableMaterial->unitLabelFa().' ممکن نیست.',
+            ], 422);
+        }
+
+        $moveBlocked = $this->moveToRawBlockReason($consumableMaterial);
+        if ($moveBlocked) {
+            return response()->json(['message' => $moveBlocked], 422);
+        }
+
+        $lots = $consumableMaterial->lots()->get();
+        $invoiceIds = $lots->pluck('invoice_id')->filter()->unique()->values();
+        foreach ($invoiceIds as $invoiceId) {
+            $others = ConsumableMaterialLot::query()
+                ->where('invoice_id', $invoiceId)
+                ->where('consumable_material_id', '!=', $consumableMaterial->id)
+                ->exists();
+            if ($others) {
+                return response()->json([
+                    'message' => '«'.$consumableMaterial->name.'» در فاکتوری است که مواد مصرفی دیگری هم دارد. انتقال این کالا موجودی همان فاکتور را دوباره در انبار مصرفی می‌سازد.',
+                ], 422);
+            }
+        }
+        if ($invoiceIds->isNotEmpty() && ! Schema::hasColumn('raw_material_lots', 'invoice_id')) {
+            return response()->json([
+                'message' => 'اتصال فاکتور به مواد اولیه آماده نیست و انتقال موجودی این کالا موجودی را دوباره می‌سازد.',
+            ], 422);
+        }
+
+        try {
+            $raw = DB::transaction(function () use ($consumableMaterial, $name, $unit, $invoiceIds) {
+                $lots = $consumableMaterial->lots()->lockForUpdate()->get();
+                $stillBlocked = $this->moveToRawBlockReason($consumableMaterial);
+                if ($stillBlocked) {
+                    throw new RuntimeException($stillBlocked);
+                }
+
+                $raw = RawMaterial::query()
+                    ->where('atelier_id', $consumableMaterial->atelier_id)
+                    ->where('name', $name)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($raw) {
+                    if ($raw->unitType() !== $unit) {
+                        throw new RuntimeException(
+                            '«'.$name.'» در انبار مواد اولیه با واحد '.$raw->unitLabelFa().' ثبت شده است.'
+                        );
+                    }
+                } else {
+                    $payload = [
+                        'atelier_id' => $consumableMaterial->atelier_id,
+                        'name' => $name,
+                        'sale_price' => 0,
+                        'note' => $consumableMaterial->note,
+                    ];
+                    if (Schema::hasColumn('raw_materials', 'unit_type')) {
+                        $payload['unit_type'] = $unit;
+                    }
+                    $raw = RawMaterial::create($payload);
+                }
+
+                foreach ($lots as $lot) {
+                    $lotPayload = [
+                        'atelier_id' => $consumableMaterial->atelier_id,
+                        'raw_material_id' => $raw->id,
+                        'quantity_kg' => $lot->quantity,
+                        'remaining_kg' => $lot->remaining,
+                        'price_per_kg' => $lot->unit_cost,
+                        'purchased_at' => $lot->purchased_at,
+                        'note' => $lot->note,
+                    ];
+                    if (Schema::hasColumn('raw_material_lots', 'invoice_id')) {
+                        $lotPayload['invoice_id'] = $lot->invoice_id;
+                    }
+                    if (Schema::hasColumn('raw_material_lots', 'invoice_item_id')) {
+                        $lotPayload['invoice_item_id'] = $lot->invoice_item_id;
+                    }
+                    RawMaterialLot::create($lotPayload);
+                }
+
+                if ($invoiceIds->isNotEmpty() && Schema::hasColumn('invoices', 'stock_target')) {
+                    Invoice::query()
+                        ->whereIn('id', $invoiceIds->all())
+                        ->where('atelier_id', $consumableMaterial->atelier_id)
+                        ->update(['stock_target' => 'raw']);
+                }
+
+                $consumableMaterial->lots()->delete();
+                $consumableMaterial->delete();
+
+                return $raw;
+            });
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => '«'.$name.'» به انبار مواد اولیه منتقل شد.',
+            'raw_material_id' => $raw->id,
+        ], 200);
     }
 
     public function destroy(Request $request, ConsumableMaterial $consumableMaterial)
@@ -279,5 +429,24 @@ class ConsumableMaterialController extends Controller
             })->values(),
             'created_at' => optional($withdrawal->created_at)->toDateTimeString(),
         ];
+    }
+
+    protected function moveToRawBlockReason(ConsumableMaterial $material): ?string
+    {
+        $name = $material->name;
+        if ($material->withdrawals()->exists()) {
+            return '«'.$name.'» برداشت دارد و تا وقتی برداشت دارد به انبار مواد اولیه منتقل نمی‌شود.';
+        }
+        if (Schema::hasColumn('produced_good_ingredients', 'consumable_material_id')
+            && ProducedGoodIngredient::query()->where('consumable_material_id', $material->id)->exists()) {
+            return '«'.$name.'» در فرمول کالای تولیدی استفاده شده و به انبار مواد اولیه منتقل نمی‌شود.';
+        }
+        foreach ($material->lots()->get() as $lot) {
+            if (! $lot->isUntouched()) {
+                return '«'.$name.'» بخشی از موجودی‌اش مصرف شده و به انبار مواد اولیه منتقل نمی‌شود.';
+            }
+        }
+
+        return null;
     }
 }
