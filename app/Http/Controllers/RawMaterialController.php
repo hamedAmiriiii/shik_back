@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\InvoiceItem;
 use App\Models\ProducedGoodIngredient;
 use App\Models\ProductionConsumption;
 use App\Models\RawMaterial;
@@ -191,22 +192,39 @@ class RawMaterialController extends Controller
             'unit_type' => ['sometimes', Rule::in([RawMaterial::UNIT_KG, RawMaterial::UNIT_LITER, RawMaterial::UNIT_PIECE])],
         ]);
 
+        $unitChanging = false;
+        $newUnit = null;
         if (array_key_exists('unit_type', $fields)) {
             if (! Schema::hasColumn('raw_materials', 'unit_type')) {
                 unset($fields['unit_type']);
             } elseif ($fields['unit_type'] !== $rawMaterial->unitType()) {
-                if ($rawMaterial->lots()->exists()
-                    || ProducedGoodIngredient::where('raw_material_id', $rawMaterial->id)->exists()) {
-                    return response()->json([
-                        'message' => 'بعد از ثبت خرید یا استفاده در فرمول، واحد ماده اولیه قابل تغییر نیست.',
-                    ], 422);
+                $blocked = $rawMaterial->unitChangeBlockReason();
+                if ($blocked) {
+                    return response()->json(['message' => $blocked], 422);
                 }
+                $unitChanging = true;
+                $newUnit = $fields['unit_type'];
             }
         }
 
-        $rawMaterial->update($fields);
+        DB::transaction(function () use ($rawMaterial, $fields, $unitChanging, $newUnit) {
+            $rawMaterial->update($fields);
 
-        return response($fifo->attachStock($rawMaterial->load($this->lotRelations())), 200);
+            if ($unitChanging && $newUnit && Schema::hasColumn('invoice_items', 'unit_type')) {
+                $itemIds = $rawMaterial->lots()
+                    ->whereNotNull('invoice_item_id')
+                    ->pluck('invoice_item_id')
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all();
+                if ($itemIds !== []) {
+                    InvoiceItem::query()->whereIn('id', $itemIds)->update(['unit_type' => $newUnit]);
+                }
+            }
+        });
+
+        return response($fifo->attachStock($rawMaterial->fresh()->load($this->lotRelations())), 200);
     }
 
     /**

@@ -87,6 +87,27 @@ class RawMaterial extends Model
         return 'کیلو';
     }
 
+    /**
+     * اگر در فرمول استفاده شده یا بخشی از لات مصرف شده باشد واحد عوض نمی‌شود.
+     * موجودی دست‌نخورده فقط با واحد جدید خوانده می‌شود (مثلاً ۱۰ عدد → ۱۰ کیلو).
+     */
+    public function unitChangeBlockReason(): ?string
+    {
+        $label = $this->unitLabelFa();
+        $name = $this->name;
+        if (ProducedGoodIngredient::query()->where('raw_material_id', $this->id)->exists()) {
+            return '«'.$name.'» در فرمول کالای تولیدی استفاده شده و واحد '.$label.' آن قابل تغییر نیست.';
+        }
+        $lots = $this->relationLoaded('lots') ? $this->lots : $this->lots()->get();
+        foreach ($lots as $lot) {
+            if (! $lot->isUntouched()) {
+                return '«'.$name.'» در مواد اولیه با واحد '.$label.' ثبت شده و بخشی از موجودی‌اش مصرف شده است. تا وقتی مصرف دارد واحدش عوض نمی‌شود.';
+            }
+        }
+
+        return null;
+    }
+
     public function atelier(): BelongsTo
     {
         return $this->belongsTo(Atelier::class);
