@@ -382,6 +382,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('inventory-wastes', [\App\Http\Controllers\InventoryWasteController::class, 'index']);
     Route::post('inventory-wastes', [\App\Http\Controllers\InventoryWasteController::class, 'store']);
     Route::delete('inventory-wastes/{inventoryWaste}', [\App\Http\Controllers\InventoryWasteController::class, 'destroy']);
+    Route::get('low-stock-report', [\App\Http\Controllers\LowStockReportController::class, 'show']);
+    Route::post('low-stock-report/calculate', [\App\Http\Controllers\LowStockReportController::class, 'calculate']);
     Route::resource('shop-employees', \App\Http\Controllers\ShopEmployeeController::class);
     Route::get('employee-payrolls', [\App\Http\Controllers\EmployeePayrollController::class, 'index']);
     Route::post('employee-payrolls', [\App\Http\Controllers\EmployeePayrollController::class, 'store']);

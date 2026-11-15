@@ -121,6 +121,11 @@ class ShopBackupTables
                 'fks' => [],
             ],
             [
+                'name' => 'low_stock_reports',
+                'scope' => 'atelier',
+                'fks' => [],
+            ],
+            [
                 'name' => 'produced_goods',
                 'scope' => 'atelier',
                 'fks' => [],

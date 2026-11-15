@@ -52,7 +52,7 @@ class ShopPermissionCatalog
         return [
             ['key' => 'dashboard', 'label' => 'داشبورد', 'prefixes' => ['dashboard']],
             ['key' => 'pos', 'label' => 'فروش صندوق', 'prefixes' => ['purchased-products', 'pos-catalog']],
-            ['key' => 'products', 'label' => 'کالاها', 'prefixes' => ['products', 'product']],
+            ['key' => 'products', 'label' => 'کالاها', 'prefixes' => ['products', 'product', 'low-stock-report']],
             ['key' => 'categories', 'label' => 'دسته‌بندی', 'prefixes' => ['category']],
             ['key' => 'manufacturers', 'label' => 'تولیدکننده', 'prefixes' => ['manufacturers']],
             ['key' => 'customers', 'label' => 'مشتریان', 'prefixes' => ['customers', 'customer-broadcast', 'shop-customer-groups', 'smart-customer']],
