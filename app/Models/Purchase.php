@@ -39,6 +39,8 @@ class Purchase extends Model
         'oil_visit_id',
         'shop_table_id',
         'table_label',
+        'dining_mode',
+        'customer_note',
     ];
 
     protected $casts = [

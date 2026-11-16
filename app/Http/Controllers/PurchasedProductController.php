@@ -686,6 +686,17 @@ class PurchasedProductController extends Controller
                 'atelier_id' => $purchaseAtelierId,
             ]);
 
+            if (Schema::hasColumn('purchases', 'dining_mode')) {
+                $diningMode = strtolower(trim((string) $request->input('dining_mode', '')));
+                $purchasePayload['dining_mode'] = in_array($diningMode, ['hall', 'takeaway'], true)
+                    ? $diningMode
+                    : null;
+            }
+            if (Schema::hasColumn('purchases', 'customer_note')) {
+                $note = trim((string) $request->input('customer_note', ''));
+                $purchasePayload['customer_note'] = $note !== '' ? mb_substr($note, 0, 2000) : null;
+            }
+
             $saleCreatedAt = null;
             if ($request->filled('sale_date')) {
                 try {
