@@ -18,7 +18,7 @@ class ProducedGoodIngredient extends Model
     ];
 
     protected $casts = [
-        'grams_per_kg' => 'decimal:3',
+        'grams_per_kg' => 'decimal:6',
         'is_removable' => 'boolean',
         'is_addable' => 'boolean',
     ];

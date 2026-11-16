@@ -26,8 +26,8 @@ class RawMaterialLot extends Model
     ];
 
     protected $casts = [
-        'quantity_kg' => 'decimal:3',
-        'remaining_kg' => 'decimal:3',
+        'quantity_kg' => 'decimal:6',
+        'remaining_kg' => 'decimal:6',
         'price_per_kg' => 'decimal:2',
         'purchased_at' => 'datetime',
     ];

@@ -20,7 +20,8 @@ class RawMaterialFifoService
 {
     public function kgFromGrams(float $gramsPerKg, float $productKg): float
     {
-        return round(($gramsPerKg / 1000) * $productKg, 3);
+        // تا ۶ رقم اعشار تا نیم‌گرم / ۲.۵ گرم در مصرف دقیق بماند (۰.۰۰۰۵ کیلو)
+        return round(($gramsPerKg / 1000) * $productKg, 6);
     }
 
     /**
@@ -40,7 +41,7 @@ class RawMaterialFifoService
         }
 
         if ($isPiece) {
-            return round($recipeValue * $productKg, 3);
+            return round($recipeValue * $productKg, 6);
         }
 
         return $this->kgFromGrams($recipeValue, $productKg);
@@ -63,7 +64,7 @@ class RawMaterialFifoService
      */
     public function plan(RawMaterial $material, float $needKg, bool $lock = false)
     {
-        $needKg = round($needKg, 3);
+        $needKg = round($needKg, 6);
         $query = RawMaterialLot::query()
             ->where('raw_material_id', $material->id)
             ->where('remaining_kg', '>', 0)
@@ -84,7 +85,7 @@ class RawMaterialFifoService
             }
 
             $available = (float) $lot->remaining_kg;
-            $take = round(min($available, $remainingNeed), 3);
+            $take = round(min($available, $remainingNeed), 6);
             if ($take <= 0) {
                 continue;
             }
@@ -97,14 +98,14 @@ class RawMaterialFifoService
                 'price_per_kg' => $price,
                 'cost' => round($take * $price, 2),
             ];
-            $remainingNeed = round($remainingNeed - $take, 3);
+            $remainingNeed = round($remainingNeed - $take, 6);
         }
 
         $shortage = max($remainingNeed, 0);
 
         return [
             'needed_kg' => $needKg,
-            'allocated_kg' => round($needKg - $shortage, 3),
+            'allocated_kg' => round($needKg - $shortage, 6),
             'shortage_kg' => $shortage,
             'cost' => round(array_sum(array_column($slices, 'cost')), 2),
             'slices' => $slices,
@@ -116,7 +117,7 @@ class RawMaterialFifoService
      */
     public function planProducedGood(ProducedGood $ingredient, float $needKg, bool $lock = false): array
     {
-        $needKg = round($needKg, 3);
+        $needKg = round($needKg, 6);
         $query = Production::query()
             ->where('produced_good_id', $ingredient->id)
             ->where('remaining_kg', '>', 0)
@@ -136,7 +137,7 @@ class RawMaterialFifoService
             }
 
             $available = (float) $production->remaining_kg;
-            $take = round(min($available, $remainingNeed), 3);
+            $take = round(min($available, $remainingNeed), 6);
             if ($take <= 0) {
                 continue;
             }
@@ -149,14 +150,14 @@ class RawMaterialFifoService
                 'price_per_kg' => $price,
                 'cost' => round($take * $price, 2),
             ];
-            $remainingNeed = round($remainingNeed - $take, 3);
+            $remainingNeed = round($remainingNeed - $take, 6);
         }
 
         $shortage = max($remainingNeed, 0);
 
         return [
             'needed_kg' => $needKg,
-            'allocated_kg' => round($needKg - $shortage, 3),
+            'allocated_kg' => round($needKg - $shortage, 6),
             'shortage_kg' => $shortage,
             'cost' => round(array_sum(array_column($slices, 'cost')), 2),
             'slices' => $slices,
@@ -175,7 +176,7 @@ class RawMaterialFifoService
             return (float) $lot->remaining_kg > 0;
         })->values();
 
-        $stock = round((float) $open->sum('remaining_kg'), 3);
+        $stock = round((float) $open->sum('remaining_kg'), 6);
         $next = $open->first();
 
         $material->setAttribute('stock_kg', $stock);
@@ -201,7 +202,7 @@ class RawMaterialFifoService
         $good->loadMissing(['ingredients.rawMaterial', 'ingredients.ingredientProducedGood']);
 
         $preview = $this->recipeCostPreview($good, $quantityKg);
-        $stockKg = round((float) Production::where('produced_good_id', $good->id)->sum('remaining_kg'), 3);
+        $stockKg = round((float) Production::where('produced_good_id', $good->id)->sum('remaining_kg'), 6);
 
         $total = $preview['total'];
         $lines = $preview['lines'];
@@ -257,7 +258,7 @@ class RawMaterialFifoService
                 $grams = (float) $line->grams_per_kg;
                 $need = $material && ! $material->isPieceUnit()
                     ? $this->kgFromGrams($grams, $quantityKg)
-                    : round($grams * $quantityKg, 3);
+                    : round($grams * $quantityKg, 6);
                 $plan = ($material && Schema::hasTable('consumable_material_lots'))
                     ? app(ConsumableFifoService::class)->plan($material, $need)
                     : [
@@ -539,7 +540,7 @@ class RawMaterialFifoService
             ->orderBy('id')
             ->get();
 
-        $stockKg = round((float) $productions->sum('remaining_kg'), 3);
+        $stockKg = round((float) $productions->sum('remaining_kg'), 6);
         if ($stockKg <= 0) {
             return [
                 'cost_per_kg' => null,
@@ -672,7 +673,7 @@ class RawMaterialFifoService
                 return [
                     'lot_id' => $lot['lot_id'],
                     'source_production_id' => $lot['source_production_id'] ?? null,
-                    'quantity_kg' => round($lot['quantity_kg_per_kg'] * $qty, 3),
+                    'quantity_kg' => round($lot['quantity_kg_per_kg'] * $qty, 6),
                     'price_per_kg' => $lot['price_per_kg'],
                     'cost' => round($lot['cost_per_kg'] * $qty, 2),
                 ];
@@ -700,7 +701,7 @@ class RawMaterialFifoService
             }
 
             $inv = $byKey[$key];
-            $line['needed_kg'] = round($inv['qty_per_kg'] * $qty, 3);
+            $line['needed_kg'] = round($inv['qty_per_kg'] * $qty, 6);
             $line['cost'] = round($inv['cost_per_kg'] * $qty, 2);
             $line['lots'] = $scaleLots($inv);
 
@@ -724,8 +725,8 @@ class RawMaterialFifoService
                 'ingredient_kind' => $inv['kind'] ?? 'raw_material',
                 'name' => $inv['name'],
                 'unit_type' => $inv['unit_type'] ?? RawMaterial::UNIT_KG,
-                'grams_per_kg' => round($inv['qty_per_kg'] * ($isPiece ? 1 : 1000), 3),
-                'needed_kg' => round($inv['qty_per_kg'] * $qty, 3),
+                'grams_per_kg' => round($inv['qty_per_kg'] * ($isPiece ? 1 : 1000), 6),
+                'needed_kg' => round($inv['qty_per_kg'] * $qty, 6),
                 'cost' => round($inv['cost_per_kg'] * $qty, 2),
                 'lots' => $scaleLots($inv),
                 'shortage_kg' => 0,
@@ -740,7 +741,7 @@ class RawMaterialFifoService
      */
     public function produce(ProducedGood $good, float $quantityKg, ?string $note = null): Production
     {
-        $quantityKg = round($quantityKg, 3);
+        $quantityKg = round($quantityKg, 6);
         if ($quantityKg <= 0) {
             throw new RuntimeException('مقدار تولید باید بیشتر از صفر باشد.');
         }
@@ -762,7 +763,7 @@ class RawMaterialFifoService
                     }
 
                     $need = $material->isPieceUnit()
-                        ? round((float) $line->grams_per_kg * $quantityKg, 3)
+                        ? round((float) $line->grams_per_kg * $quantityKg, 6)
                         : $this->kgFromGrams((float) $line->grams_per_kg, $quantityKg);
                     if ($material->isPieceUnit() && ! ProductQuantityTools::isWholeNumber($need)) {
                         throw new RuntimeException(
@@ -862,7 +863,7 @@ class RawMaterialFifoService
                         /** @var Production $source */
                         $source = $slice['production'];
                         $take = $slice['quantity_kg'];
-                        $left = round((float) $source->remaining_kg - $take, 3);
+                        $left = round((float) $source->remaining_kg - $take, 6);
                         if ($left < 0) {
                             throw new RuntimeException('موجودی تولید همزمان تغییر کرده است. دوباره تلاش کنید.');
                         }
@@ -888,7 +889,7 @@ class RawMaterialFifoService
                     /** @var RawMaterialLot $lot */
                     $lot = $slice['lot'];
                     $take = $slice['quantity_kg'];
-                    $left = round((float) $lot->remaining_kg - $take, 3);
+                    $left = round((float) $lot->remaining_kg - $take, 6);
                     if ($left < 0) {
                         throw new RuntimeException('موجودی لات همزمان تغییر کرده است. دوباره تلاش کنید.');
                     }
@@ -940,8 +941,8 @@ class RawMaterialFifoService
                 throw new RuntimeException('تولید یافت نشد.');
             }
 
-            $qty = round((float) $locked->quantity_kg, 3);
-            $remaining = round((float) $locked->remaining_kg, 3);
+            $qty = round((float) $locked->quantity_kg, 6);
+            $remaining = round((float) $locked->remaining_kg, 6);
             if ($remaining !== $qty) {
                 throw new RuntimeException(
                     'بخشی از این تولید فروخته، ضایع یا در تولید دیگری مصرف شده و قابل برگشت نیست. ابتدا فروش/ضایعات/مصرف را برگشت بزنید.'
@@ -1014,7 +1015,7 @@ class RawMaterialFifoService
                     if (! $source) {
                         throw new RuntimeException('بچ تولید مصرف‌شده یافت نشد.');
                     }
-                    $source->remaining_kg = round((float) $source->remaining_kg + (float) $row->quantity_kg, 3);
+                    $source->remaining_kg = round((float) $source->remaining_kg + (float) $row->quantity_kg, 6);
                     $source->save();
 
                     continue;
@@ -1024,7 +1025,7 @@ class RawMaterialFifoService
                 if (! $lot) {
                     throw new RuntimeException('لات ماده اولیه یافت نشد.');
                 }
-                $lot->remaining_kg = round((float) $lot->remaining_kg + (float) $row->quantity_kg, 3);
+                $lot->remaining_kg = round((float) $lot->remaining_kg + (float) $row->quantity_kg, 6);
                 $lot->save();
             }
 

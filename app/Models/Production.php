@@ -19,8 +19,8 @@ class Production extends Model
     ];
 
     protected $casts = [
-        'quantity_kg' => 'decimal:3',
-        'remaining_kg' => 'decimal:3',
+        'quantity_kg' => 'decimal:6',
+        'remaining_kg' => 'decimal:6',
         'total_cost' => 'decimal:2',
         'cost_per_kg' => 'decimal:2',
     ];
