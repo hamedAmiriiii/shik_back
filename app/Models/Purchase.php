@@ -168,6 +168,14 @@ class Purchase extends Model
     }
 
     /**
+     * پرداخت‌های وصول اقساط (کامل یا جزئی)
+     */
+    public function installmentPayments()
+    {
+        return $this->hasMany(InstallmentPayment::class)->orderBy('paid_at')->orderBy('id');
+    }
+
+    /**
      * قسط‌های پرداخت شده
      */
     public function paidInstallments()
@@ -373,10 +381,26 @@ class Purchase extends Model
     }
 
     /**
+     * مجموع مبلغ قسط‌های پرداخت‌نشده (بعد از کسر پرداخت جزئی از مبلغ قسط)
+     */
+    public function unpaidInstallmentsSum(): float
+    {
+        if ($this->relationLoaded('installments')) {
+            return round((float) $this->installments->where('is_paid', false)->sum('amount'), 2);
+        }
+
+        return round((float) $this->unpaidInstallments()->sum('amount'), 2);
+    }
+
+    /**
      * محاسبه مبلغ پرداخت شده از قسط‌ها
      */
     public function getPaidAmountAttribute()
     {
+        if ($this->isInstallment()) {
+            return round(max(0, (float) $this->total_amount - $this->unpaidInstallmentsSum()), 2);
+        }
+
         // اگر installments قبلاً load شده باشد، از آن استفاده می‌کنیم
         if ($this->relationLoaded('installments')) {
             return $this->installments->where('is_paid', true)->sum('amount');
@@ -395,6 +419,9 @@ class Purchase extends Model
         }
         if ($this->isCheque()) {
             return $this->outstandingChequeAmount();
+        }
+        if ($this->isInstallment()) {
+            return $this->unpaidInstallmentsSum();
         }
 
         return $this->total_amount - $this->paid_amount;

@@ -61,6 +61,9 @@ class AccountingSalePoster
         if (Schema::hasTable('purchase_debt_payments')) {
             $with[] = 'debtPayments';
         }
+        if (Schema::hasTable('installment_payments')) {
+            $with[] = 'installmentPayments';
+        }
         $purchase->loadMissing($with);
         AccountingReturnPoster::reverseForPurchase($purchase);
         foreach ($purchase->installments as $installment) {
@@ -69,6 +72,15 @@ class AccountingSalePoster
                 AccountingVoucher::SOURCE_INSTALLMENT_PAY,
                 (int) $installment->id
             );
+        }
+        if (Schema::hasTable('installment_payments')) {
+            foreach ($purchase->installmentPayments as $installmentPayment) {
+                AccountingVoucherService::reversePostedIfAny(
+                    $atelierId,
+                    AccountingVoucher::SOURCE_INSTALLMENT_PAYMENT,
+                    (int) $installmentPayment->id
+                );
+            }
         }
         if ($purchase->cheque_id) {
             AccountingVoucherService::reversePostedIfAny(
@@ -98,25 +110,39 @@ class AccountingSalePoster
         );
     }
 
-    public static function postInstallmentPay(Installment $installment): ?AccountingVoucher
-    {
+    public static function postInstallmentPay(
+        Installment $installment,
+        ?float $paidAmount = null,
+        ?\App\Models\InstallmentPayment $payment = null
+    ): ?AccountingVoucher {
         $installment->loadMissing('purchase');
         $purchase = $installment->purchase;
         if (! $purchase) {
             return null;
         }
         $atelierId = (int) $purchase->atelier_id;
-        $amount = round((float) $installment->amount, 2);
+        $amount = round(
+            $paidAmount !== null
+                ? $paidAmount
+                : (float) ($payment?->amount ?? $installment->amount),
+            2
+        );
         if ($atelierId <= 0 || $amount < 0.01 || ! AccountingLedger::ready()) {
             return null;
         }
 
+        $eventAt = $payment?->paid_at ?: ($installment->paid_at ?: now());
+        $sourceType = $payment
+            ? AccountingVoucher::SOURCE_INSTALLMENT_PAYMENT
+            : AccountingVoucher::SOURCE_INSTALLMENT_PAY;
+        $sourceId = $payment ? (int) $payment->id : (int) $installment->id;
+
         return AccountingVoucherService::post(
             $atelierId,
-            self::eventDate($installment->paid_at),
+            self::eventDate($eventAt),
             'وصول قسط فروش #'.$purchase->id,
-            AccountingVoucher::SOURCE_INSTALLMENT_PAY,
-            (int) $installment->id,
+            $sourceType,
+            $sourceId,
             [
                 ['account_id' => AccountingLedger::mapped($atelierId, 'installment_pay.cash'), 'debit' => $amount, 'credit' => 0],
                 ['account_id' => AccountingLedger::mapped($atelierId, 'installment_pay.ar'), 'debit' => 0, 'credit' => $amount],

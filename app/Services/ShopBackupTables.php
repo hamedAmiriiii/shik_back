@@ -511,6 +511,16 @@ class ShopBackupTables
                 ],
             ],
             [
+                'name' => 'installment_payments',
+                'scope' => 'parent',
+                'parent' => 'purchases',
+                'parent_key' => 'purchase_id',
+                'fks' => [
+                    'purchase_id' => 'purchases',
+                    'installment_id' => 'installments',
+                ],
+            ],
+            [
                 'name' => 'purchase_debt_payments',
                 'scope' => 'parent',
                 'parent' => 'purchases',
@@ -687,6 +697,7 @@ class ShopBackupTables
         return [
             \App\Models\AccountingVoucher::SOURCE_PURCHASE => 'purchases',
             \App\Models\AccountingVoucher::SOURCE_INSTALLMENT_PAY => 'installments',
+            \App\Models\AccountingVoucher::SOURCE_INSTALLMENT_PAYMENT => 'installment_payments',
             \App\Models\AccountingVoucher::SOURCE_DEBT_SETTLE => 'purchases',
             \App\Models\AccountingVoucher::SOURCE_DEBT_PAYMENT => 'purchase_debt_payments',
             \App\Models\AccountingVoucher::SOURCE_CHEQUE_CLEAR => 'cheques',

@@ -37,6 +37,11 @@ class Installment extends Model
         return $this->belongsTo(Purchase::class);
     }
 
+    public function payments()
+    {
+        return $this->hasMany(InstallmentPayment::class);
+    }
+
     /**
      * تبدیل تاریخ سررسید به شمسی
      */

@@ -3,10 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Models\Installment;
+use App\Models\InstallmentPayment;
 use App\Models\Purchase;
 use App\Models\UserShiksho;
+use App\Tools\PriceTools;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class InstallmentController extends Controller
 {
@@ -29,7 +32,8 @@ class InstallmentController extends Controller
     }
 
     /**
-     * پرداخت یک قسط
+     * پرداخت یک قسط (کامل یا جزئی).
+     * اگر مبلغ بیشتر از قسط فعلی باشد، قسط‌های بعدی به‌ترتیب تسویه یا از مبلغشان کسر می‌شود.
      */
     public function pay(Request $request, Purchase $purchase, Installment $installment)
     {
@@ -44,15 +48,126 @@ class InstallmentController extends Controller
             return response()->json(['message' => 'این قسط قبلاً پرداخت شده است'], 400);
         }
 
+        $fields = $request->validate([
+            'amount' => 'nullable|numeric|min:0',
+            'notes' => 'nullable|string|max:1000',
+        ]);
+
+        $notes = $fields['notes'] ?? null;
+        $requested = isset($fields['amount']) ? PriceTools::roundToman((float) $fields['amount']) : 0.0;
+
         DB::beginTransaction();
         try {
-            $installment->update([
-                'is_paid' => true,
-                'paid_at' => now(),
-                'notes' => $request->input('notes'),
-            ]);
+            $locked = Installment::query()
+                ->where('id', $installment->id)
+                ->lockForUpdate()
+                ->first();
 
-            \App\Services\AccountingSalePoster::postInstallmentPay($installment->fresh());
+            if (! $locked || $locked->is_paid) {
+                DB::rollBack();
+
+                return response()->json(['message' => 'این قسط قبلاً پرداخت شده است'], 400);
+            }
+
+            $targets = Installment::query()
+                ->where('purchase_id', $purchase->id)
+                ->where('is_paid', false)
+                ->where('installment_number', '>=', $locked->installment_number)
+                ->orderBy('installment_number')
+                ->lockForUpdate()
+                ->get();
+
+            $remainingPayable = PriceTools::roundToman((float) $targets->sum('amount'));
+            if ($remainingPayable < 1) {
+                DB::rollBack();
+
+                return response()->json(['message' => 'مبلغ قابل پرداخت این قسط‌ها صفر است'], 422);
+            }
+
+            $payAmount = $requested > 0 ? $requested : PriceTools::roundToman((float) $locked->amount);
+            if ($payAmount < 1) {
+                DB::rollBack();
+
+                return response()->json(['message' => 'مبلغ پرداخت باید حداقل ۱ تومان باشد'], 422);
+            }
+
+            if (($payAmount - $remainingPayable) > 0.02) {
+                DB::rollBack();
+
+                return response()->json([
+                    'message' => 'مبلغ پرداخت از مجموع قسط‌های باقی‌مانده بیشتر است',
+                    'payable_amount' => $remainingPayable,
+                ], 422);
+            }
+
+            $left = $payAmount;
+            $primary = null;
+            $affected = [];
+
+            foreach ($targets as $row) {
+                if ($left < 0.01) {
+                    break;
+                }
+
+                $rowAmount = PriceTools::roundToman((float) $row->amount);
+                if ($rowAmount < 1) {
+                    continue;
+                }
+
+                if (($left + 0.02) >= $rowAmount) {
+                    $row->update([
+                        'is_paid' => true,
+                        'paid_at' => now(),
+                        'notes' => $notes ?: $row->notes,
+                    ]);
+                    $left = round($left - $rowAmount, 2);
+                    $fresh = $row->fresh();
+                    $affected[] = $fresh;
+                    if ($primary === null) {
+                        $primary = $fresh;
+                    }
+                } else {
+                    $newAmount = PriceTools::roundToman($rowAmount - $left);
+                    if ($newAmount < 1) {
+                        $row->update([
+                            'is_paid' => true,
+                            'paid_at' => now(),
+                            'notes' => $notes ?: $row->notes,
+                        ]);
+                    } else {
+                        $partialNote = 'کسر '.number_format($left).' تومان بابت پرداخت جزئی';
+                        $row->update([
+                            'amount' => $newAmount,
+                            'notes' => trim(($notes ? $notes.' | ' : '').$partialNote),
+                        ]);
+                    }
+                    $left = 0;
+                    $fresh = $row->fresh();
+                    $affected[] = $fresh;
+                    if ($primary === null) {
+                        $primary = $fresh;
+                    }
+                }
+            }
+
+            if ($primary === null) {
+                DB::rollBack();
+
+                return response()->json(['message' => 'خطا در اعمال پرداخت قسط'], 500);
+            }
+
+            $payment = null;
+            if (Schema::hasTable('installment_payments')) {
+                $payment = InstallmentPayment::create([
+                    'purchase_id' => $purchase->id,
+                    'installment_id' => $locked->id,
+                    'amount' => $payAmount,
+                    'notes' => $notes,
+                    'paid_at' => now(),
+                ]);
+            }
+
+            \App\Services\AccountingSalePoster::postInstallmentPay($primary, $payAmount, $payment);
 
             if ($purchase->phone) {
                 $atelierId = $purchase->atelier_id;
@@ -62,18 +177,25 @@ class InstallmentController extends Controller
                 }
                 $userShiksho = $userQuery->first();
                 if ($userShiksho) {
-                    $userShiksho->addInstallmentCredit($installment->amount);
+                    $userShiksho->addInstallmentCredit($payAmount);
                 }
             }
 
             DB::commit();
 
-            $installment->load('purchase');
+            $purchase->refresh()->load('installments');
+            $primary->load('purchase');
+
+            $message = count($affected) > 1 || ((float) ($affected[0]->amount ?? 0) !== (float) $locked->amount && ! $affected[0]->is_paid)
+                ? 'پرداخت ثبت شد. اقساط به‌روزرسانی شدند.'
+                : 'قسط با موفقیت پرداخت شد';
 
             return response([
-                'message' => 'قسط با موفقیت پرداخت شد',
-                'installment' => $installment,
-                'purchase' => $purchase->load('installments'),
+                'message' => $message,
+                'paid_amount' => $payAmount,
+                'installment' => $primary,
+                'affected_installments' => $affected,
+                'purchase' => $purchase,
             ], 200);
         } catch (\Exception $e) {
             DB::rollBack();

@@ -18,6 +18,9 @@ class AccountingVoucher extends Model
 
     public const SOURCE_INSTALLMENT_PAY = 'installment_pay';
 
+    /** وصول جزئی/چندمرحله‌ای قسط — source_id = installment_payments.id */
+    public const SOURCE_INSTALLMENT_PAYMENT = 'installment_payment';
+
     public const SOURCE_DEBT_SETTLE = 'debt_settle';
 
     public const SOURCE_DEBT_PAYMENT = 'debt_payment';
