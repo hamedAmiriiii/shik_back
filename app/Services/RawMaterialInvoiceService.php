@@ -107,14 +107,14 @@ class RawMaterialInvoiceService
         foreach ($prepared as $row) {
             $item = null;
             if (Schema::hasTable('invoice_items')) {
-                $item = InvoiceItem::create([
-                    'invoice_id' => $invoice->id,
-                    'title' => $row['material']->name,
-                    'unit_price' => $row['price'],
-                    'quantity' => $row['qty'],
-                    'total' => $row['amount'],
-                    'sort_order' => $sort,
-                ]);
+                $item = InvoiceItem::create($this->invoiceItemAttributes(
+                    $invoice->id,
+                    $row['material'],
+                    $row['qty'],
+                    $row['price'],
+                    $row['amount'],
+                    $sort
+                ));
                 $sort++;
             }
 
@@ -184,14 +184,14 @@ class RawMaterialInvoiceService
         $invoice = $this->createInvoice($material, $fields, $actor, $amount);
         $item = null;
         if (Schema::hasTable('invoice_items')) {
-            $item = InvoiceItem::create([
-                'invoice_id' => $invoice->id,
-                'title' => $material->name,
-                'unit_price' => $price,
-                'quantity' => $qty,
-                'total' => $amount,
-                'sort_order' => 0,
-            ]);
+            $item = InvoiceItem::create($this->invoiceItemAttributes(
+                $invoice->id,
+                $material,
+                $qty,
+                $price,
+                $amount,
+                0
+            ));
         }
 
         $lot->update([
@@ -282,14 +282,14 @@ class RawMaterialInvoiceService
         }
 
         $sort = (int) $invoice->items()->max('sort_order');
-        $item = InvoiceItem::create([
-            'invoice_id' => $invoice->id,
-            'title' => $material->name,
-            'unit_price' => $price,
-            'quantity' => $qty,
-            'total' => $amount,
-            'sort_order' => $sort + 1,
-        ]);
+        $item = InvoiceItem::create($this->invoiceItemAttributes(
+            $invoice->id,
+            $material,
+            $qty,
+            $price,
+            $amount,
+            $sort + 1
+        ));
 
         $invoice->unsetRelation('items');
         $newAmount = $invoice->itemsSum();
@@ -337,6 +337,9 @@ class RawMaterialInvoiceService
             'user_name' => $userName,
             'atelier_id' => $atelierId,
         ];
+        if (Schema::hasColumn('invoices', 'stock_target')) {
+            $payload['stock_target'] = 'raw';
+        }
 
         $beneficiaryFields = $fields;
         $beneficiaryError = ShopBeneficiaryService::applyToFields($atelierId, $beneficiaryFields, true, 'invoices');
@@ -546,6 +549,32 @@ class RawMaterialInvoiceService
         $name = preg_replace('/\s+/u', ' ', $name) ?? '';
 
         return $name;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function invoiceItemAttributes(
+        int $invoiceId,
+        RawMaterial $material,
+        float $qty,
+        float $price,
+        float $amount,
+        int $sortOrder
+    ): array {
+        $payload = [
+            'invoice_id' => $invoiceId,
+            'title' => $material->name,
+            'unit_price' => $price,
+            'quantity' => $qty,
+            'total' => $amount,
+            'sort_order' => $sortOrder,
+        ];
+        if (Schema::hasColumn('invoice_items', 'unit_type')) {
+            $payload['unit_type'] = $material->unitType();
+        }
+
+        return $payload;
     }
 
     protected function unitOf(InvoiceItem $item): string
