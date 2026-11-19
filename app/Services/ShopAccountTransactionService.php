@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AccountingVoucher;
 use App\Models\Cheque;
 use App\Models\DailyShopReconciliation;
 use App\Models\DailyShopReconciliationAccountDeposit;
@@ -423,7 +424,25 @@ class ShopAccountTransactionService
             ->limit(500)
             ->get();
 
+        if ($rows->isEmpty()) {
+            return;
+        }
+
+        // فقط وصول‌هایی که مستقیم همین حساب را شارژ کرده‌اند (نه مسیر صندوق→تطبیق)
+        $directFilter = ShopAccountBalanceService::sourcesThatDebitedShopAccount(
+            $atelierId,
+            AccountingVoucher::SOURCE_CHEQUE_CLEAR,
+            $rows->pluck('id')->map(fn ($id) => (int) $id)->all()
+        );
+
         foreach ($rows as $cheque) {
+            $sourceId = (int) $cheque->id;
+            if (
+                $directFilter !== null
+                && ! ShopAccountBalanceService::countsAsDirectShopCredit($directFilter, $sourceId, $accountId)
+            ) {
+                continue;
+            }
             $amount = round((float) $cheque->amount, 2);
             if ($amount < 0.01) {
                 continue;

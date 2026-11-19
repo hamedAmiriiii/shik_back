@@ -519,9 +519,18 @@ class ShopSalesReportService
             ->whereHas('cheque', function ($q) use ($start, $end) {
                 $q->where(function ($inner) use ($start, $end) {
                     $inner->where(function ($c) use ($start, $end) {
+                        // فقط وصول‌هایی که به صندوق رفته‌اند در انتظار واریز تطبیق‌اند؛
+                        // وصول مستقیم به حساب بانکی/تنخواه از قبل در موجودی حساب نشسته.
                         $c->where('status', \App\Models\Cheque::STATUS_CLEARED)
                             ->whereNotNull('cleared_at')
-                            ->whereBetween('cleared_at', [$start, $end]);
+                            ->whereBetween('cleared_at', [$start, $end])
+                            ->where(function ($dest) {
+                                $dest->whereNull('shop_account_id')
+                                    ->orWhereHas('shopAccount', function ($account) {
+                                        $account->where('type', \App\Models\ShopAccount::TYPE_TILL)
+                                            ->orWhere('legacy_slot', \App\Models\ShopAccount::LEGACY_TILL);
+                                    });
+                            });
                     })->orWhere(function ($c) use ($start, $end) {
                         $c->where('status', \App\Models\Cheque::STATUS_TRANSFERRED)
                             ->whereNotNull('transferred_at')

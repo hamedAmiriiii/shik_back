@@ -282,7 +282,7 @@ class ChequeController extends Controller
         }
 
         $message = $cleared->type === Cheque::TYPE_RECEIVED
-            ? 'چک دریافتی وصول شد؛ مبلغ تا تطبیق در صندوق می‌ماند و بعد به حساب واریز می‌شود.'
+            ? 'چک دریافتی وصول شد و مبلغ به حساب مقصد واریز شد.'
             : 'چک صادره وصول شد و مبلغ از حساب کسر شد.';
 
         return response([

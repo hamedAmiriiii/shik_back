@@ -26,7 +26,8 @@ use Illuminate\Support\Facades\Schema;
  *
  * حساب فروشگاه: واریزهای تطبیق روزانه − شارژ تنخواه − هزینه/فاکتور پرداخت‌شده از آن
  *               − برگشت فروش از حساب − تقسیم سود شرکا + اصلاح مانده واقعی
- * وصول نسیه و چک دریافتی مستقیم حساب را شارژ نمی‌کنند؛ اول صندوق/کارتخوان، بعد از تطبیق واریز.
+ * وصول نسیه معمولاً اول صندوق/کارتخوان است و با تطبیق واریز می‌شود.
+ * وصول چک دریافتی اگر مقصد بانک/تنخواه باشد مستقیم همان حساب را شارژ می‌کند.
  * تنخواه: شارژ دریافتی − هزینه/فاکتور پرداخت‌شده از آن − برگشت/برداشت‌های مشابه + اصلاح مانده
  * صندوق نقد: مانده دفتر حسابداری (۱۱۱۰۱)
  */
@@ -665,7 +666,7 @@ class ShopAccountBalanceService
     /**
      * @param  array{with_voucher: array<int, true>, shop_debits: array<int, array<int, true>>}  $filter
      */
-    protected static function countsAsDirectShopCredit(array $filter, int $sourceId, int $shopAccountId): bool
+    public static function countsAsDirectShopCredit(array $filter, int $sourceId, int $shopAccountId): bool
     {
         // بدون سند حسابداری: مثل قبل در موجودی حساب می‌ماند
         if (! isset($filter['with_voucher'][$sourceId])) {
@@ -682,7 +683,7 @@ class ShopAccountBalanceService
      * @param  array<int>  $sourceIds
      * @return array{with_voucher: array<int, true>, shop_debits: array<int, array<int, true>>}|null
      */
-    protected static function sourcesThatDebitedShopAccount(
+    public static function sourcesThatDebitedShopAccount(
         int $atelierId,
         string $sourceType,
         array $sourceIds

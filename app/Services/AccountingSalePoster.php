@@ -7,6 +7,7 @@ use App\Models\Cheque;
 use App\Models\Installment;
 use App\Models\Purchase;
 use App\Models\PurchaseDebtPayment;
+use App\Models\ShopAccount;
 use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -221,8 +222,15 @@ class AccountingSalePoster
             return null;
         }
 
-        // وصول چک دریافتی ابتدا به صندوق می‌رود؛ شارژ حساب بانکی فقط با تطبیق/واریز
+        // حساب مقصد انتخاب‌شده (بانک/تنخواه) همان لحظه شارژ می‌شود؛ فقط اگر مقصد صندوق باشد در صندوق می‌ماند.
         $debitAccountId = AccountingLedger::mapped($atelierId, 'cheque_clear_received.cash_fallback');
+        $shopAccountId = (int) ($cheque->shop_account_id ?? 0);
+        if ($shopAccountId > 0) {
+            $shop = ShopAccount::query()->find($shopAccountId);
+            if ($shop && (int) $shop->atelier_id === $atelierId && ! $shop->isTill()) {
+                $debitAccountId = AccountingLedger::shopCashAccountId($atelierId, $shopAccountId);
+            }
+        }
 
         return AccountingVoucherService::post(
             $atelierId,
@@ -231,8 +239,18 @@ class AccountingSalePoster
             AccountingVoucher::SOURCE_CHEQUE_CLEAR,
             (int) $cheque->id,
             [
-                ['account_id' => $debitAccountId, 'debit' => $amount, 'credit' => 0],
-                ['account_id' => AccountingLedger::mapped($atelierId, 'cheque_clear_received.cheque_receivable'), 'debit' => 0, 'credit' => $amount],
+                [
+                    'account_id' => $debitAccountId,
+                    'debit' => $amount,
+                    'credit' => 0,
+                    'description' => 'ورود وجه وصول چک',
+                ],
+                [
+                    'account_id' => AccountingLedger::mapped($atelierId, 'cheque_clear_received.cheque_receivable'),
+                    'debit' => 0,
+                    'credit' => $amount,
+                    'description' => 'بستن چک دریافتنی',
+                ],
             ]
         );
     }
