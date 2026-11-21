@@ -260,6 +260,40 @@ class AccountingReportService
         ];
     }
 
+    /**
+     * گردش حساب‌های ارزش افزوده خرید (۱۱۵۰۱) و فروش (۲۱۳۰۱).
+     *
+     * @return array{
+     *   input: array{code:string,name:string,debit:float,credit:float,net:float},
+     *   output: array{code:string,name:string,debit:float,credit:float,net:float}
+     * }
+     */
+    public static function vatAccountSummary(int $atelierId, ?string $fromG = null, ?string $toG = null): array
+    {
+        $byCode = self::netByCode($atelierId, $fromG, $toG);
+        $input = $byCode[ChartOfAccountsSeeder::CODE_VAT_INPUT] ?? ['debit' => 0.0, 'credit' => 0.0];
+        $output = $byCode[ChartOfAccountsSeeder::CODE_VAT_OUTPUT] ?? ['debit' => 0.0, 'credit' => 0.0];
+
+        return [
+            'input' => [
+                'code' => ChartOfAccountsSeeder::CODE_VAT_INPUT,
+                'name' => 'ارزش افزوده خرید',
+                'debit' => round((float) $input['debit'], 2),
+                'credit' => round((float) $input['credit'], 2),
+                // دارایی: بدهکار − بستانکار
+                'net' => round((float) $input['debit'] - (float) $input['credit'], 2),
+            ],
+            'output' => [
+                'code' => ChartOfAccountsSeeder::CODE_VAT_OUTPUT,
+                'name' => 'ارزش افزوده فروش',
+                'debit' => round((float) $output['debit'], 2),
+                'credit' => round((float) $output['credit'], 2),
+                // بدهی: بستانکار − بدهکار
+                'net' => round((float) $output['credit'] - (float) $output['debit'], 2),
+            ],
+        ];
+    }
+
     public static function parseDate(?string $value): ?string
     {
         if ($value === null || trim($value) === '') {

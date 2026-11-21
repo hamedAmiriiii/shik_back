@@ -114,6 +114,30 @@ class AccountingReportController extends Controller
         return response(['data' => $data], 200);
     }
 
+    /**
+     * گزارش ارزش افزوده خرید/فروش.
+     * GET /api/accounting/vat?from=&to=
+     */
+    public function vat(Request $request)
+    {
+        $atelierId = $this->assertShopFeature($request, \App\Services\ShopFeatureFlags::ACCOUNTING, 'حسابداری برای این فروشگاه فعال نیست.');
+        if ($fail = $this->tablesGuard()) {
+            return $fail;
+        }
+
+        try {
+            $data = \App\Services\AccountingVatReportService::report(
+                $atelierId,
+                $request->input('from'),
+                $request->input('to')
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response(['data' => $data], 200);
+    }
+
     protected function tablesGuard()
     {
         if (! AccountingVoucher::tablesReady() || ! \App\Models\AccountingAccount::tableReady()) {

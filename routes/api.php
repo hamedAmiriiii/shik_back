@@ -554,6 +554,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('accounting/ledger', [\App\Http\Controllers\AccountingReportController::class, 'ledger']);
     Route::get('accounting/profit-loss', [\App\Http\Controllers\AccountingReportController::class, 'profitLoss']);
     Route::get('accounting/balance-sheet', [\App\Http\Controllers\AccountingReportController::class, 'balanceSheet']);
+    Route::get('accounting/vat', [\App\Http\Controllers\AccountingReportController::class, 'vat']);
 
     // سامانه مؤدیان (زیر حسابداری)
     Route::prefix('accounting/moadian')->group(function () {
