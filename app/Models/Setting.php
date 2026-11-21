@@ -72,6 +72,8 @@ class Setting extends Model
             'produced_goods_enabled' => '0',
             'accounting_enabled' => '0',
             \App\Services\PurchaseVatService::SETTING_ENABLED => '0',
+            \App\Services\SaleVatService::SETTING_ENABLED => '0',
+            \App\Services\SaleVatService::SETTING_RATE => (string) \App\Services\SaleVatService::DEFAULT_RATE,
             'customer_club_enabled' => \App\Services\ShopFeatureFlags::customerClubDefaultForAtelier($atelierId) ? '1' : '0',
             'smart_customer_club_enabled' => \App\Services\ShopFeatureFlags::customerClubDefaultForAtelier($atelierId) ? '1' : '0',
             'receipt_print_settings' => '',

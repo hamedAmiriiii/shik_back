@@ -72,6 +72,9 @@ class AccountingVatReportService
             'from' => self::toJalaliDisplay($fromG),
             'to' => self::toJalaliDisplay($toG),
             'enabled' => PurchaseVatService::enabledForAtelier($atelierId),
+            'purchase_vat_enabled' => PurchaseVatService::enabledForAtelier($atelierId),
+            'sale_vat_enabled' => SaleVatService::enabledForAtelier($atelierId),
+            'sale_vat_rate' => SaleVatService::rateForAtelier($atelierId),
             'rows' => $rows,
             'totals' => [
                 'input_invoices' => $invoiceTotal,
@@ -83,7 +86,7 @@ class AccountingVatReportService
                 'net_payable' => round($outputLedger - $inputFromDocs, 2),
             ],
             'accounts' => $ledger,
-            'note' => 'ارزش افزوده خرید از فاکتور و هزینه می‌آید؛ طرف معامله همان ذینفع ثبت‌شده روی سند است. خروجی فروش فعلاً از حساب ۲۱۳۰۱ خوانده می‌شود (در فروشگاه‌های فعلی معمولاً صفر است).',
+            'note' => 'ارزش افزوده خرید از فاکتور و هزینه (ذینفع روی سند) است. خروجی فروش از حساب ۲۱۳۰۱ می‌آید؛ وقتی «ارزش افزوده فروش» در تنظیمات روشن باشد، از مبلغ ناخالص فروش جدا و در سند ثبت می‌شود.',
         ];
     }
 

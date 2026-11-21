@@ -77,13 +77,30 @@ class AccountingReturnPoster
         }
 
         try {
+            $returnGross = $credits > 0 ? $credits : $sale;
+            // فقط اگر سند فروش اصلی آرتیکل VAT خروجی داشته باشد، برگشت هم جدا شود
+            // (فروش‌های قبل از روشن‌شدن sale_vat_enabled دست‌نخورده بمانند).
+            $originalHadVat = self::purchaseVoucherHasVatOutput($purchasePosted, $atelierId);
+            $vatSplit = $originalHadVat
+                ? SaleVatService::splitGross($atelierId, $returnGross)
+                : ['net' => $returnGross, 'vat' => 0.0];
+            $returnNet = round((float) $vatSplit['net'], 2);
+            $returnVat = round((float) $vatSplit['vat'], 2);
+
             $lines = [];
             AccountingLedger::push(
                 $lines,
                 AccountingLedger::mapped($atelierId, 'purchase_return.discount'),
-                $credits > 0 ? $credits : $sale,
+                $returnNet,
                 0,
                 'برگشت از فروش'
+            );
+            AccountingLedger::push(
+                $lines,
+                AccountingLedger::mapped($atelierId, 'purchase_return.vat_output'),
+                $returnVat,
+                0,
+                'برگشت ارزش افزوده فروش'
             );
             AccountingLedger::push(
                 $lines,
@@ -185,5 +202,23 @@ class AccountingReturnPoster
                 (int) $id
             );
         }
+    }
+
+    protected static function purchaseVoucherHasVatOutput(AccountingVoucher $voucher, int $atelierId): bool
+    {
+        try {
+            $vatAccountId = AccountingLedger::mapped($atelierId, 'purchase.vat_output');
+        } catch (RuntimeException $e) {
+            return false;
+        }
+
+        $voucher->loadMissing('lines');
+        foreach ($voucher->lines as $line) {
+            if ((int) $line->account_id === $vatAccountId && round((float) $line->credit, 2) >= 0.01) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

@@ -17,7 +17,8 @@ class AccountingPostingMapRegistry
 
         return [
             // فروش
-            self::row('purchase.revenue', 'sale', 'فروش', 'درآمد فروش', $c::CODE_REVENUE, 'بستانکار فروش کالا'),
+            self::row('purchase.revenue', 'sale', 'فروش', 'درآمد فروش', $c::CODE_REVENUE, 'بستانکار فروش کالا (خالص بدون VAT خروجی)'),
+            self::row('purchase.vat_output', 'sale', 'فروش', 'ارزش افزوده فروش', $c::CODE_VAT_OUTPUT, 'بستانکار ۲۱۳۰۱ وقتی sale_vat_enabled روشن است'),
             self::row('purchase.discount', 'sale', 'فروش', 'تخفیف فروش', $c::CODE_DISCOUNT, 'تخفیف روی فاکتور فروش'),
             self::row('purchase.loyalty', 'sale', 'فروش', 'اعتبار / تخفیف باشگاه', $c::CODE_LOYALTY, 'مصرف اعتبار وفاداری هنگام فروش'),
             self::row('purchase.cash', 'sale', 'فروش', 'دریافت نقد فروش', $c::CODE_TILL, 'وقتی فروش نقد از صندوق است'),
@@ -59,7 +60,8 @@ class AccountingPostingMapRegistry
             self::row('expense.manual_credit_grant.ar', 'expense', 'هزینه', 'بدهی اعتبار اعطایی', $c::CODE_AR, 'طرف مقابل اعطای اعتبار'),
 
             // برگشت فروش
-            self::row('purchase_return.discount', 'return', 'برگشت فروش', 'تخفیف برگشت', $c::CODE_DISCOUNT, ''),
+            self::row('purchase_return.discount', 'return', 'برگشت فروش', 'تخفیف برگشت', $c::CODE_DISCOUNT, 'خالص برگشت از فروش (بدون VAT)'),
+            self::row('purchase_return.vat_output', 'return', 'برگشت فروش', 'برگشت ارزش افزوده فروش', $c::CODE_VAT_OUTPUT, 'کاهش بدهی ۲۱۳۰۱'),
             self::row('purchase_return.loyalty', 'return', 'برگشت فروش', 'برگرداندن اعتبار باشگاه', $c::CODE_LOYALTY, ''),
             self::row('purchase_return.cash', 'return', 'برگشت فروش', 'نقد برگشتی', $c::CODE_TILL, ''),
             self::row('purchase_return.pos', 'return', 'برگشت فروش', 'کارتخوان برگشتی', $c::CODE_POS, ''),

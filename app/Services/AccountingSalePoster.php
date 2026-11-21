@@ -304,6 +304,10 @@ class AccountingSalePoster
             }
         }
 
+        $vatSplit = SaleVatService::splitGross($atelierId, $sales);
+        $revenue = $vatSplit['net'];
+        $vatOutput = $vatSplit['vat'];
+
         $lines = [];
         self::push($lines, AccountingLedger::mapped($atelierId, 'purchase.cash'), $cash, 0, 'نقد صندوق');
         self::push($lines, AccountingLedger::mapped($atelierId, 'purchase.card'), $card, 0, 'کارتخوان در راه');
@@ -311,7 +315,8 @@ class AccountingSalePoster
         self::push($lines, AccountingLedger::mapped($atelierId, 'purchase.ar'), $ar, 0, 'حساب دریافتنی');
         self::push($lines, AccountingLedger::mapped($atelierId, 'purchase.discount'), $discount, 0, 'تخفیف');
         self::push($lines, AccountingLedger::mapped($atelierId, 'purchase.loyalty'), $credit, 0, 'اعتبار وفاداری');
-        self::push($lines, AccountingLedger::mapped($atelierId, 'purchase.revenue'), 0, $sales, 'درآمد فروش');
+        self::push($lines, AccountingLedger::mapped($atelierId, 'purchase.revenue'), 0, $revenue, 'درآمد فروش');
+        self::push($lines, AccountingLedger::mapped($atelierId, 'purchase.vat_output'), 0, $vatOutput, 'ارزش افزوده فروش');
 
         $cogs = [
             'purchase.cogs_inv_catalog' => 0.0,
