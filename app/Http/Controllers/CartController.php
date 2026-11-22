@@ -373,14 +373,28 @@ class CartController extends Controller
             $creditUsed = 0;
             $userShiksho = null;
 
+            $lineTotals = [];
+            $cartItems = $cart->items;
+            foreach ($cartItems as $item) {
+                $lineTotals[] = round((float) $item->quantity * (float) $item->price, 2);
+            }
+            $creditShares = [];
+
             // اگر کاربر می‌خواهد از اعتبار استفاده کند
             if ($phone && $useCredit) {
                 $userShiksho = UserShiksho::where('phone', $phone)
                     ->where('atelier_id', $atelierId)
                     ->first();
                 if ($userShiksho && $userShiksho->credit > 0) {
-                    $creditUsed = \App\Tools\PriceTools::roundToman(min($userShiksho->credit, $originalTotalAmount));
-                    $userShiksho->useCredit($creditUsed);
+                    $allocated = \App\Services\LoyaltyCreditAllocator::allocate(
+                        $lineTotals,
+                        min((float) $userShiksho->credit, $originalTotalAmount)
+                    );
+                    $creditShares = $allocated['shares'];
+                    $creditUsed = $allocated['used'];
+                    if ($creditUsed >= 0.01) {
+                        $userShiksho->useCredit($creditUsed);
+                    }
                 }
             }
 
@@ -406,8 +420,10 @@ class CartController extends Controller
             \App\Services\CustomerCreditExpenseService::recordCreditUsed($purchase);
 
             // ذخیره محصولات خریداری شده
-            foreach ($cart->items as $item) {
-                PurchasedProduct::create([
+            $lineCreditColumn = \Illuminate\Support\Facades\Schema::hasColumn('purchased_products', 'credit_used');
+            $lineIndex = 0;
+            foreach ($cartItems as $item) {
+                $payload = [
                     'purchase_id' => $purchase->id,
                     'product_id' => $item->product_id,
                     'quantity' => $item->quantity,
@@ -415,7 +431,12 @@ class CartController extends Controller
                     'sale_price' => $item->price, // قیمت ذخیره شده در cart
                     'size' => $item->size, // سایز انتخاب شده
                     'color' => $item->color, // رنگ انتخاب شده
-                ]);
+                ];
+                if ($lineCreditColumn) {
+                    $payload['credit_used'] = round((float) ($creditShares[$lineIndex] ?? 0), 2);
+                }
+                PurchasedProduct::create($payload);
+                $lineIndex++;
 
                 // کسر موجودی محصول
                 $item->product->decrement('quantity', $item->quantity);

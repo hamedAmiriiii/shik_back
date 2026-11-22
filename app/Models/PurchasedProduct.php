@@ -22,12 +22,19 @@ class PurchasedProduct extends Model
         'sale_price',
         'size',
         'color',
+        'credit_used',
+        'credit_earned',
+        'phone',
+        'total_amount',
     ];
 
     protected $casts = [
         'purchase_price' => 'decimal:2',
         'sale_price' => 'decimal:2',
         'quantity' => 'decimal:3',
+        'credit_used' => 'decimal:2',
+        'credit_earned' => 'decimal:2',
+        'total_amount' => 'decimal:2',
     ];
 
     protected $appends = ['item_type', 'display_name'];

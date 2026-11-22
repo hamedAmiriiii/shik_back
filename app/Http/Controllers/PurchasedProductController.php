@@ -491,7 +491,19 @@ class PurchasedProductController extends Controller
                 $userShiksho->refresh();
             }
             if ($userShiksho && $userShiksho->credit > 0) {
-                $creditUsed = \App\Tools\PriceTools::roundToman(min($userShiksho->credit, $amountAfterDiscount));
+                $lineTotals = [];
+                foreach ($preparedLines as $line) {
+                    $lineTotals[] = round((float) $line['quantity'] * (float) $line['sale_price'], 2);
+                }
+                $allocated = \App\Services\LoyaltyCreditAllocator::allocate(
+                    $lineTotals,
+                    min((float) $userShiksho->credit, $amountAfterDiscount)
+                );
+                $creditUsed = $allocated['used'];
+                foreach ($productsData as $i => &$productRow) {
+                    $productRow['credit_used'] = round((float) ($allocated['shares'][$i] ?? 0), 2);
+                }
+                unset($productRow);
             }
         }
 
@@ -738,8 +750,9 @@ class PurchasedProductController extends Controller
             }
 
             $purchasedProducts = [];
+            $lineCreditColumn = Schema::hasColumn('purchased_products', 'credit_used');
             foreach ($productsData as $productData) {
-                $purchasedProducts[] = PurchasedProduct::create([
+                $payload = [
                     'purchase_id' => $purchase->id,
                     'product_id' => $productData['product_id'],
                     'produced_good_id' => $productData['produced_good_id'],
@@ -750,7 +763,11 @@ class PurchasedProductController extends Controller
                     'sale_price' => $productData['sale_price'],
                     'size' => $productData['size'] ?? null,
                     'color' => $productData['color'] ?? null,
-                ]);
+                ];
+                if ($lineCreditColumn) {
+                    $payload['credit_used'] = round((float) ($productData['credit_used'] ?? 0), 2);
+                }
+                $purchasedProducts[] = PurchasedProduct::create($payload);
             }
 
             $posSale->commitStock($preparedLines, $purchasedProducts);
@@ -1413,6 +1430,11 @@ class PurchasedProductController extends Controller
         $grossTotal = $originalTotalAmount;
         $amountAfterDiscount = max(0, $grossTotal - $discountAmount);
         $creditUsed = 0;
+        $creditShares = [];
+        $lineTotals = [];
+        foreach ($productsData as $row) {
+            $lineTotals[] = round((float) $row['quantity'] * (float) $row['sale_price'], 2);
+        }
         if ($phone && $useCredit) {
             $userShikshoQuery = UserShiksho::where('phone', $phone);
             if ($purchaseAtelierId !== null) {
@@ -1420,10 +1442,18 @@ class PurchasedProductController extends Controller
             }
             $userShiksho = $userShikshoQuery->lockForUpdate()->first();
             if ($userShiksho && $userShiksho->credit > 0) {
-                $creditUsed = PriceTools::roundToman(min($userShiksho->credit, $amountAfterDiscount));
+                $allocated = \App\Services\LoyaltyCreditAllocator::allocate(
+                    $lineTotals,
+                    min((float) $userShiksho->credit, $amountAfterDiscount)
+                );
+                $creditShares = $allocated['shares'];
+                $creditUsed = $allocated['used'];
             }
         }
-
+        foreach ($productsData as $i => &$row) {
+            $row['credit_used'] = round((float) ($creditShares[$i] ?? 0), 2);
+        }
+        unset($row);
         $payableAmount = max(0, PriceTools::roundToman($amountAfterDiscount - $creditUsed));
         $creditEarned = 0;
         $skipCreditEarn = $request->boolean('skip_credit_earn');

@@ -101,6 +101,11 @@ class TableOrderCheckoutService
                 : (bool) $order->use_credit;
 
             $creditUsed = 0.0;
+            $creditShares = [];
+            $lineTotals = [];
+            foreach ($prepared as $line) {
+                $lineTotals[] = round((float) $line['quantity'] * (float) $line['sale_price'], 2);
+            }
             $phone = $order->phone;
             if ($phone && $useCredit) {
                 $userShiksho = UserShiksho::where('phone', $phone)
@@ -108,8 +113,15 @@ class TableOrderCheckoutService
                     ->lockForUpdate()
                     ->first();
                 if ($userShiksho && $userShiksho->credit > 0) {
-                    $creditUsed = \App\Tools\PriceTools::roundToman(min((float) $userShiksho->credit, $grossTotal));
-                    $userShiksho->useCredit($creditUsed);
+                    $allocated = LoyaltyCreditAllocator::allocate(
+                        $lineTotals,
+                        min((float) $userShiksho->credit, $grossTotal)
+                    );
+                    $creditShares = $allocated['shares'];
+                    $creditUsed = $allocated['used'];
+                    if ($creditUsed >= 0.01) {
+                        $userShiksho->useCredit($creditUsed);
+                    }
                 }
             }
 
@@ -149,8 +161,9 @@ class TableOrderCheckoutService
             CustomerCreditExpenseService::recordCreditUsed($purchase);
 
             $createdLines = [];
-            foreach ($prepared as $line) {
-                $createdLines[] = PurchasedProduct::create([
+            $lineCreditColumn = Schema::hasColumn('purchased_products', 'credit_used');
+            foreach ($prepared as $i => $line) {
+                $payload = [
                     'purchase_id' => $purchase->id,
                     'product_id' => $line['product_id'],
                     'produced_good_id' => $line['produced_good_id'],
@@ -161,7 +174,11 @@ class TableOrderCheckoutService
                     'sale_price' => $line['sale_price'],
                     'size' => $line['size'] ?? null,
                     'color' => $line['color'] ?? null,
-                ]);
+                ];
+                if ($lineCreditColumn) {
+                    $payload['credit_used'] = round((float) ($creditShares[$i] ?? 0), 2);
+                }
+                $createdLines[] = PurchasedProduct::create($payload);
             }
 
             try {
