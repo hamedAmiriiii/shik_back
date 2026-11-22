@@ -383,6 +383,7 @@ class PurchasedProductController extends Controller
             'products.*.size' => 'nullable|string|max:255',
             'products.*.color' => 'nullable|string|max:255',
             'use_credit' => 'nullable|boolean',
+            'skip_credit_earn' => 'nullable|boolean',
             'discount_amount' => 'nullable|numeric|min:0',
             'payment_type' => 'nullable|string|in:cash,installment,debt,cheque,mixed',
             'cheque_id' => 'nullable|integer|exists:cheques,id',
@@ -497,11 +498,12 @@ class PurchasedProductController extends Controller
         $payableAmount = max(0, \App\Tools\PriceTools::roundToman($amountAfterDiscount - $creditUsed));
 
         $creditEarned = 0;
-        
+        $skipCreditEarn = $request->boolean('skip_credit_earn');
+
         // اگر تخفیف مستقیم داده نشده باشد و شماره تلفن وجود دارد و اعتبار فعال است، اعتبار جدید را محاسبه کن
-        // اگر discount_amount > 0 باشد، اعتبار اضافه نمی‌شود
+        // اگر discount_amount > 0 یا skip_credit_earn باشد، اعتبار اضافه نمی‌شود
         $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
-        if ($phone && $enableLoyaltyCredit && $discountAmount == 0) {
+        if ($phone && $enableLoyaltyCredit && $discountAmount == 0 && ! $skipCreditEarn) {
             // محاسبه اعتبار کسب شده (بر اساس مبلغ اصلی خرید، قبل از کسر اعتبار استفاده شده)
             $creditEarned = UserShiksho::calculateCredit($originalTotalAmount, $purchaseAtelierId);
         }
@@ -1424,8 +1426,9 @@ class PurchasedProductController extends Controller
 
         $payableAmount = max(0, PriceTools::roundToman($amountAfterDiscount - $creditUsed));
         $creditEarned = 0;
+        $skipCreditEarn = $request->boolean('skip_credit_earn');
         $enableLoyaltyCredit = \App\Models\Setting::isEnabled('enable_loyalty_credit', true);
-        if ($phone && $enableLoyaltyCredit && $discountAmount == 0) {
+        if ($phone && $enableLoyaltyCredit && $discountAmount == 0 && ! $skipCreditEarn) {
             $creditEarned = UserShiksho::calculateCredit($originalTotalAmount, $purchaseAtelierId);
         }
 
