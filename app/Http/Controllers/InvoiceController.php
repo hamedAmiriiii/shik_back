@@ -690,6 +690,28 @@ class InvoiceController extends Controller
             $invoice->setAttribute('has_raw_material_lots', false);
         }
 
+        // فاکتورهای قدیمی: نوع انبار روی خود فاکتور بود — برای نمایش روی هر قلم هم برگردان
+        if ($invoice->relationLoaded('items')) {
+            $invoiceTarget = Schema::hasColumn('invoices', 'stock_target')
+                ? (string) ($invoice->stock_target ?? '')
+                : '';
+            if (! in_array($invoiceTarget, InvoiceItem::stockTargets(), true)) {
+                if ($invoice->getAttribute('has_consumable_lots')) {
+                    $invoiceTarget = InvoiceItem::STOCK_CONSUMABLE;
+                } elseif ($invoice->getAttribute('has_raw_material_lots')) {
+                    $invoiceTarget = InvoiceItem::STOCK_RAW;
+                } else {
+                    $invoiceTarget = '';
+                }
+            }
+            foreach ($invoice->items as $item) {
+                $resolved = $item->resolvedStockTarget($invoiceTarget !== '' ? $invoiceTarget : null);
+                if ($resolved !== null) {
+                    $item->setAttribute('stock_target', $resolved);
+                }
+            }
+        }
+
         return $invoice;
     }
 
@@ -837,11 +859,19 @@ class InvoiceController extends Controller
             $salePrice = $item['sale_price'] ?? null;
             $salePrice = $salePrice === null || $salePrice === '' ? null : round((float) $salePrice, 2);
 
+            $stockTargetSet = array_key_exists('stock_target', $item) || array_key_exists('stock_kind', $item);
+            $stockTarget = strtolower(trim((string) ($item['stock_target'] ?? $item['stock_kind'] ?? '')));
+            if (! in_array($stockTarget, InvoiceItem::stockTargets(), true)) {
+                $stockTarget = '';
+            }
+
             $rows[] = [
                 'title' => mb_substr($title, 0, 255),
                 'unit_price' => round($unitPrice, 2),
                 'quantity' => round($quantity, 3),
                 'unit_type' => $unit,
+                'stock_target' => $stockTarget,
+                'stock_target_set' => $stockTargetSet,
                 'total' => $base,
                 'vat_mode' => $vat['vat_mode'],
                 'vat_percent' => $vat['vat_percent'],
@@ -951,6 +981,12 @@ class InvoiceController extends Controller
             } elseif (in_array($unit, ['kg', 'liter'], true)) {
                 throw new RuntimeException('ستون واحد اقلام آماده نیست. database/sql/add_invoice_stock_target_and_units_manual.sql را اجرا کنید.');
             }
+            $stockTarget = (string) ($row['stock_target'] ?? '');
+            if ($stockTarget !== '' && Schema::hasColumn('invoice_items', 'stock_target')) {
+                $payload['stock_target'] = $stockTarget;
+            } elseif ($stockTarget !== '' && ! Schema::hasColumn('invoice_items', 'stock_target')) {
+                throw new RuntimeException('ستون نوع قلم فاکتور آماده نیست. database/sql/add_invoice_item_stock_target_manual.sql را اجرا کنید.');
+            }
             InvoiceItem::create($payload);
         }
     }
@@ -961,30 +997,163 @@ class InvoiceController extends Controller
      */
     protected function syncStockTarget(Invoice $invoice, Request $request, array $itemRows, $previousItems): void
     {
-        $target = (string) $request->input('stock_target', '');
-        if (! in_array($target, ['product', 'consumable', 'raw'], true)) {
+        $invoiceTarget = Schema::hasColumn('invoices', 'stock_target')
+            ? (string) ($invoice->stock_target ?? '')
+            : '';
+        if (! in_array($invoiceTarget, InvoiceItem::stockTargets(), true)) {
+            $invoiceTarget = '';
+        }
+
+        $requestTarget = (string) $request->input('stock_target', '');
+        if (! in_array($requestTarget, InvoiceItem::stockTargets(), true)) {
             if ($request->boolean('sync_consumables')) {
-                $target = 'consumable';
+                $requestTarget = InvoiceItem::STOCK_CONSUMABLE;
             } elseif ($request->boolean('sync_raw_materials')) {
-                $target = 'raw';
+                $requestTarget = InvoiceItem::STOCK_RAW;
             } elseif ($request->boolean('sync_products')) {
-                $target = 'product';
+                $requestTarget = InvoiceItem::STOCK_PRODUCT;
+            } else {
+                $requestTarget = '';
             }
         }
 
-        if ($target === 'consumable') {
-            app(ConsumableInvoiceSyncService::class)->syncFromInvoice($invoice->fresh(['items']));
-        } elseif ($target === 'raw') {
-            app(RawMaterialInvoiceService::class)->syncFromInvoice($invoice->fresh(['items']));
-        } elseif ($target === 'product') {
-            app(ProductInvoiceSyncService::class)->syncFromInvoice($invoice->fresh(['items']), $itemRows, $previousItems);
-        } else {
+        $fallbackTarget = $requestTarget !== '' ? $requestTarget : $invoiceTarget;
+        $anyExplicit = $this->itemRowsHaveExplicitStockTarget($itemRows)
+            || $this->invoiceItemsHaveExplicitStockTarget($previousItems);
+
+        // اگر هنوز نوع روی قلم‌ها نیست و درخواست نوع واحد دارد، همه را همان نوع بگیر
+        if (! $anyExplicit && $fallbackTarget !== '') {
+            foreach ($itemRows as $index => $row) {
+                if (($row['stock_target'] ?? '') === '') {
+                    $itemRows[$index]['stock_target'] = $fallbackTarget;
+                }
+            }
+            if (Schema::hasColumn('invoice_items', 'stock_target')) {
+                InvoiceItem::query()
+                    ->where('invoice_id', $invoice->id)
+                    ->where(function ($q) {
+                        $q->whereNull('stock_target')->orWhere('stock_target', '');
+                    })
+                    ->update(['stock_target' => $fallbackTarget]);
+            }
+            $anyExplicit = true;
+        }
+
+        $kinds = $this->collectStockKindsFromRows($itemRows, $fallbackTarget, $anyExplicit);
+        $previousKinds = [];
+        foreach ($previousItems as $prev) {
+            /** @var InvoiceItem $prev */
+            $resolved = $prev->resolvedStockTarget($fallbackTarget !== '' ? $fallbackTarget : null);
+            if ($resolved !== null) {
+                $kinds[$resolved] = true;
+                $previousKinds[$resolved] = true;
+            }
+        }
+
+        // اگر قلم‌ها نوع دارند یا درخواست همگام‌سازی انبار آمده، هر نوع را جدا همگام کن
+        $shouldSync = $kinds !== []
+            || $request->boolean('sync_consumables')
+            || $request->boolean('sync_raw_materials')
+            || $request->boolean('sync_products')
+            || $requestTarget !== '';
+
+        if (! $shouldSync) {
+            if (Schema::hasColumn('invoices', 'stock_target')) {
+                $invoice->update(['stock_target' => null]);
+            }
+
             return;
         }
 
-        if (Schema::hasColumn('invoices', 'stock_target')) {
-            $invoice->update(['stock_target' => $target]);
+        $fresh = $invoice->fresh(['items']);
+        if (isset($kinds[InvoiceItem::STOCK_CONSUMABLE])
+            || isset($previousKinds[InvoiceItem::STOCK_CONSUMABLE])
+            || $request->boolean('sync_consumables')
+            || $requestTarget === InvoiceItem::STOCK_CONSUMABLE
+            || $fresh->consumableMaterialLots()->exists()
+        ) {
+            app(ConsumableInvoiceSyncService::class)->syncFromInvoice($fresh);
+            $fresh = $invoice->fresh(['items']);
         }
+        if (isset($kinds[InvoiceItem::STOCK_RAW])
+            || isset($previousKinds[InvoiceItem::STOCK_RAW])
+            || $request->boolean('sync_raw_materials')
+            || $requestTarget === InvoiceItem::STOCK_RAW
+            || $fresh->rawMaterialLots()->exists()
+        ) {
+            app(RawMaterialInvoiceService::class)->syncFromInvoice($fresh);
+            $fresh = $invoice->fresh(['items']);
+        }
+        if (isset($kinds[InvoiceItem::STOCK_PRODUCT])
+            || isset($previousKinds[InvoiceItem::STOCK_PRODUCT])
+            || $request->boolean('sync_products')
+            || $requestTarget === InvoiceItem::STOCK_PRODUCT
+        ) {
+            app(ProductInvoiceSyncService::class)->syncFromInvoice($fresh, $itemRows, $previousItems);
+        }
+
+        if (Schema::hasColumn('invoices', 'stock_target')) {
+            $currentKinds = $this->collectStockKindsFromRows($itemRows, $fallbackTarget, $anyExplicit);
+            $unique = array_keys($currentKinds);
+            $invoice->update([
+                'stock_target' => count($unique) === 1 ? $unique[0] : null,
+            ]);
+        }
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $itemRows
+     */
+    protected function itemRowsHaveExplicitStockTarget(array $itemRows): bool
+    {
+        foreach ($itemRows as $row) {
+            if (! empty($row['stock_target_set'])) {
+                return true;
+            }
+            if (in_array((string) ($row['stock_target'] ?? ''), InvoiceItem::stockTargets(), true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, InvoiceItem>  $items
+     */
+    protected function invoiceItemsHaveExplicitStockTarget($items): bool
+    {
+        if (! Schema::hasColumn('invoice_items', 'stock_target')) {
+            return false;
+        }
+        foreach ($items as $item) {
+            if (in_array((string) ($item->stock_target ?? ''), InvoiceItem::stockTargets(), true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $itemRows
+     * @return array<string, true>
+     */
+    protected function collectStockKindsFromRows(array $itemRows, string $fallbackTarget, bool $anyExplicit): array
+    {
+        $kinds = [];
+        foreach ($itemRows as $row) {
+            $own = (string) ($row['stock_target'] ?? '');
+            if (in_array($own, InvoiceItem::stockTargets(), true)) {
+                $kinds[$own] = true;
+                continue;
+            }
+            if (! $anyExplicit && in_array($fallbackTarget, InvoiceItem::stockTargets(), true)) {
+                $kinds[$fallbackTarget] = true;
+            }
+        }
+
+        return $kinds;
     }
 
     /**

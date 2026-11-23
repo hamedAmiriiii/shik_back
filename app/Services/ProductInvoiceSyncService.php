@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Tools\PriceTools;
 use App\Tools\ProductQuantityTools;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
 class ProductInvoiceSyncService
@@ -21,8 +22,21 @@ class ProductInvoiceSyncService
     public function syncFromInvoice(Invoice $invoice, array $rows, Collection $previousItems): void
     {
         $atelierId = (int) $invoice->atelier_id;
+        $invoiceTarget = Schema::hasColumn('invoices', 'stock_target')
+            ? (string) ($invoice->stock_target ?? '')
+            : '';
+        $anyExplicit = $this->rowsHaveExplicitStockTarget($rows)
+            || $this->itemsHaveExplicitStockTarget($previousItems);
+
+        // قلم‌های قبلی: نوع صریح یا ارث از stock_target قدیمی فاکتور
         $oldQty = [];
         foreach ($previousItems as $item) {
+            $resolved = $item->resolvedStockTarget(
+                in_array($invoiceTarget, InvoiceItem::stockTargets(), true) ? $invoiceTarget : null
+            );
+            if ($resolved !== InvoiceItem::STOCK_PRODUCT) {
+                continue;
+            }
             $name = $this->normalizeName($item->title);
             if ($name === '') {
                 continue;
@@ -35,6 +49,9 @@ class ProductInvoiceSyncService
         $sale = [];
         $barcode = [];
         foreach ($rows as $row) {
+            if (! $this->rowMatchesStockTarget($row, InvoiceItem::STOCK_PRODUCT, $invoiceTarget, $anyExplicit)) {
+                continue;
+            }
             $name = $this->normalizeName($row['title'] ?? '');
             if ($name === '') {
                 continue;
@@ -136,4 +153,59 @@ class ProductInvoiceSyncService
 
         return preg_replace('/\s+/u', ' ', $name) ?? '';
     }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
+     */
+    protected function rowsHaveExplicitStockTarget(array $rows): bool
+    {
+        foreach ($rows as $row) {
+            if (! empty($row['stock_target_set'])) {
+                return true;
+            }
+            if (in_array((string) ($row['stock_target'] ?? ''), InvoiceItem::stockTargets(), true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  Collection<int, InvoiceItem>  $items
+     */
+    protected function itemsHaveExplicitStockTarget(Collection $items): bool
+    {
+        if (! Schema::hasColumn('invoice_items', 'stock_target')) {
+            return false;
+        }
+        foreach ($items as $item) {
+            if (in_array((string) ($item->stock_target ?? ''), InvoiceItem::stockTargets(), true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    protected function rowMatchesStockTarget(
+        array $row,
+        string $want,
+        string $invoiceTarget,
+        bool $anyExplicit
+    ): bool {
+        $own = (string) ($row['stock_target'] ?? '');
+        if (in_array($own, InvoiceItem::stockTargets(), true)) {
+            return $own === $want;
+        }
+        if ($anyExplicit) {
+            return false;
+        }
+
+        return $invoiceTarget === $want;
+    }
+
 }

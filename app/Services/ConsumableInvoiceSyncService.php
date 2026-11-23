@@ -50,9 +50,16 @@ class ConsumableInvoiceSyncService
         $rawNames = $this->rawNamesOnInvoice($invoice);
         $purchasedAt = $this->resolvePurchasedAt($invoice);
         $prepared = [];
+        $invoiceTarget = Schema::hasColumn('invoices', 'stock_target')
+            ? (string) ($invoice->stock_target ?? '')
+            : '';
+        $anyExplicit = $this->itemsHaveExplicitStockTarget($invoice);
 
         foreach ($invoice->items as $item) {
             /** @var InvoiceItem $item */
+            if (! $this->itemIsStockKind($item, InvoiceItem::STOCK_CONSUMABLE, $invoiceTarget, $anyExplicit)) {
+                continue;
+            }
             $name = ConsumableMaterial::normalizeName($item->title);
             $qty = round((float) $item->quantity, 3);
             $unitPrice = round((float) $item->unit_price, 2);
@@ -229,6 +236,42 @@ class ConsumableInvoiceSyncService
         }
 
         return ConsumableMaterial::UNIT_PIECE;
+    }
+
+    protected function itemsHaveExplicitStockTarget(Invoice $invoice): bool
+    {
+        if (! Schema::hasColumn('invoice_items', 'stock_target')) {
+            return false;
+        }
+        foreach ($invoice->items as $item) {
+            if (in_array((string) ($item->stock_target ?? ''), InvoiceItem::stockTargets(), true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * اگر بعضی قلم‌ها نوع صریح دارند، فقط همان‌ها؛ وگرنه کل فاکتور قدیمی با stock_target ارث می‌برد.
+     */
+    protected function itemIsStockKind(
+        InvoiceItem $item,
+        string $want,
+        string $invoiceTarget,
+        bool $anyExplicit
+    ): bool {
+        $own = Schema::hasColumn('invoice_items', 'stock_target')
+            ? (string) ($item->stock_target ?? '')
+            : '';
+        if (in_array($own, InvoiceItem::stockTargets(), true)) {
+            return $own === $want;
+        }
+        if ($anyExplicit) {
+            return false;
+        }
+
+        return $invoiceTarget === $want;
     }
 
     protected function resolvePurchasedAt(Invoice $invoice): Carbon

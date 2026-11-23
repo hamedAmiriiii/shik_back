@@ -14,6 +14,7 @@ class InvoiceItem extends Model
         'unit_price',
         'quantity',
         'unit_type',
+        'stock_target',
         'total',
         'vat_mode',
         'vat_percent',
@@ -21,6 +22,38 @@ class InvoiceItem extends Model
         'discount_amount',
         'sort_order',
     ];
+
+    public const STOCK_PRODUCT = 'product';
+
+    public const STOCK_CONSUMABLE = 'consumable';
+
+    public const STOCK_RAW = 'raw';
+
+    /**
+     * @return list<string>
+     */
+    public static function stockTargets(): array
+    {
+        return [self::STOCK_PRODUCT, self::STOCK_CONSUMABLE, self::STOCK_RAW];
+    }
+
+    /**
+     * نوع انبار این قلم؛ اگر روی قلم نباشد از نوع کل فاکتور (فاکتورهای قدیمی) ارث می‌برد.
+     */
+    public function resolvedStockTarget(?string $invoiceTarget = null): ?string
+    {
+        $own = is_string($this->stock_target) ? trim($this->stock_target) : '';
+        if (in_array($own, self::stockTargets(), true)) {
+            return $own;
+        }
+
+        $fallback = is_string($invoiceTarget) ? trim($invoiceTarget) : '';
+        if (in_array($fallback, self::stockTargets(), true)) {
+            return $fallback;
+        }
+
+        return null;
+    }
 
     protected $casts = [
         'unit_price' => 'decimal:2',
